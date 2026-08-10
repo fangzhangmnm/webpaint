@@ -2,6 +2,7 @@
 // 像素正确性不在这里——gl-smoke fillParity（golden/commit≡live/lockAlpha/导出不漏）。
 import { test, eq } from "./runner.mjs";
 import { initFillMode, fillPreviewActive, commitFillNow, sendSelectionToFill } from "../src/fill-mode.ts";
+import { currentPanelColor, setColor } from "../src/color-panel.ts";
 
 // 最小 fake ctx：fill-mode 只碰这些面。editMode 状态机用字段模拟 + 手动派 wp:modechange。
 function makeCtx() {
@@ -169,4 +170,21 @@ test("[fill-mode] v0.7.38 送入填色：one-shot 携入不清选区，只生效
     sendSelectionToFill();
     eq(ctx._mode, "lasso", "无选区：不切换");
   } finally { window.removeEventListener("wp:settool", onSetTool); }
+});
+
+test("[fill-mode] v0.8.24 色板 target = fill 全程：无选区改色跟到 seed（color window 退化修复）", () => {
+  const { ctx, calls } = makeCtx();
+  initFillMode(ctx);
+  setMode(ctx, "brush");
+  setMode(ctx, "fill");                    // 进 fill：pendingFill.begin(笔刷色)
+  eq(currentPanelColor(), "#ff0000", "进 fill 色板显示 = 笔刷色（零跳变）");
+  setColor("#00ff00");                     // 无选区改色 → 改 pendingFill seed，不写笔刷色
+  eq(ctx.wp2.pendingFill.view().color, "#00ff00", "无选区改色跟到 pendingFill（旧行为：漏写笔刷色、seed 陈旧）");
+  eq(ctx.state.color, "#ff0000", "笔刷色不动（T4c 锚）");
+  ctx.doc.selection = {};                  // 圈选 → 预览激活
+  const p = calls.provider();              // board 每帧拉的 fill provider
+  eq(p.color, "#00ff00", "预览用的就是色窗当前显示的色（不再陈旧）");
+  eq(currentPanelColor(), "#00ff00", "色窗显示与预览一致");
+  setMode(ctx, "brush");                   // 真切出：commit + pendingFill 清场
+  eq(ctx.wp2.pendingFill.view(), null, "出 fill pendingFill 清场（色板回笔刷色）");
 });

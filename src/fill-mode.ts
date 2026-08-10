@@ -157,10 +157,12 @@ export function initFillMode(ctx: AppContext): void {
     const leaf = requireEditableLeaf(ctx.doc, null) as ViewLeaf | null;
     return leaf ? { color: _fillColor(), layer: leaf } : null;
   });
-  // 色板 target 切换（T4c）：fill 预览期，setColor/吸管/色词全改 PendingFill（笔刷色不动）。
-  // 防抖 350ms 合并一次拖拽/连点为一条 entry（v0.7.8 语义沿用）。
+  // 色板 target 切换（T4c；v0.8.24 从「仅预览期」扩到 fill 工具全程）：fill 里 setColor/吸管/色词
+  // 全改 PendingFill（笔刷色不动）。全程接管修的退化 = 无选区期改色曾写笔刷色、pendingFill seed
+  // 不跟，下一次圈选预览用的是进 fill 时的陈旧色（「填色没反应全局颜色窗的颜色」）。
+  // 记账只在预览挂着时走防抖 350ms（v0.7.8 语义）；无预览期改色 = 换 seed（画布零变化，不占 undo 步）。
   registerColorTarget(() => {
-    if (!fillPreviewActive()) return null;
+    if (ctx.editMode.current() !== "fill") return null;   // transient 括号里也让位（current = 括号模式）
     const pf = ctx.wp2.pendingFill;
     if (!pf.view()) pf.begin(ctx.state.color);   // 兜底（undo 把选区变回来等路径）
     return {
@@ -168,9 +170,11 @@ export function initFillMode(ctx: AppContext): void {
       set: (hex) => {
         const cur = pf.view()!.color;
         if (cur === hex) return;
-        if (_colorBase === null) _colorBase = cur;
-        clearTimeout(_colorTimer);
-        _colorTimer = setTimeout(_flushColorEntry, 350);
+        if (fillPreviewActive()) {
+          if (_colorBase === null) _colorBase = cur;
+          clearTimeout(_colorTimer);
+          _colorTimer = setTimeout(_flushColorEntry, 350);
+        }
         pf.setColorLive(hex);
         ctx.board.requestRender();
       },

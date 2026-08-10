@@ -120,7 +120,7 @@ export class Layer {
   private _mat: { canvas: Bitmap; ox: number; oy: number } | null = null;   // 物化视图缓存（读者用；写后失效）
   private _empty: Bitmap | null = null;                                      // 空层 1×1 占位
   // 内容版本：每次像素写换号（_invalidate 是所有写路径的汇拢点）。消费者=线稿分区缓存
-  //   （lineart-oracle）这类「按层内容做贵预计算」的失效判据。releaseMaterialized 纯腾内存不换号。
+  //   （flat-coloring-oracle）这类「按层内容做贵预计算」的失效判据。releaseMaterialized 纯腾内存不换号。
   //   取号走**全局单调计数器**（构造时也取）：删层→undo 恢复会保留同一 layer id、若 rev 从 0
   //   重数则 (id,rev) 可能撞上旧缓存——全局计数让 (id,rev) 永不复用，同 (id,rev) ⟺ 同内容态。
   contentRev = ++_contentRevCounter;

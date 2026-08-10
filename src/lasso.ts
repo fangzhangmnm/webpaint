@@ -21,10 +21,10 @@
 // selection.js 的 Selection 类。lasso 只负责手势光栅化（产 Selection）+ 自由变换 gizmo。
 
 import { Selection, rasterizePolygonGray8 } from "./selection.ts";
-import { LineartOracle } from "./lineart-oracle.ts";
+import { LineartOracle } from "./flat-coloring-oracle.ts";
 import { makeSeedDist } from "./color-dist.ts";
 import type { ColorMetric } from "./color-dist.ts";
-import { edtSquared } from "./lineart/edt.ts";
+import { edtSquared } from "./flat-coloring/edt.ts";
 import { makeBitmap } from "./bitmap.ts";
 import { FloatingTransform } from "./floating-transform.ts";
 import type { WarpBakeFn } from "./floating-transform.ts";
@@ -402,7 +402,7 @@ export class LassoEngine {
   // 仅 bbox 大小。barrier 不再单独 alloc（diff 算在 flood fill 里 inline）。
   _magicWandToSelection(start: Point | null, sourceLayer: ViewLeaf | null): SelectionLike | null {
     if (!this.doc) return null;
-    // v0.7 线稿模式：tap → 分区 label 查表（缓存 miss 时同步构建，见 lineart-oracle.ts）。
+    // v0.7 线稿模式：tap → 分区 label 查表（缓存 miss 时同步构建，见 flat-coloring-oracle.ts）。
     //   与 flood 完全同构：产原始选区，后续 auto-expand / setOp 合并共用同一条路。
     // v0.7.23（user 2026-07-30）：classic + union 模式下**已选区当墙**——先套索糊一条「临时线」
     //   或先圈邻区，flood 撞选区即停（前线稿时代的缺线止痛；lineart 分区预计算不吃选区、similar

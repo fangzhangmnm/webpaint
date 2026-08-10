@@ -10,8 +10,9 @@ import { desk } from "./workbench-state.ts";
 
 let state: AppContext["state"], colorWheel: ReturnType<typeof mountColorWheel>;
 
-// ---- 色板 target 切换（T4c）：fill 预览期，色板编辑「将要填的颜色」（PendingFill），不碰笔刷色。
-// 注册制防环：fill-mode init 时注册 provider（返回 null = 无 target，照旧写笔刷色）。
+// ---- 色板 target 切换（T4c；v0.8.24 扩到 fill 工具全程）：fill 里色板编辑「将要填的颜色」
+// （PendingFill），不碰笔刷色。注册制防环：fill-mode init 时注册 provider（返回 null = 无 target，
+// 照旧写笔刷色）。
 export interface ColorTarget { get(): string; set(hex: string): void }
 let _targetProvider: (() => ColorTarget | null) | null = null;
 export function registerColorTarget(p: () => ColorTarget | null): void { _targetProvider = p; }
@@ -27,10 +28,10 @@ export function refreshColorDisplay(): void {
 
 export function setColor(hex: string) {
   const t = _targetProvider?.();
-  if (t) t.set(hex);   // fill 预览期：改的是 PendingFill（可撤销）；笔刷色不动
+  if (t) t.set(hex);   // fill 工具期：改的是 PendingFill（预览挂着时可撤销）；笔刷色不动
   else desk.brushTool.color = hex;   // 绑定反应式引擎（→state.color/dialReactive.color 重派生）+ 标脏持久化
   els.activeSwatch.style.background = hex;
-  colorWheel.setColor(hex);   // 推给色轮；组件自己守 round-trip，不会弹 hue
+  colorWheel?.setColor(hex);   // 推给色轮；组件自己守 round-trip，不会弹 hue（init 前无色轮=只写状态）
 }
 
 export function toggleColorPanel(force?: boolean) {

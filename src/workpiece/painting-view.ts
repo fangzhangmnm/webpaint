@@ -11,7 +11,7 @@
 //     （getter/setter = view/_rawWrite 直通）。写纪律沿旧约：引擎/预览直写，记账走 SelectionFace。
 //   - ViewLeaf 的写方法 = 旧 Layer「预览违规户」们（液化就地写等，见 handoff §3）的继续容身处；
 //     买账的路径（stroke commit/fill/滤镜）早已走 token+LayerTiles。
-//   - contentRev 全局单调（lineart-oracle 等 (id,rev) 缓存键的不复用保证——tileset 实例换血后
+//   - contentRev 全局单调（flat-coloring-oracle 等 (id,rev) 缓存键的不复用保证——tileset 实例换血后
 //     LayerPixels.contentVersion 从头数，这里用 WeakMap+全局计数器重映射）。
 //
 // 同步策略：LayerTree 每次写换新根（不可变值契约）→ 端口以**根引用身份**做缓存键；
@@ -74,7 +74,7 @@ export class ViewLeaf {
     return lp;
   }
 
-  /** 内容版本（全局单调不复用；lineart-oracle 等 (id,rev) 缓存键）。 */
+  /** 内容版本（全局单调不复用；flat-coloring-oracle 等 (id,rev) 缓存键）。 */
   get contentRev(): number { return revFor(this.pixels); }
 
   // ---- 派生只读视图（物化缓存；语义同旧 Layer._ensureMat）----

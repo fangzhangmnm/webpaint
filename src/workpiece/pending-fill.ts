@@ -32,7 +32,7 @@ export class PendingFill implements CollectorComponent {
   /** 出 fill 工具（导航态，不记账）。 */
   clear(): void { this._cur = null; }
 
-  /** 预览直写（拖拽中间值，不记账；记账由防抖 flush 走 commitPreApplied）。 */
+  /** 预览直写（拖拽中间值 / 无预览期换 seed，不记账；记账由防抖 flush 走 commitPreApplied）。 */
   setColorLive(hex: string): void {
     if (this._cur) this._cur = { color: hex };
   }

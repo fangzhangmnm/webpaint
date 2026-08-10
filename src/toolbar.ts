@@ -744,7 +744,7 @@ export function initToolbar(ctx: AppContext) {
     openSlotMenu(lassoSetOpSlot, lassoSetOpMenu);
   });
   // v0.7.8 魔棒算法组槽（原系统 <select> 退役，家规：不用系统控件）：
-  //   classic=经典 flood / lineart=论文线稿分区（断口自动闭合+填到线下，lineart-oracle）。
+  //   classic=经典 flood / lineart=论文线稿分区（断口自动闭合+填到线下，flat-coloring-oracle）。
   //   选项从 MAGIC_ALGORITHMS SSoT 填；换算法首 tap 会同步建分区（2K 实测 <1s）。
   const lassoAlgoBtn = byId("lassoAlgoBtn");
   const lassoAlgoMenu = byId("lassoAlgoMenu");

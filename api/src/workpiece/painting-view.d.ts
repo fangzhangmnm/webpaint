@@ -28,7 +28,7 @@ export declare class ViewLeaf {
     constructor(tiles: LayerTiles, id: number);
     /** 活像素（tileset 注册表解析；叶已被删时端口不再发出本对象，getter 假定 ref 有效）。 */
     get pixels(): LayerPixels;
-    /** 内容版本（全局单调不复用；lineart-oracle 等 (id,rev) 缓存键）。 */
+    /** 内容版本（全局单调不复用；flat-coloring-oracle 等 (id,rev) 缓存键）。 */
     get contentRev(): number;
     private _ensureMat;
     /** 纯腾内存（GL 模式每帧后调；下次访问按需重建）。 */

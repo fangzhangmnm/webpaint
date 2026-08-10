@@ -14,7 +14,7 @@ export declare class PendingFill implements CollectorComponent {
     begin(initColor: string): void;
     /** 出 fill 工具（导航态，不记账）。 */
     clear(): void;
-    /** 预览直写（拖拽中间值，不记账；记账由防抖 flush 走 commitPreApplied）。 */
+    /** 预览直写（拖拽中间值 / 无预览期换 seed，不记账；记账由防抖 flush 走 commitPreApplied）。 */
     setColorLive(hex: string): void;
     /** 记账写（pre-applied）：当前值已上台，before = 防抖窗口起点的旧色。 */
     commitPreApplied(before: string): void;

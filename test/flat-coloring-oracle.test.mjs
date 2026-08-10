@@ -1,8 +1,8 @@
-// 线稿 oracle 接缝（lineart-oracle.ts）验收：tap→Selection 同构、按 contentRev 缓存/失效。
+// 线稿 oracle 接缝（flat-coloring-oracle.ts）验收：tap→Selection 同构、按 contentRev 缓存/失效。
 // fake layer 走 OracleSourceLayer 结构面（≈ floodSelectFrom 的 mock 风格），node 直测无 DOM。
 import { describe, it, assert, eq } from "./runner.mjs";
 
-const { LineartOracle } = await import("../src/lineart-oracle.ts");
+const { LineartOracle } = await import("../src/flat-coloring-oracle.ts");
 
 /** 断口圆线稿 RGBA（黑线白透明底），断口朝 +x ~6px */
 function gapRingRgba(w, h, cx, cy, r, thick, gapHalf) {
@@ -33,7 +33,7 @@ function count255(sel) {
   return n;
 }
 
-describe("lineart-oracle · tap→Selection + contentRev 缓存", () => {
+describe("flat-coloring-oracle · tap→Selection + contentRev 缓存", () => {
   const w = 64, h = 64;
   const doc = { width: w, height: h };
 

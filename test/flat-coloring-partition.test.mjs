@@ -1,14 +1,14 @@
-// 线稿分区管线（src/lineart/，论文 Fourey–Tschumperlé–Revoy 2018）验收：
+// 线稿分区管线（src/flat-coloring/，论文 Fourey–Tschumperlé–Revoy 2018）验收：
 // EDT → 边界曲率/端点 → 样条闭合 → label map → 线下洋葱剥皮。
 // 全合成图形、纯数组进出，node 直测无 DOM。
 import { describe, it, assert, eq } from "./runner.mjs";
 
-const { edtSquared } = await import("../src/lineart/edt.ts");
-const { traceBorderCycles, keypointsFromBinary } = await import("../src/lineart/border.ts");
-const { digitizeSpline, transitionCount, areaGuardOk } = await import("../src/lineart/closing.ts");
+const { edtSquared } = await import("../src/flat-coloring/edt.ts");
+const { traceBorderCycles, keypointsFromBinary } = await import("../src/flat-coloring/border.ts");
+const { digitizeSpline, transitionCount, areaGuardOk } = await import("../src/flat-coloring/closing.ts");
 const {
   binarizeLuma, buildPartitionFromBinary, regionMaskAt, attachInkDepth, DEFAULT_LINEART_PARAMS,
-} = await import("../src/lineart/partition.ts");
+} = await import("../src/flat-coloring/partition.ts");
 
 // ---- 合成图形 helpers ----
 function blank(w, h) { return new Uint8Array(w * h); }

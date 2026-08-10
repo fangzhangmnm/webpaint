@@ -14,4 +14,4 @@ import "./curves.ts";
 import "./sharpen-blur.ts";
 import "./liquify.ts";
 // 风格化组（category="artist"）—— 3 个同主题合一个 plugin 文件
-import "./stylize_filters.ts";
+import "./stylize-filters.ts";

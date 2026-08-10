@@ -1,5 +1,5 @@
 import { Selection } from "./selection.ts";
-import { LineartOracle } from "./lineart-oracle.ts";
+import { LineartOracle } from "./flat-coloring-oracle.ts";
 import type { ColorMetric } from "./color-dist.ts";
 import { FloatingTransform } from "./floating-transform.ts";
 import type { WarpBakeFn } from "./floating-transform.ts";
@@ -95,8 +95,8 @@ export declare class LassoEngine {
     lineartDebugInfo(sourceLayer: ViewLeaf | null): {
         w: number;
         h: number;
-        keypoints: import("./lineart/partition.ts").LineartPartition["keypoints"];
-        bridges: import("./lineart/partition.ts").LineartPartition["bridges"];
+        keypoints: import("./flat-coloring/partition.ts").LineartPartition["keypoints"];
+        bridges: import("./flat-coloring/partition.ts").LineartPartition["bridges"];
     } | null;
     setSampleMode(m: string): void;
     getSampleMode(): "bicubic" | "rotsprite" | "spline" | "bilinear" | "nearest";

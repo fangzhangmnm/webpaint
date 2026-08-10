@@ -81,4 +81,12 @@
 
 ## 4. 施工进度（接棒者按片追记）
 
--（空——C0 未开工。）
+- **C0 ✅ v0.8.24（2026-08-09）**：①全文件对照表落 `20260809-file-naming-survey.md`（211 文件×
+  实际做什么×提案去处，含重点错位样本/死代码候选两节）；②改名落地：`lineart/`→`flat-coloring/`、
+  `lineart-oracle.ts`→`flat-coloring-oracle.ts`、`stylize_filters.ts`→`stylize-filters.ts`（持久化
+  key/算法 id "lineart"/类名符号均未动，符号改名排 C3）；③color window 退化已修：色板 target 从
+  「仅预览期」扩到 **fill 工具全程**（旧行为：无选区期改色写笔刷色、pendingFill seed 陈旧→圈选
+  预览用旧色）——fill 里改色一律改 PendingFill，预览挂着才走防抖记账，无预览改色=换 seed 不占
+  undo 步；笔刷色全程不动（T4c 锚不变）。测试 1233 绿（+1 行为锚 fill-mode.test.mjs）。
+  **真机锚（追加进真机批）**：进 fill→（无选区时）色窗换色→点选区，预览色 = 色窗色；✓ 连续填
+  下一块色不丢；出 fill 色窗回笔刷色。

@@ -1,15 +1,15 @@
 // 线稿分区 oracle——魔棒「线稿闭合」算法的 app 侧接缝（ADR-0004 语义不变：一切算法只产 Selection，
 // fill 仍是选区消费视图）。两段式：
-//   prepare（贵）：源层整 doc RGBA → src/lineart/partition.ts 论文管线 → label map，
+//   prepare（贵）：源层整 doc RGBA → src/flat-coloring/partition.ts 论文管线 → label map，
 //     按 (layer.id, layer.contentRev, doc 尺寸) 缓存，层一动即失效（contentRev 在
 //     Layer._invalidate 汇拢点 bump）。v1 同步构建（2K doc 秒级、后续 tap 查表 ms 级）；
 //     worker 化留给后续切片。
 //   query（贱）：tap → label 查表 → tight-bbox mask → Selection。
-// 该文件不懂论文数学（全在 src/lineart/），也不懂指针/UI；供 LassoEngine 调用。
+// 该文件不懂论文数学（全在 src/flat-coloring/），也不懂指针/UI；供 LassoEngine 调用。
 import {
   buildLineartPartition, regionMaskAt, attachInkDepth, binarizeLuma, DEFAULT_LINEART_PARAMS,
-} from "./lineart/partition.ts";
-import type { LineartPartition, LineartParams } from "./lineart/partition.ts";
+} from "./flat-coloring/partition.ts";
+import type { LineartPartition, LineartParams } from "./flat-coloring/partition.ts";
 import { Selection } from "./selection.ts";
 
 /** 结构化最小依赖（≈ floodSelectFrom 的 mock 面）：node 直测不拖 doc.ts */
