@@ -145,8 +145,9 @@ export class WebPaintBackend implements WebPaintBackendInterface {
       };
     }
     if (fmt === "psd") {
-      // psd 解码路由排 C7 后棒（psd.ts 尚在壳侧；先响亮失败，不静默）。
-      throw new Error("WebPaintBackend.open: psd 路由未接（C7 后棒）——请先在壳侧解码");
+      // C7 后棒实勘：全仓不存在 psd 解码器——psd 是**只写格式**（导出 = backend/psd.ts encodeDocToPsd，
+      // exporters 懒加载）。open 对 8BPS 响亮失败是终态，不是待接的路由（要导入 psd = 新功能，另立项）。
+      throw new Error("WebPaintBackend.open: WebPaint 无 psd 解码器（psd 只写不读）——请转存 .ora/.png 再导入");
     }
     const plane = fmt === "png"
       ? await decodePngToBytes(bytes)

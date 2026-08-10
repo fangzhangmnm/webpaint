@@ -69,7 +69,7 @@ registerExporter({
 registerExporter({
   id: "psd", label: ".psd（Photoshop）", ext: "psd", kind: "project", busyHint: "PSD 编码中…",
   encode: async (doc) => {
-    const { encodeDocToPsd } = await import("./psd.ts");   // 懒加载：psd 编码器只在用时拉
+    const { encodeDocToPsd } = await import("./backend/psd.ts");   // 懒加载：psd 编码器只在用时拉
     return encodeDocToPsd(doc);
   },
 });

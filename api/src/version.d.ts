@@ -1,1 +1,1 @@
-export declare const WEBPAINT_VERSION = "v0.8.34-2026-08-10";
+export declare const WEBPAINT_VERSION = "v0.8.35-2026-08-10";

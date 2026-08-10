@@ -69,7 +69,6 @@
     "src/filters.ts",
     "src/palette.ts",
     "src/panel-state.ts",
-    "src/psd.ts",
     "src/reference.ts",
     "src/sevenzip.ts",
     "src/smooth-config.ts",

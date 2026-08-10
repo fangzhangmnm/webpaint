@@ -20,10 +20,10 @@
 //   const blob = await encodeDocToPsd(doc);
 //   // → image/vnd.adobe.photoshop blob，触发下载或 share
 
-import { renderNodesToBytes } from "./backend/doc-render.ts";
-import { flattenViewLeaves } from "./backend/workpiece/painting-view.ts";
-import type { ViewLeaf } from "./backend/workpiece/painting-view.ts";
-import type { PaintingView } from "./backend/workpiece/painting-view.ts";
+import { renderNodesToBytes } from "./doc-render.ts";
+import { flattenViewLeaves } from "./workpiece/painting-view.ts";
+import type { ViewLeaf } from "./workpiece/painting-view.ts";
+import type { PaintingView } from "./workpiece/painting-view.ts";
 
 // doc.layers / compositeLayers 的节点联合（ViewLeaf | LayerGroup）；这两个类型在 doc.ts 未导出，
 // compositeLayers 接受 doc.layers 原样传入即可，这里给本地用到的画布上下文类型。
