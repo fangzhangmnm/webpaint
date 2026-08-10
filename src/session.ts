@@ -118,9 +118,8 @@ export async function renderDocToImageBlob(doc: PaintingView, mime = "image/png"
     const png = await encodePngFromBytes(plane.data, plane.w, plane.h);
     return new Blob([png as unknown as BlobPart], { type: "image/png" });
   }
-  // JPG 无 alpha 通道 → doc 背景直下（straight source-over 到不透明底，纯字节数学）。
-  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec((doc.backgroundColor || "#ffffff").trim());
-  const br = m ? parseInt(m[1], 16) : 255, bgc = m ? parseInt(m[2], 16) : 255, bb = m ? parseInt(m[3], 16) : 255;
+  // JPG 无 alpha 通道 → 白底直下（压底常量——doc 无纸色概念，想要别的底色自己加图层；纯字节数学）。
+  const br = 255, bgc = 255, bb = 255;
   const flat = new Uint8ClampedArray(plane.w * plane.h * 4);
   const src = plane.data;
   for (let p = 0; p < src.length; p += 4) {

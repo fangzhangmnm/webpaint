@@ -83,10 +83,9 @@ function sniffFormat(u8: Uint8Array): "ora-zip" | "psd" | "png" | "image" {
   return "image";   // jpg/webp/… → 注入解码器
 }
 
-function blankData(meta: { width: number; height: number; backgroundColor?: string }): PaintingData {
+function blankData(meta: { width: number; height: number }): PaintingData {
   return {
     width: meta.width, height: meta.height,
-    backgroundColor: meta.backgroundColor ?? "#ffffff",
     activeId: 1, referenceLayerId: null,
     nodes: [{ id: 1, name: "Layer 1", visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false, pixels: null }],
   };
@@ -94,7 +93,7 @@ function blankData(meta: { width: number; height: number; backgroundColor?: stri
 
 function singleImageData(plane: RgbaPlane): PaintingData {
   return {
-    width: plane.w, height: plane.h, backgroundColor: "#ffffff",
+    width: plane.w, height: plane.h,
     activeId: 1, referenceLayerId: null,
     nodes: [{
       id: 1, name: "Layer 1", visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false,
@@ -167,7 +166,7 @@ export class WebPaintBackend implements WebPaintBackendInterface {
 
   // ── 静态工厂（路由归 backend）──
 
-  static blank(meta: { width: number; height: number; backgroundColor?: string }, inject: BackendInject = {}): WebPaintBackend {
+  static blank(meta: { width: number; height: number }, inject: BackendInject = {}): WebPaintBackend {
     return new WebPaintBackend(blankData(meta), inject);
   }
 
@@ -255,7 +254,7 @@ export class WebPaintBackend implements WebPaintBackendInterface {
     let leaves = 0;
     this._wp2.layerTree!.eachLeaf(() => leaves++);
     return {
-      width: this._view.width, height: this._view.height, backgroundColor: this._view.backgroundColor,
+      width: this._view.width, height: this._view.height,
       activeId: this._view.activeId, referenceLayerId: this._view.referenceLayerId,
       layerCount: leaves,
     };

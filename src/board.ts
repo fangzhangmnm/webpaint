@@ -97,7 +97,7 @@ type ViewportChangeCb = (() => void) | null;
 //
 // 合成顺序：
 //   1) 屏幕底色 --void（画布外的空地）
-//   2) doc 矩形：先填 doc.backgroundColor（一期固定白）
+//   2) doc 矩形：先填白纸（显示常量——doc 无纸色概念，ORA 对齐 2026-08-10；棋盘开关看透明）
 //   3) 逐 layer drawImage（globalAlpha = layer.opacity, comp = layer.mode）
 //   4) cursor 预览（笔尖圈圈，可选）
 
@@ -174,7 +174,7 @@ export class Board {
 
     // 主题色：从 CSS 变量取
     this._voidColor = "#e6e2d6";
-    // 棋盘背景：开后底层用半透明灰白格替代 doc.backgroundColor。
+    // 棋盘背景：开后底层用半透明灰白格替代白纸显示常量。
     // 适合做透明素材 / 看图层 alpha 通道。
     this._showCheckerboard = false;
     // v163 像素栅格：放大到 PIXEL_GRID_FADE_LO 以上渐显 1 doc-px 网格（像素画对齐）。
@@ -622,7 +622,7 @@ export class Board {
   // GL 渲染路径：GL canvas 渲 doc（void 底 + doc 背景 + 图层 + live overlay，视口仿射）；
   //   本 2D canvas 清透明、只画 lasso overlay + doc 边框（GL 透出 doc）。
   _renderFullGL(ctx: Ctx2D, W: number, H: number) {
-    const docBg = this._showCheckerboard ? "checker" : (this.doc.backgroundColor || "#ffffff");   // 棋盘背景接缝（GL 合成器 doc 空间棋盘）
+    const docBg = this._showCheckerboard ? "checker" : "#ffffff";   // 白纸=显示常量（doc 无纸色）；棋盘背景接缝（GL 合成器 doc 空间棋盘）
     // live-sync：原地改真层的笔（draw/erase pixelMode）描边中把活动叶标 updated
     //   （执行器 contentVersion 快路径每帧只重传变更 tile）。液化/filterBrush/形状笔 pixelMode
     //   改走 _glSurrogate 的影子变体（C6 stroke 替身叶，同一条增量 sync 路）。
@@ -868,7 +868,7 @@ export class Board {
   //   GL 失败态返 null（v351 起无 WebGL2 = 无画布）。底与显示同源（棋盘/背景色）。
   pickCompositeColor(ix: number, iy: number): [number, number, number, number] | null {
     if (!this._glBoard) return null;
-    const docBg = this._showCheckerboard ? "checker" : (this.doc.backgroundColor || "#ffffff");
+    const docBg = this._showCheckerboard ? "checker" : "#ffffff";   // 白纸=显示常量（doc 无纸色）
     // v0.4.11（拍板#8）：调整预览开着时取替身（WYSIWYG——吸到的=眼睛看到的）。
     // v0.5.11（user 拍板）：fill 预览挂着时同款待遇——吸到的=预览色，不是底下真实像素。
     return this._glBoard.pickColor(this.doc as unknown as GLDoc, docBg, ix, iy, this._glSurrogate(), this._glFillOverlay());

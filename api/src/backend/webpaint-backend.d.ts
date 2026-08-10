@@ -71,7 +71,6 @@ export declare class WebPaintBackend implements WebPaintBackendInterface {
     static blank(meta: {
         width: number;
         height: number;
-        backgroundColor?: string;
     }, inject?: BackendInject): WebPaintBackend;
     /** 魔数嗅探：zip→ora、8BPS→psd（后棒）、png→UPNG 单图成层、其余→注入解码器单图成层。 */
     static open(bytes: Uint8Array, inject?: BackendInject): Promise<BackendOpenResult>;

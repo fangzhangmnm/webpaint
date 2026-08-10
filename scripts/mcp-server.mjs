@@ -86,9 +86,9 @@ const TOOLS = {
   // ── 生命周期 ──
   create: {
     description: "新建空白画布（弃旧建新）；返回 docInfo",
-    inputSchema: obj({ width: num, height: num, backgroundColor: str }, ["width", "height"]),
+    inputSchema: obj({ width: num, height: num }, ["width", "height"]),
     handler: (a) => {
-      replaceBackend(WebPaintBackend.blank({ width: a.width, height: a.height, backgroundColor: a.backgroundColor }, mkInject()));
+      replaceBackend(WebPaintBackend.blank({ width: a.width, height: a.height }, mkInject()));
       return be.docInfo();
     },
   },

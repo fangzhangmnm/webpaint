@@ -215,7 +215,7 @@ export class ReferenceWindow {
     }
     const cx = this._composeCanvas!.getContext("2d")!;
     cx.clearRect(0, 0, W, H);
-    cx.fillStyle = doc.backgroundColor || "#ffffff";
+    cx.fillStyle = "#ffffff";   // 白纸显示常量（doc 无纸色）
     cx.fillRect(0, 0, W, H);
     cx.drawImage(merged, 0, 0);
     return true;

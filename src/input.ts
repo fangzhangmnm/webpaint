@@ -1209,7 +1209,7 @@ export class InputController {
     } else {
       px = this.board.pickCompositeColor(ix, iy) ?? [0, 0, 0, 0];
     }
-    const bg = parseHex(this.doc.backgroundColor || "#ffffff");
+    const bg = parseHex("#ffffff");   // 吸色压底=白纸显示常量（doc 无纸色，与屏显同底）
     const la = px[3] / 255;
     const inv = 1 - la;
     const r = px[0] * la + bg.r * inv;

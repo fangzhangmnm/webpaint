@@ -422,3 +422,15 @@
   同页对拍；SwiftShader 在 CI/WSL、真 GPU 在 user 真机同一套锚）+ ⑥arena 租户配额记账
   （mock multiplayer 已备好第二真租户；Gl2Port.createTileArena 的配额/退租接口 + backend
   dispose 释放 _room arena——SoftGl2 靠 GC、真 GPU 要显式 free）。
+- **backgroundColor 全量删除 ✅ v0.8.45（2026-08-10）**：v0.8.44 全量 round-trip 测试暴露
+  「bg 不进 .ora、round-trip 静默回白」的契约缺口，上呈后 **user 拍板：「和ora对齐，全量删
+  background color，没有底色图层就是透明」**。落地：①数据模型剔字段——TreeJson/PaintingData/
+  PaintingView getter/BackendDocInfo/blank() meta/setTreeProp 联合型全删（考古：app 从无设置
+  入口，board 注释「一期固定白」，全仓写入点全是硬编码 #ffffff——字段从未活过）；②壳侧四个
+  消费点改**显示/压底常量白**：board docBg（棋盘开关照旧看透明）、吸色压底（input.ts）、JPG
+  导出白底直下（session.ts，PNG 本就保透明 v134 锚不动）、参考窗底（reference.ts）——屏显
+  与导出行为逐像素不变；③MCP create 工具剔参数；④测试更新：layer-tree-json 驱逐锚换
+  referenceLayerId（同为 doc 级 unique 树 prop，锚语义不变）、round-trip docInfo 恢复全字段
+  对比（缺口闭环：字段没了自然不再丢）。验收：tsc 0、快层 1256 绿 + 全量层 3 绿、build 五
+  lint、GL smoke PASSED、MCP server 冒烟 OK。无新真机锚（行为逐像素不变；棋盘/导出既有
+  真机锚覆盖）。

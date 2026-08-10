@@ -242,7 +242,6 @@ export class PaintingView {
   // ---- DocView 同形读面 ----
   get width(): number { return this._tree.view().width; }
   get height(): number { return this._tree.view().height; }
-  get backgroundColor(): string { return this._tree.view().backgroundColor; }
   get activeId(): number | null { return this._tree.view().activeId; }
   get referenceLayerId(): number | null { return this._tree.view().referenceLayerId; }
   get layers(): ViewNode[] { this._sync(); return this._nodes; }

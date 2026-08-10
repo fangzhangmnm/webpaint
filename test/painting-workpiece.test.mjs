@@ -28,7 +28,7 @@ describe("PaintingWorkpiece · 树模式", () => {
     let t = wp.begin(); tree.addLayer("scratch"); t.commit();
     eq(tiles.tilesetCount(), 2);
     wp.load({
-      width: 64, height: 64, backgroundColor: "#112233",
+      width: 64, height: 64,
       nodes: [
         leafData("bg", { rect: { x: 2, y: 2, w: 4, h: 4 }, bytes: solid(4, 4, 123) }),
         { name: "g", visible: true, opacity: 1, mode: "source-over", clippingMask: false, children: [leafData("in-group")] },
@@ -41,7 +41,6 @@ describe("PaintingWorkpiece · 树模式", () => {
     assert(!undo.canUndo(), "load 不可撤（换文档语义）");
     const bg = tree.view().nodes[0];
     eq(tiles.getRegion(bg.id, 3, 3, 1, 1)[0], 123, "tile 字节灌入到位");
-    eq(tree.view().backgroundColor, "#112233");
     eq(tree.view().activeId, bg.id, "缺省 active = 第一叶");
   });
 

@@ -91,7 +91,6 @@ export declare class PaintingView {
     private _syncLeaf;
     get width(): number;
     get height(): number;
-    get backgroundColor(): string;
     get activeId(): number | null;
     get referenceLayerId(): number | null;
     get layers(): ViewNode[];

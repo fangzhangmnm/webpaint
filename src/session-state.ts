@@ -450,7 +450,7 @@ async function newDoc({ name, w, h, layer0Name, fillLayer0 }: { name: string; w:
   if (es.isDirty()) await saveNow();
   input.clearHistory();
   wp2.load({
-    width: w, height: h, backgroundColor: "#ffffff",
+    width: w, height: h,
     nodes: [{ name: layer0Name ?? `${tLatin("doc.layerName")} 1`, visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false, pixels: null }],
   });
   doc.clearSelectionOnLoad();

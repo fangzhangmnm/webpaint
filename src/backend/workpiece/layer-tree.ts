@@ -32,7 +32,8 @@ export interface TreeJson {
   nodes: TreeNode[];                 // index 0 = 最底层（沿 v1 约定）
   activeId: number | null;
   referenceLayerId: number | null;
-  backgroundColor: string;
+  // backgroundColor 已删（2026-08-10 user 拍板「和ora对齐，全量删background color，没有底色图层
+  // 就是透明」）——doc 无纸色概念，屏显白纸/JPG 白底是壳侧显示常量。
   width: number;
   height: number;
 }
@@ -361,7 +362,7 @@ export class LayerTree implements CollectorComponent {
   /** 元规则相同才合并动词（提案 .h）：doc 级 unique 值。
    *  width/height（T3b-2 补）：整 doc 几何变换（crop/resample/rot90）的尺寸位——像素实例交换
    *  由 DocResizeOp/computed 记账，json 尺寸走本 verb 进树 record，同一 step 内两账同向翻。 */
-  setTreeProp(key: "referenceLayerId" | "backgroundColor" | "width" | "height", value: number | null | string): void {
+  setTreeProp(key: "referenceLayerId" | "width" | "height", value: number | null | string): void {
     const next = this._clone(this._json);
     (next as unknown as Record<string, unknown>)[key] = value;
     this._swapRoot(next);

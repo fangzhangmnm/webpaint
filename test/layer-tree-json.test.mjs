@@ -48,7 +48,7 @@ function mk(opts = {}) {
     wp, tiles: wp.layerTiles,
     initial: {
       nodes: [{ id: 1, name: "bg", visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false, pixelsRef: ref0 }],
-      activeId: 1, referenceLayerId: null, backgroundColor: "#ffffff", width: 64, height: 64,
+      activeId: 1, referenceLayerId: null, width: 64, height: 64,
     },
   });
   wp.layerTiles.releaseTileset(ref0);   // json 已收养
@@ -145,7 +145,7 @@ describe("LayerTree · 换根收集与所有权", () => {
     const { undo, wp, tree, tiles } = mk({ maxQuotaBytes: 1 });   // recordBytes(树)>1 → 每 push 即驱逐旧步
     let t = wp.begin(); const a = tree.addLayer("a"); t.commit();
     t = wp.begin(); tree.removeLayer(a.id); t.commit();
-    t = wp.begin(); tree.setTreeProp("backgroundColor", "#123456"); t.commit();
+    t = wp.begin(); tree.setTreeProp("referenceLayerId", 1); t.commit();
     // removeLayer 那步已被配额驱逐 → a 的 tileset 应已释放
     eq(tiles.tilesetCount(), 1, "被驱逐 record 的旧根引用已释放");
     undo.clear();
@@ -267,7 +267,7 @@ function mkGrouped() {
     wp, tiles: wp.layerTiles,
     initial: {
       nodes: [leaf(1, "bg", r1), { id: 10, name: "g", visible: true, opacity: 1, mode: "source-over", clippingMask: false, children: [leaf(11, "a", r11), leaf(12, "b", r12)] }],
-      activeId: 1, referenceLayerId: null, backgroundColor: "#fff", width: 64, height: 64,
+      activeId: 1, referenceLayerId: null, width: 64, height: 64,
     },
   });
   for (const r of [r1, r11, r12]) wp.layerTiles.releaseTileset(r);
@@ -292,7 +292,7 @@ function mkSmall() {
     wp, tiles: wp.layerTiles, maxLeaves: () => 2,
     initial: {
       nodes: [{ id: 1, name: "bg", visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false, pixelsRef: ref0 }],
-      activeId: 1, referenceLayerId: null, backgroundColor: "#fff", width: 32, height: 32,
+      activeId: 1, referenceLayerId: null, width: 32, height: 32,
     },
   });
   wp.layerTiles.releaseTileset(ref0);

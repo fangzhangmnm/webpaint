@@ -11,7 +11,6 @@ export interface BackendLayerNode {
 export interface BackendDocInfo {
     width: number;
     height: number;
-    backgroundColor: string;
     activeId: number | null;
     referenceLayerId: number | null;
     layerCount: number;

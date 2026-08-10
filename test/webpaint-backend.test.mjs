@@ -29,9 +29,9 @@ const INJ = { appVersion: "v0.0.0-test" };
 
 describe("webpaint-backend · born-loaded 工厂", () => {
   it("blank：出生即 doc 在（无空态），干净不脏、栈空", () => {
-    const be = WebPaintBackend.blank({ width: 128, height: 96, backgroundColor: "#ffeecc" }, INJ);
+    const be = WebPaintBackend.blank({ width: 128, height: 96 }, INJ);
     const info = be.docInfo();
-    eq(info.width, 128); eq(info.height, 96); eq(info.backgroundColor, "#ffeecc");
+    eq(info.width, 128); eq(info.height, 96);
     eq(info.layerCount, 1); eq(info.activeId, 1);
     eq(be.isDirty(), false, "load 收尾 markSaved");
     eq(be.canUndo(), false, "load 清栈");

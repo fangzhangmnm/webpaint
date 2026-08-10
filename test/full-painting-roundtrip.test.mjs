@@ -31,7 +31,7 @@ function stroke(be, leafId, brush, points) {
 
 // 结构丰富的确定性画作：4 叶 + 1 组（2 叶入组）+ 属性全谱 + 6 笔 + erase + 2 filter + 负向扩张 crop
 function buildRichPainting() {
-  const be = WebPaintBackend.blank({ width: 640, height: 480, backgroundColor: "#f8f4e8" }, mkInject());
+  const be = WebPaintBackend.blank({ width: 640, height: 480 }, mkInject());
   const L2 = be.layerAdd("线稿").id, L3 = be.layerAdd("上色").id, L4 = be.layerAdd("特效").id;
   // 属性全谱（mode/opacity/clippingMask/lockAlpha/visible/name——stack.xml 全字段过一遍）
   be.layerSetProp(L2, "opacity", 0.85);
@@ -77,9 +77,7 @@ describe("full · 全量画作 round-trip（决定论 encode）", () => {
     const ora2 = await be2.encodeOra();
     assert(bytesEq(ora1, ora2), "encodeOra 两代逐字节相同（1980 epoch zip + 决定论全链）");
     eq(JSON.stringify(be2.layerTree()), JSON.stringify(be1.layerTree()), "层树投影相同（嵌套组/属性全谱）");
-    // backgroundColor 不进 .ora（既有语义：ora 核心无此字段，bg 归壳 sidecar/desk）——对比时剔除。
-    const info = (be) => { const { backgroundColor: _bg, ...rest } = be.docInfo(); return rest; };
-    eq(JSON.stringify(info(be2)), JSON.stringify(info(be1)), "docInfo 相同（除 bg——ora 不载它）");
+    eq(JSON.stringify(be2.docInfo()), JSON.stringify(be1.docInfo()), "docInfo 相同（bg 字段已全量删除——ORA 对齐拍板）");
     const png1 = await be1.exportImage("png");
     const png2 = await be2.exportImage("png");
     assert(bytesEq(png1, png2), "两代 exportImage 合成逐字节相同（SoftGl2 软合成域）");

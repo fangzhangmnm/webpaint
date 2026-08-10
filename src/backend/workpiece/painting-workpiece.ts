@@ -34,7 +34,6 @@ export interface PaintingDataGroup {
 export type PaintingDataNode = PaintingDataLeaf | PaintingDataGroup;
 export interface PaintingData {
   width: number; height: number;
-  backgroundColor?: string;
   activeId?: number | null;
   referenceLayerId?: number | null;
   nodes: PaintingDataNode[];
@@ -95,7 +94,7 @@ export class PaintingWorkpiece extends Workpiece {
         wp: this, tiles: this.layerTiles, maxLeaves: opts.tree.maxLeaves,
         initial: {
           nodes: [{ id: 1, name: "Layer 1", visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false, pixelsRef: ref0 }],
-          activeId: 1, referenceLayerId: null, backgroundColor: "#ffffff",
+          activeId: 1, referenceLayerId: null,
           width: opts.tree.width, height: opts.tree.height,
         },
       });
@@ -138,7 +137,6 @@ export class PaintingWorkpiece extends Workpiece {
         nodes: built.nodes,
         activeId: data.activeId ?? firstLeaf(built.nodes),
         referenceLayerId: data.referenceLayerId ?? null,
-        backgroundColor: data.backgroundColor ?? "#ffffff",
         width: data.width, height: data.height,
       });
     } finally {
@@ -166,7 +164,7 @@ export class PaintingWorkpiece extends Workpiece {
       };
     });
     return {
-      width: v.width, height: v.height, backgroundColor: v.backgroundColor,
+      width: v.width, height: v.height,
       activeId: v.activeId, referenceLayerId: v.referenceLayerId,
       nodes: walk(v.nodes),
     };

@@ -24,7 +24,8 @@ export interface BackendLayerNode {
   children?: BackendLayerNode[];          // 组才有
 }
 export interface BackendDocInfo {
-  width: number; height: number; backgroundColor: string;
+  // backgroundColor 已删（2026-08-10 user 拍板 ORA 对齐：doc 无纸色，透明即透明）
+  width: number; height: number;
   activeId: number | null; referenceLayerId: number | null;
   layerCount: number;                     // 叶计数（maxLayers 预算对照）
 }

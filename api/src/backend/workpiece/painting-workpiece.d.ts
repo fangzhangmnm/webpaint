@@ -31,7 +31,6 @@ export type PaintingDataNode = PaintingDataLeaf | PaintingDataGroup;
 export interface PaintingData {
     width: number;
     height: number;
-    backgroundColor?: string;
     activeId?: number | null;
     referenceLayerId?: number | null;
     nodes: PaintingDataNode[];

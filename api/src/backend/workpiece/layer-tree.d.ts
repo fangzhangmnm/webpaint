@@ -25,7 +25,6 @@ export interface TreeJson {
     nodes: TreeNode[];
     activeId: number | null;
     referenceLayerId: number | null;
-    backgroundColor: string;
     width: number;
     height: number;
 }
@@ -100,7 +99,7 @@ export declare class LayerTree implements CollectorComponent {
     /** 元规则相同才合并动词（提案 .h）：doc 级 unique 值。
      *  width/height（T3b-2 补）：整 doc 几何变换（crop/resample/rot90）的尺寸位——像素实例交换
      *  由 DocResizeOp/computed 记账，json 尺寸走本 verb 进树 record，同一 step 内两账同向翻。 */
-    setTreeProp(key: "referenceLayerId" | "backgroundColor" | "width" | "height", value: number | null | string): void;
+    setTreeProp(key: "referenceLayerId" | "width" | "height", value: number | null | string): void;
     /** 唯一不记账 verb（焦点=导航）：无需令牌、不收集；换根共享 nodes（records 不受扰）。 */
     setActive(id: number): boolean;
     sealRecord(): RecordData | null;
