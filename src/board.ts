@@ -219,16 +219,15 @@ export class Board {
     this.fitToScreen();
   }
 
-  // 按渲染模式给 doc 设内存预算档（doc.maxLayers 动态字节预算用）：
-  //   GL 模式——合成直读 tile + 每帧 release 物化 canvas → 单份 tile 计费；预算 = min(GPU tile 池容量, 设备 RAM 预算)
-  //     （CPU cap 不得超 GPU 池容量，否则池满丢 tile = 合成漏块）。
-  //   2D 模式——_mat 常驻 → tile + 物化 canvas 双份计费；预算 = 设备 RAM 预算（诚实计 actual bytes，防 OOM）。
+  // 按渲染模式给 doc 设内存预算档（doc.maxLayers 动态字节预算用）；驻留恒单份 tile 计费
+  //   （C3 债 b：物化 canvas 已拆）。GL 模式预算 = min(GPU tile 池容量, 设备 RAM 预算)
+  //   （CPU cap 不得超 GPU 池容量，否则池满丢 tile = 合成漏块）。
   _configureDocMemory() {
     if (this._glBoard) {
       // S7：GPU 池惰性增长——预算口径用 quota（增长上限），别用 committed（初始才 16MiB）。
-      this.doc.configureMemory(Math.min(this._glBoard.memory.quotaBytes, layerByteBudget()), false);
+      this.doc.configureMemory(Math.min(this._glBoard.memory.quotaBytes, layerByteBudget()));
     } else {
-      this.doc.configureMemory(layerByteBudget(), true);
+      this.doc.configureMemory(layerByteBudget());
     }
   }
 
@@ -621,10 +620,6 @@ export class Board {
       this._glFloatInputs(), stampOverlay,
       liveSync as unknown as GLLeaf | null, this._glSurrogate(),
     );
-    // 切片②：GL 合成直读 tile（不碰 layer.canvas）→ 物化 canvas 是纯冗余的第二份像素拷贝。
-    //   非 live-preview 帧（已 syncAll 把 tile 传 GPU）后释放各层物化缓存 → GL 模式不常驻第二份拷贝。
-    //   （live-preview 中不释放：活动层 surrogate / 叠层路径可能仍读 canvas。getter 命中会按需重建。）
-    if (!this._isLivePreview()) eachViewLeaf(this.doc.layers, (l) => l.releaseMaterialized());
     // 2D 叠层（透明底）：lasso 蚂蚁线/handles + doc 边框
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, W, H);

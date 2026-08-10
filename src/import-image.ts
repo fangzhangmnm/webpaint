@@ -29,11 +29,9 @@ import type { AppContext } from "./app-context.ts";
 // 错误信息提取（catch 子句 e 在 strict 下是 unknown）。
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
 
-// 导入时往 doc 活层写像素（doc.js 未类型化 → 只描述用到的字段；ctx 容 OffscreenCanvas/HTMLCanvasElement）。
+// 导入时往 doc 活层写像素（doc.js 未类型化 → 只描述用到的字段）。
 interface ImportLayer {
   name: string; bboxX: number; bboxY: number; bboxW: number; bboxH: number;
-  canvas: CanvasImageSource; ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
-  replaceFromCanvas(src: CanvasImageSource, ox: number, oy: number, w: number, h: number): void;
   replaceFromBytes(data: Uint8ClampedArray, ox: number, oy: number, w: number, h: number): void;
 }
 // big-import sheet 的结果。

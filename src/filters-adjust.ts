@@ -32,7 +32,7 @@ interface FilterLike {
   sampleModes?: boolean;   // v0.6.36：声明即渲染采样核下拉（液化；选项 = RESAMPLE_MODES 的 liquify context）
 }
 // adjust panel 操作的 doc 活层（doc.js 未类型化 → 只描述用到的）。
-interface AdjustLayer { id: number; name: string; bboxX: number; bboxY: number; bboxW: number; bboxH: number; canvas: CanvasImageSource; ctx: CanvasRenderingContext2D; snapshot(): LayerSnap; replaceFromCanvas(src: CanvasImageSource, ox: number, oy: number, w: number, h: number): void; }
+interface AdjustLayer { id: number; name: string; bboxX: number; bboxY: number; bboxW: number; bboxH: number; snapshot(): LayerSnap; }
 // editMode.enterTransient 的 apply/abort（edit-mode.js 未类型化默认 null → 调用处断言真签名）。
 interface TransientOpts { apply?: () => void; abort?: () => void; }
 // filter region preview 态（surrogate canvas + 提取的源/掩码数据）。

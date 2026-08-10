@@ -77,22 +77,6 @@ export async function encodePngFromBytes(data: Uint8ClampedArray, w: number, h: 
   return png;
 }
 
-// canvas → PNG 字节（扁平化导出/缩略图这类"canvas 语义即输出"的 B 类调用方用；
-// 像素管线调用方请走 encodePngFromBytes）。
-export async function encodePngFromCanvas(canvas: OffscreenCanvas | HTMLCanvasElement): Promise<Uint8Array> {
-  let blob: Blob | null | undefined;
-  const oc = canvas as OffscreenCanvas, hc = canvas as HTMLCanvasElement;
-  if (typeof oc.convertToBlob === "function") {
-    blob = await oc.convertToBlob({ type: "image/png" });
-  } else if (typeof hc.toBlob === "function") {
-    blob = await new Promise<Blob | null>((resolve) => hc.toBlob(resolve, "image/png"));
-  } else {
-    throw new Error("canvas 无 toBlob / convertToBlob");
-  }
-  if (!blob) throw new Error("canvas → blob 失败");
-  return new Uint8Array(await blob.arrayBuffer());
-}
-
 // ---- 解码 ----
 
 /** PNG 字节 → straight RGBA。主路 UPNG（全格式、零 canvas、零 premult 损）；

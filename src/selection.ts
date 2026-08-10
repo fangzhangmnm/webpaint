@@ -16,19 +16,14 @@
 // - bboxX/Y/W/H 保持公开（消费面到处在读）；v0.4.6 起 = per-tile 内容 bbox 聚合（**紧**——
 //   旧版 compose 的“合成 bbox 可能略大”TODO 就此了账）。
 // - 蚂蚁线 outline 已抽 src/marching-ants.ts 深模块（自持缓存，keyed by Selection 对象身份）。
-// - Canvas2D 消费者（filters / 浮层 lift / 剪贴板）走 materializeMaskCanvas()（懒缓存物化，
-//   RGBA 白 + alpha=mask，与旧 maskCanvas drawImage 语义逐像素一致）。CPU 算法读者走
-//   materializeMaskRegion()/sampleAt() 窄读口（gray8，无 4 倍 RGBA 浪费）。
+// - CPU 算法读者走 materializeMaskRegion()/sampleAt() 窄读口（gray8，无 4 倍 RGBA 浪费）。
 // - GPU：bboxMask() 给 bbox 对齐的 gray8 平面（懒缓存）→ gl-doc-renderer 直传 R8 纹理
 //   （S7 改走 cpu-gpu-tile-bridge）。
-// - 纯 in-process：除 fromAlphaCanvas/resampledTo/materializeMaskCanvas 外全部零 canvas 依赖，node 直测。
+// - 纯 in-process：全部零 canvas 依赖，node 直测（C3 债 b：fromAlphaCanvas/materializeMaskCanvas 死口拆除）。
 
 import { TILE_SIZE } from "./common/tile-geometry.ts";
 import { appTilePool } from "./tiles/app-tile-pool.ts";
 import { computeBBox, type TileHandle } from "./tiles/cpu-tile-pool.ts";
-
-type Bitmap = OffscreenCanvas | HTMLCanvasElement;
-type Ctx = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
 
 // applyMaskPostStroke / fillOnLayer / clearOnLayer 调用方（Layer）的最小形状。
 interface LayerLike {
@@ -36,7 +31,7 @@ interface LayerLike {
   bboxY: number;
   snapshotImageData(): LayerSnapLike;
   putImageData(docX: number, docY: number, img: ImageData): void;
-  editRegion(x0: number, y0: number, w: number, h: number, fn: (ctx: CanvasRenderingContext2D, ox: number, oy: number) => void): void;
+  editRegionBytes(x0: number, y0: number, w: number, h: number, fn: (buf: Uint8ClampedArray, ox: number, oy: number) => void): void;
 }
 
 // Layer.snapshotImageData() 产物（applyMaskPostStroke 的 preSnap/afterSnap 形状——CPU 算法的只读物化，非 undo 包）。
@@ -58,12 +53,6 @@ const unpackTx = (k: number) => k % PACK;
 const unpackTy = (k: number) => Math.floor(k / PACK);
 
 const GRAY_TILE = TILE_SIZE * TILE_SIZE;
-
-function makeBitmap(w: number, h: number): Bitmap {
-  return (typeof OffscreenCanvas !== "undefined")
-    ? new OffscreenCanvas(w, h)
-    : (() => { const c = document.createElement("canvas"); c.width = w; c.height = h; return c; })();
-}
 
 // 硬形态学（pixel-art 逻辑）：grid 上 8-连通 膨胀(grow)/腐蚀(!grow)，radius 轮。
 //   每轮「先收集再应用」(double-buffer) 保证恰好 radius 像素环，不在同轮内自传播。
@@ -108,11 +97,10 @@ export class Selection {
 
   private _tiles: Map<number, TileHandle>;
   private _disposed = false;
-  // 懒缓存（不可变 → 一次算永远对）：bbox 对齐 gray8 平面（GL 上传 / CPU 密集读者）；Canvas2D 物化。
+  // 懒缓存（不可变 → 一次算永远对）：bbox 对齐 gray8 平面（GL 上传 / CPU 密集读者）。
   private _bboxMask: { x: number; y: number; w: number; h: number; data: Uint8Array } | null = null;
-  private _maskCanvas: Bitmap | null = null;
 
-  /** 内部构造：接管 tiles 里句柄的所有权。外部走工厂（full/fromGray8Region/fromAlphaCanvas/compose…）。 */
+  /** 内部构造：接管 tiles 里句柄的所有权。外部走工厂（full/fromGray8Region/fromLayerAlpha/compose…）。 */
   private constructor(tiles: Map<number, TileHandle>, bbox: { x: number; y: number; w: number; h: number }) {
     this._tiles = tiles;
     this.bboxX = bbox.x; this.bboxY = bbox.y;
@@ -136,7 +124,6 @@ export class Selection {
     this._tiles.forEach((h) => { if (!h.released) h.release(); });
     this._tiles.clear();
     this._bboxMask = null;
-    this._maskCanvas = null;
   }
 
   get disposed(): boolean { return this._disposed; }
@@ -213,17 +200,8 @@ export class Selection {
     return Selection._fromTiles(tiles);
   }
 
-  /** 从「alpha = mask」的 canvas 建（lasso freehand/ellipse 的 AA 光栅器仍是 Canvas2D，vetted）。 */
   // ⚠不变量（user 拍板 2026-07-29）：**Selection mask 恒二值 0/255**——所有工厂出厂即二值，
-  //   羽化是将来的显式后处理，别让 AA 灰度从任何入口溜进来。本入口（canvas α → 选区）按 ≥128 阈值化。
-  static fromAlphaCanvas(x0: number, y0: number, canvas: Bitmap): Selection | null {
-    const w = (canvas as HTMLCanvasElement).width, h = (canvas as HTMLCanvasElement).height;
-    if (w <= 0 || h <= 0) return null;
-    const d = (canvas.getContext("2d") as Ctx).getImageData(0, 0, w, h).data;
-    const g = new Uint8Array(w * h);
-    for (let i = 0; i < w * h; i++) g[i] = d[i * 4 + 3] >= 128 ? 255 : 0;
-    return Selection.fromGray8Region(x0, y0, w, h, g);
-  }
+  //   羽化是将来的显式后处理，别让 AA 灰度从任何入口溜进来（各入口按 ≥128 阈值化）。
 
   /** 从图层 alpha 建（v0.7.38「从当前图层建选区」）。α≥128 → 255（恒二值不变量同上）；
    *  空层 → null（= 没选区）。像素走 tiles 直读口 getImageData（v0.6.39 唯一正确读法，零 canvas
@@ -385,28 +363,6 @@ export class Selection {
     return this._bboxMask;
   }
 
-  /**
-   * Canvas2D 物化（懒缓存；**只读**，别画上去）：bbox 尺寸，RGBA 白 + alpha=mask——
-   * 与旧 maskCanvas 的 drawImage 语义逐像素一致。剩余 Canvas2D 消费者（filters/浮层 lift/剪贴板）
-   * 的过渡口，S8/S9 收缩 Canvas2D 残余时一并日落。
-   */
-  materializeMaskCanvas(): Bitmap {
-    this._assertAlive();
-    if (!this._maskCanvas) {
-      const { w, h, data } = this.bboxMask();
-      const c = makeBitmap(Math.max(1, w), Math.max(1, h));
-      const ctx = c.getContext("2d") as Ctx;
-      const img = ctx.createImageData(Math.max(1, w), Math.max(1, h));
-      const od = img.data;
-      for (let i = 0; i < w * h; i++) {
-        od[i * 4] = 255; od[i * 4 + 1] = 255; od[i * 4 + 2] = 255; od[i * 4 + 3] = data[i];
-      }
-      ctx.putImageData(img, 0, 0);
-      this._maskCanvas = c;
-    }
-    return this._maskCanvas;
-  }
-
   // ---- 作用到 layer（改 layer 像素，不改自身）----
 
   // 笔刷/橡皮/液化结束后：把 layer 在选区外的像素 revert 到 preSnap（"stroke 只在选区内生效"）。
@@ -465,8 +421,7 @@ export class Selection {
     const m = parseInt(color.slice(1), 16);
     const cr = (m >> 16) & 255, cg = (m >> 8) & 255, cb = m & 255;
     const mask = this.materializeMaskRegion(this.bboxX, this.bboxY, w, h);
-    (layer as unknown as { editRegionBytes: (x: number, y: number, w: number, h: number, fn: (buf: Uint8ClampedArray) => void) => void })
-      .editRegionBytes(this.bboxX, this.bboxY, w, h, (buf) => {
+    layer.editRegionBytes(this.bboxX, this.bboxY, w, h, (buf) => {
         for (let i = 0; i < w * h; i++) {
           const as = mask[i] / 255;
           if (as <= 0) continue;
@@ -488,8 +443,7 @@ export class Selection {
     const w = this.bboxW, h = this.bboxH;
     if (w <= 0 || h <= 0) return;
     const mask = this.materializeMaskRegion(this.bboxX, this.bboxY, w, h);
-    (layer as unknown as { editRegionBytes: (x: number, y: number, w: number, h: number, fn: (buf: Uint8ClampedArray) => void) => void })
-      .editRegionBytes(this.bboxX, this.bboxY, w, h, (buf) => {
+    layer.editRegionBytes(this.bboxX, this.bboxY, w, h, (buf) => {
         for (let i = 0; i < w * h; i++) {
           if (mask[i]) buf[i * 4 + 3] = Math.round(buf[i * 4 + 3] * (255 - mask[i]) / 255);
         }
@@ -535,8 +489,7 @@ export class Selection {
     return Selection.fromGray8Region(this.bboxY, docW - (this.bboxX + w), nw, nh, dst);
   }
 
-  /** 重采样：mask 同步缩放 (sx,sy)。缩放器 = Canvas2D drawImage（与 layer 同一 vetted 路径）。 */
-  // v0.6.46 字节版：面积平均缩放 mask → ≥128 二值化（选区不变量：恒 0/255）。零 canvas。
+  /** 重采样：mask 同步缩放 (sx,sy)。v0.6.46 字节版：面积平均缩放 → ≥128 二值化（选区不变量：恒 0/255）。零 canvas。 */
   resampledTo(sx: number, sy: number): Selection | null {
     this._assertAlive();
     const oW = this.bboxW, oH = this.bboxH;

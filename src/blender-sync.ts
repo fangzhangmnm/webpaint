@@ -5,8 +5,8 @@
 //   - AppContext seam（doc / board / history / setStatus / withBusy / …）
 //   - vendored btp 客户端（../vendor/btp/v1/index.js）——BTPClient 走 fetch；连接 = 一个 baseUrl
 //     （本机 localhost / 另一台设备填能连到 server 的 HTTPS 地址，如 tailscale serve 的 *.ts.net）
-//   - 三个 WebPaint 深模块：renderDocToImageBlob（唯一合成器）、smartResample（安全缩放，
-//     step-halving 抗锯齿，缩小到小贴图不糊）、ViewLeaf.replaceFromCanvas（clear + 整块换像素）
+//   - 三个 WebPaint 深模块：renderDocToImageBlob（唯一合成器）、areaResampleBytes（安全缩放，
+//     面积平均抗锯齿，缩小到小贴图不糊）、ViewLeaf.replaceFromBytes（clear + 整块换像素）
 //
 // UI 中文（跟 WebPaint 一致）。交互沿用 app 既有「smart 按钮」范式：连接键 = 智能保存键那种
 // 单键多态（连接/连接中/已连接，点击随态切动作）；拉取/推送 = 菜单里 smart 导入导出那种 main + ⋯ 配置。

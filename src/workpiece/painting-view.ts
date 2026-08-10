@@ -3,8 +3,9 @@
 // 角色：PaintingWorkpiece（LayerTree json + LayerTiles tileset 注册表）→ 旧 DocView 同形的
 // **view 节点树**。让 23 个 doc.ts 消费文件在割接时几乎零改动：board/GL 管线本就 duck-typed
 // （{id,visible,opacity,mode,clippingMask,pixels,children}），引擎（brush/liquify/lasso）拿到的
-// ViewLeaf 具备旧 Layer 的读写面（pixels/bbox/canvas 物化缓存/editRegion/snapshot…——写走
-// 活 LayerPixels，token 开着时由 tile-layer 全局观察者写时扣押，纪律与 T2 一致）。
+// ViewLeaf 具备旧 Layer 的读写面（pixels/bbox/editRegionBytes/snapshot…——写走
+// 活 LayerPixels，token 开着时由 tile-layer 全局观察者写时扣押，纪律与 T2 一致。
+// C3 债 b：canvas/ctx 物化视图拆除，bbox = contentBounds 缓存，字节口是唯一读写面）。
 //
 // 过渡态（T4/T5 收编，自裁范围）：
 //   - selection substrate 已迁 SelectionComponent（T4a）；本端口只留镜像口
@@ -17,16 +18,12 @@
 // 同步策略：LayerTree 每次写换新根（不可变值契约）→ 端口以**根引用身份**做缓存键；
 // ViewLeaf 按 id 复用（物化缓存/引擎持引用跨 commit 有效），属性镜像每次 resync 回灌。
 
-import { LayerPixels, materialize, editRegion as editPixels, editRegionBytes as editPixelsBytes, disposePixelsSnapshot, type PixelsSnapshot } from "../tiles/tile-layer.ts";
-import { makeBitmap } from "../bitmap.ts";
+import { LayerPixels, editRegionBytes as editPixelsBytes, disposePixelsSnapshot, type PixelsSnapshot } from "../tiles/tile-layer.ts";
 import type { PaintingWorkpiece } from "./painting-workpiece.ts";
 import type { LayerTiles } from "./layer-tiles.ts";
 import { isGroupNode, type TreeNode, type TreeLeaf } from "./layer-tree.ts";
 import { computeMaxLayers, layerByteBudget } from "../doc.ts";
 import type { Selection } from "../selection.ts";
-
-type Bitmap = OffscreenCanvas | HTMLCanvasElement;
-type Ctx2D = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
 
 // 旧 LayerSnap 同形（undo 包/引擎 pre-snap；用完 disposeViewSnap）。
 export interface ViewLeafSnap { pixels: PixelsSnapshot }
@@ -59,8 +56,7 @@ export class ViewLeaf {
   /** @internal 属性回灌（端口 resync 用）。 */
   _pixelsRef = 0;
   private _tiles: LayerTiles;
-  private _mat: { canvas: Bitmap; ox: number; oy: number; forRev: number; forInstance: LayerPixels } | null = null;
-  private _empty: Bitmap | null = null;
+  private _bounds: { b: { x: number; y: number; w: number; h: number } | null; forRev: number; forInstance: LayerPixels } | null = null;
 
   constructor(tiles: LayerTiles, id: number) {
     this._tiles = tiles;
@@ -77,38 +73,25 @@ export class ViewLeaf {
   /** 内容版本（全局单调不复用；flat-coloring-oracle 等 (id,rev) 缓存键）。 */
   get contentRev(): number { return revFor(this.pixels); }
 
-  // ---- 派生只读视图（物化缓存；语义同旧 Layer._ensureMat）----
-  private _ensureMat(): { canvas: Bitmap; ox: number; oy: number } {
+  // ---- 派生只读视图（紧内容框；rev-keyed 缓存，语义同旧物化视图的 bbox）----
+  private _contentBounds(): { x: number; y: number; w: number; h: number } | null {
     const lp = this.pixels;
     const rev = lp.contentVersion;
-    if (this._mat && this._mat.forRev === rev && this._mat.forInstance === lp) return this._mat;
-    const m = materialize(lp, true);
-    if (m) { this._mat = { canvas: m.canvas as Bitmap, ox: m.ox, oy: m.oy, forRev: rev, forInstance: lp }; return this._mat; }
-    if (!this._empty) this._empty = makeBitmap(1, 1);
-    this._mat = { canvas: this._empty, ox: 0, oy: 0, forRev: rev, forInstance: lp };
-    return this._mat;
-  }
-  /** 纯腾内存（GL 模式每帧后调；下次访问按需重建）。 */
-  releaseMaterialized(): void { this._mat = null; }
-
-  residentBytes(countMat: boolean): number {
-    const mat = (countMat && this._mat) ? this._mat.canvas.width * this._mat.canvas.height * 4 : 0;
-    return this.pixels.byteUsage + mat;
+    if (this._bounds && this._bounds.forRev === rev && this._bounds.forInstance === lp) return this._bounds.b;
+    this._bounds = { b: lp.contentBounds(true), forRev: rev, forInstance: lp };
+    return this._bounds.b;
   }
 
-  get canvas(): Bitmap { return this._ensureMat().canvas; }
-  get ctx(): Ctx2D { return this._ensureMat().canvas.getContext("2d", { willReadFrequently: true }) as Ctx2D; }
-  get bboxX(): number { return this.pixels.isEmpty() ? 0 : this._ensureMat().ox; }
-  get bboxY(): number { return this.pixels.isEmpty() ? 0 : this._ensureMat().oy; }
-  get bboxW(): number { return this.pixels.isEmpty() ? 0 : this._ensureMat().canvas.width; }
-  get bboxH(): number { return this.pixels.isEmpty() ? 0 : this._ensureMat().canvas.height; }
+  residentBytes(): number { return this.pixels.byteUsage; }
+
+  get bboxX(): number { return this._contentBounds()?.x ?? 0; }
+  get bboxY(): number { return this._contentBounds()?.y ?? 0; }
+  get bboxW(): number { return this._contentBounds()?.w ?? 0; }
+  get bboxH(): number { return this._contentBounds()?.h ?? 0; }
   get width(): number { return this.bboxW; }
   get height(): number { return this.bboxH; }
 
   // ---- 写者入口（活 LayerPixels 直写；token 开着 = 写时扣押，纪律同 T2）----
-  editRegion(x0: number, y0: number, w: number, h: number, fn: (ctx: CanvasRenderingContext2D, ox: number, oy: number) => void): void {
-    editPixels(this.pixels, x0, y0, w, h, fn);
-  }
   editRegionBytes(x0: number, y0: number, w: number, h: number, fn: (buf: Uint8ClampedArray, ox: number, oy: number) => void): void {
     editPixelsBytes(this.pixels, x0, y0, w, h, fn);
   }
@@ -194,9 +177,8 @@ export class PaintingView {
   private _nodes: ViewNode[] = [];
   private _leafCache = new Map<number, ViewLeaf>();
   private _lastRoot: unknown = null;
-  // 内存预算档（旧 PaintDoc._memBudgetBytes/_memCountMat 同形；board 按 GL/2D 配）。
+  // 内存预算档（board 按 GL 配额配）。
   private _memBudgetBytes: number | null = null;
-  private _memCountMat = true;
 
   constructor(wp: PaintingWorkpiece) {
     if (!wp.layerTree) throw new Error("PaintingView: 需要树模式的 PaintingWorkpiece（opts.tree）");
@@ -323,15 +305,15 @@ export class PaintingView {
   /** 换文档收尾（跨 session 不沿用选区——旧 adoptState 语义）。 */
   clearSelectionOnLoad(): void { this._wp.selection.clearOnLoad(); }
 
-  // ---- 内存预算 / 层数上限（语义沿旧 PaintDoc.maxLayers）----
-  configureMemory(budgetBytes: number, countMat: boolean): void {
+  // ---- 内存预算 / 层数上限（语义沿旧 PaintDoc.maxLayers；C3 债 b：物化 canvas 拆除后
+  //   驻留恒单份 tile 计费，countMat 档随之消灭）----
+  configureMemory(budgetBytes: number): void {
     this._memBudgetBytes = budgetBytes;
-    this._memCountMat = countMat;
   }
   get maxLayers(): number {
     const leaves = flattenViewLeaves(this.layers);
     let resident = 0;
-    for (const l of leaves) resident += l.residentBytes(this._memCountMat);
+    for (const l of leaves) resident += l.residentBytes();
     return computeMaxLayers(leaves.length, resident, this._memBudgetBytes ?? layerByteBudget());
   }
 }

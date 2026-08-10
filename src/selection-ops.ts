@@ -1,11 +1,12 @@
 // 职责（单一）：选区 → 剪贴板 / 复制为浮层 / 提取选区像素。
-//   - _extractSelectionRegionCanvas：当前层 ∩ 选区 → 裁好形状的 canvas（纯函数）。
+//   - _extractSelectionRegionBytes：当前层 ∩ 选区 → 裁好形状的 straight RGBA 字节（纯函数）。
 //   - selectionToNewLayer({move})：选区像素抽成新层（复制 / 移动），含 undo 记账。导出供 toolbar 等模块用。
 //   - _makeFullLayerSelection：给整层做全白 mask 当 selection（导入图片后自动全选用）。导出供 app.js import 流程用。
 //   - v156 剪贴板 / 复制为浮层 快捷键：wp:copy / wp:paste / wp:duplicateFloat 三个 window 事件的逻辑。
 //     入口在 input.js KEYBOARD_SHORTCUTS（hub）；run 派发 window 事件，逻辑搬到这（要 doc/import/setColor）。
 //     Ctrl+T 直接复用 lassoTransformBtn.click()，不在此。Ctrl+C/V 仅走系统剪贴板，无内部 buffer / token。
 import { readImageFromClipboard, writeImageBlobToClipboard } from "./session.ts";
+import { encodePngFromBytes } from "./png-codec.ts";
 import { Selection } from "./selection.ts";
 import { disposeLayerSnap, type LayerSnap } from "./doc.ts";
 import { countViewLeaves } from "./workpiece/painting-view.ts";
@@ -19,7 +20,7 @@ import type { AppContext } from "./app-context.ts";
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
 
 // doc 活层 / Selection 的最小结构（doc/selection.js 未类型化 → 只描述本文件用到的几何字段）。
-interface LayerLike { bboxX: number; bboxY: number; bboxW: number; bboxH: number; canvas: CanvasImageSource; }
+interface LayerLike { bboxX: number; bboxY: number; bboxW: number; bboxH: number; getImageData(x: number, y: number, w: number, h: number): ImageData; }
 // （v0.4.6：Selection.maskCanvas 死 → 本文件 Canvas2D 合成走 materializeMaskCanvas() 物化缓存）
 interface TransientOpts { apply?: () => void; abort?: () => void; }
 
@@ -31,21 +32,18 @@ let setStatus: AppContext["setStatus"], _afterDocChange: AppContext["afterDocCha
 let _commitTransform: AppContext["_commitTransform"], _cancelTransform: AppContext["_cancelTransform"], _suppressTransientPanels: AppContext["_suppressTransientPanels"];
 let importImageAsLayer: AppContext["importImageAsLayer"];
 
-// 当前层 ∩ 选区（无交集 → null）→ 裁好选区形状的离屏 canvas（仅剪贴板 PNG 编码用——
-// v0.6.41 去 canvas 化：像素在字节里裁好，canvas 只在编码边界包一次、不回流画作）。
-function _extractSelectionRegionCanvas(layer: LayerLike, sel: Selection) {
+// 当前层 ∩ 选区（无交集 → null）→ 裁好选区形状的 straight RGBA 字节（仅剪贴板 PNG 编码用——
+// C3 债 b：编码走 encodePngFromBytes，全程零 canvas、零 premult 往返）。
+function _extractSelectionRegionBytes(layer: LayerLike, sel: Selection): { data: Uint8ClampedArray; w: number; h: number } | null {
   const lbX = layer.bboxX, lbY = layer.bboxY, lbW = layer.bboxW, lbH = layer.bboxH;
   const x0 = Math.max(lbX, sel.bboxX), y0 = Math.max(lbY, sel.bboxY);
   const x1 = Math.min(lbX + lbW, sel.bboxX + sel.bboxW), y1 = Math.min(lbY + lbH, sel.bboxY + sel.bboxH);
   const w = x1 - x0, h = y1 - y0;
   if (w <= 0 || h <= 0) return null;
-  const img = (layer as unknown as { getImageData: (x: number, y: number, w: number, h: number) => ImageData }).getImageData(x0, y0, w, h);
+  const img = layer.getImageData(x0, y0, w, h);
   const mask = sel.materializeMaskRegion(x0, y0, w, h);
   for (let i = 0; i < w * h; i++) img.data[i * 4 + 3] = Math.round(img.data[i * 4 + 3] * mask[i] / 255);
-  const c = document.createElement("canvas");
-  c.width = w; c.height = h;
-  c.getContext("2d")!.putImageData(img, 0, 0);
-  return c;
+  return { data: img.data, w, h };
 }
 
 // 选区 → 新层。move=true 同时从源层挖洞（移动语义）。undo = compound(addLayer 记录 + 源层 pixels swap)：
@@ -105,19 +103,18 @@ export function initSelectionOps(ctx: AppContext) {
   window.addEventListener("wp:copy", async () => {
     const layer = requireEditableLeaf(doc, setStatus) as LayerLike | null;   // 组 → 标准状态行（组 composite 复制是后话，先拒）
     if (!layer) return;
-    let canvas;
+    let px: { data: Uint8ClampedArray; w: number; h: number } | null;
     if (doc.selection) {
-      canvas = _extractSelectionRegionCanvas(layer, doc.selection as unknown as Selection);
-      if (!canvas) { setStatus(t("se.selectionOutsideLayer"), true); return; }
+      px = _extractSelectionRegionBytes(layer, doc.selection as unknown as Selection);
+      if (!px) { setStatus(t("se.selectionOutsideLayer"), true); return; }
     } else {
       if (layer.bboxW <= 0 || layer.bboxH <= 0) { setStatus(t("se.layerEmpty"), true); return; }
-      canvas = document.createElement("canvas");
-      canvas.width = layer.bboxW; canvas.height = layer.bboxH;
-      canvas.getContext("2d")!.drawImage(layer.canvas, 0, 0);
+      px = { data: layer.getImageData(layer.bboxX, layer.bboxY, layer.bboxW, layer.bboxH).data, w: layer.bboxW, h: layer.bboxH };
     }
     try {
       // lazy promise：blob 生成放进 ClipboardItem，保 Safari user-gesture
-      await writeImageBlobToClipboard(new Promise<Blob>((res) => canvas.toBlob(res as BlobCallback, "image/png")));
+      const { data, w, h } = px;
+      await writeImageBlobToClipboard(encodePngFromBytes(data, w, h).then((png) => new Blob([png as BlobPart], { type: "image/png" })));
       setStatus(doc.selection ? t("se.copiedSelectionToClipboard") : t("se.copiedLayerToClipboard"));
     } catch (e) {
       reportError(new Error(t("se.copyFailed", { error: errMsg(e) })), "warning");   // #34：iPad 剪贴板权限被拒走 banner
