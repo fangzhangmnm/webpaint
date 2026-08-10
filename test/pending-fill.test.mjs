@@ -77,6 +77,23 @@ describe("pending-fill · 预览换色可撤销（v0.7.8 语义迁移）", () =>
     eq(pf.view(), null, "redo 回 swap 现场（clear 后的 null）");
   });
 
+  it("v0.8.29 clearRecorded：fill commit 步内清 seed；undo 还原 redo 再清（ADR-0008 §6 对齐）", () => {
+    const { wp2, stack, pf } = mk();
+    pf.begin("#123456");
+    const t = wp2.begin("fill");
+    pf.clearRecorded();
+    t.commit();
+    eq(stack.depth(), 1, "清 seed 占一步（真 app 里与 tiles/selection 同 token 一步）");
+    eq(pf.view(), null, "commit 后 seed 已清");
+    stack.undo();
+    eq(pf.view()?.color, "#123456", "undo fill → seed 随 step 还原");
+    stack.redo();
+    eq(pf.view(), null, "redo → 再清");
+    let threw = false;
+    try { pf.clearRecorded(); } catch { threw = true; }
+    assert(threw, "无令牌 clearRecorded → throw（令牌墙）");
+  });
+
   it("无令牌 commitPreApplied → throw（令牌墙）；begin/clear/setColorLive 无 token 合法", () => {
     const { pf } = mk();
     pf.begin("#000000");

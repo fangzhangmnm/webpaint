@@ -18,6 +18,8 @@ export declare class PendingFill implements CollectorComponent {
     setColorLive(hex: string): void;
     /** 记账写（pre-applied）：当前值已上台，before = 防抖窗口起点的旧色。 */
     commitPreApplied(before: string): void;
+    /** 记账清：fill commit 整点内清 seed（undo fill → seed 随 step 还原）。 */
+    clearRecorded(): void;
     sealRecord(): RecordData | null;
     swapRecord(data: RecordData): RecordData;
     recordBytes(): number;

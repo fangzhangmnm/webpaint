@@ -136,9 +136,14 @@ transform 裁定**无档口**：变换会话 = frontend UX 括号（EditMode tra
 3. **魔棒拖选**：迁的是预览宿。两条候选路（C6 现场定，不预固化）：a) `SelectionPreviewTx` api 化——保 `_rawWrite` 声明态但 commit/abort 结构化（机制现成，selection-component.ts:98-141）；b) 预览全引擎自持（accum+compose 不落 substrate），抬笔一次终值 set——需把 stopMask 从「读 doc.selection」改成显式参数传入查询，且蚂蚁线/fill overlay 的预览读面要跟。
 4. 顺手账：液化 cancelStroke 过时注释（v1 PixelEdit 时代，liquify-engine.ts:328-331）随迁清理；adjust commit 的整层 clear→region 替换（undo 包瘦身）同批考虑。
 
-## 7. doc–code 分歧记录（信代码；只记录不裁决，修不修等排期/human）
+## 7. doc–code 分歧记录（信代码；#1/#2 已获 user 裁决并于 v0.8.29 落地）
 
-1. **ADR-0008 §6 vs fill commit**：ADR 写「commit = [tiles+selection 清+PendingFill 清] 一步」；现状 commit 步只含前两项，PendingFill 清在切出 fill 时不记账地发生。改齐 = undo 名单变动，按纪律须 human 点头——C7 fill verb api 化时一并呈。
-2. **ADR-0006 / persp-edit.ts:11 vs 代码**：文档写「取消/ctrl-z=回快照」，代码无快照无回滚（apply≡abort≡`_finish`，persp-edit.ts:359）。行为 gap 上呈 human：补快照回滚，还是回写 ADR 认可现状。
-3. **液化 cancel 注释过时**（见 §6.4）。
+1. **ADR-0008 §6 vs fill commit**：ADR 写「commit = [tiles+selection 清+PendingFill 清] 一步」；曾漏「PendingFill 清」。**裁决（user 2026-08-10「应该清」）→ v0.8.29 落地**：commit 步内 `clearRecorded()` 记账清；留在 fill 时 commit 后用刚落地的色重新 begin（导航态 re-seed）——「✓ 连续填下一块」色不丢。**顺手证实并修掉出口错序 bug**：切工具路径曾先 `pendingFill.clear()` 再 `_doCommit` → `_fillColor()` 落回笔刷色（预览绿、落地红），行为锚钉住（fill-mode.test.mjs）；切出路径的换色防抖 entry 曾被谓词失真吞掉，`_flushColorEntry(force)` 修。
+2. **ADR-0006 / persp-edit.ts:11 vs 代码**：文档写「取消/ctrl-z=回快照」，代码无快照无回滚（apply≡abort≡`_finish`）。**裁决（user 2026-08-10「persp也全量进undo吧，拖一次可以undo一次」）→ v0.8.29 落地**：VP 编辑全量进 undo——`PerspComponent.commitPreApplied`，拖动期 desk 直写当 transient 预览、pointerup 持 before 快照收口一步（重置/锁切换同为一步、整包记账）；perspEdit ctrl-z 语义 abort-transient → **history**（正好落进 §3.2 判据：无挂起令牌的会话 = transform 模式逐整点回退）；undo/redo 期间 gizmo 经 onChange(kind=persp) 重灌 box + 重摆手柄。ADR-0006 已补修订记录。
+3. **液化 cancel 注释过时**（见 §6.4，仍待 C6 顺手清）。
 4. **recon-e 双向依赖计数已过期**（C2 已实测回写 gallery.ts 头，此处不再重复）。
+
+> 分类表随裁决的更新：persp 编辑一行的「0 token 0 步」自 v0.8.29 起过时——现 = 每拖一步
+> （transient 直写 + pointerup 收口），本质归类从「desk 累积真改」改判「参数重算 + 原子整点」
+> （transform 同款：会话无挂起事务、每 verb 一步）。fill 一行 commit 步 entries 变为
+> tiles+selection+pendingFill 三件套。

@@ -166,3 +166,14 @@
   ADR-0006 persp「ctrl-z 回快照」代码不存在 apply≡abort、液化 cancel 注释过时）。无代码
   改动、无新真机锚。**下一片 = C5 StrokeSession**（事务代码迁出 input.ts + 手感数学随迁
   backend + 壁钟→事件 t；census §2.1/§3.8 是现成情报）。
+- **C4 裁决落地 ✅ v0.8.29（2026-08-10）**：census §7 两分歧获 user 裁决同 session 落地。
+  ①fill commit 步补「PendingFill 清」（`clearRecorded` 记账清 + 留在 fill 时 re-seed 刚落地色
+  ——「✓ 连续填下一块」色不丢；user「应该清」）；**顺手抓获并修出口错序真 bug**：切工具路径
+  曾先 clear 后 commit → 预览绿落地红（`_fillColor` 回退笔刷色），加 `_flushColorEntry(force)`
+  保切出路径换色 entry 不丢。②persp VP 编辑全量进 undo（user「拖一次可以undo一次」）：
+  `PerspComponent.commitPreApplied` + persp-edit 拖动/重置/锁切换各收口一步、ctrl-z 改
+  history（transform 同款）、undo 中 gizmo onChange 重灌；ADR-0006 补修订记录、ADR-0008
+  §4/§6 补落地注。测试 1191 绿（+5：fill 落色 WYSIWYG/commit 三件套/clearRecorded/persp
+  拖动记账/no-op 不占步）。**真机锚（追加真机批）**：fill 换色→切工具，落地色=预览色；
+  ✓ 连续填两块不同色各自正确、undo 逐步回；persp 编辑拖 VP→ctrl-z 回拖前、连拖三次撤三次、
+  重置/锁切换也各占一步、undo 中手柄跟着跳。

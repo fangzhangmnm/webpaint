@@ -4,7 +4,8 @@
 //     的「undo 不同步还原 = 透视静默错位」在 v2 下结构性修复）；
 //   - 与 layerTiles/layerTree 同 token → 一个 step 多 entry，undo/redo 两账同向翻；
 //   - 无 VP（remap no-op）→ 不占 entry；无令牌 remap → throw（令牌墙）；
-//   - VP 编辑器路径**不在**记账面（user 拍板「VP setting 不进 undo history」——desk 直写照旧）。
+//   - v0.8.29：VP 编辑器也进记账面（user 2026-08-10「拖一次可以undo一次」——commitPreApplied
+//     每拖一步；旧「VP setting 不进 undo history」收窄 supersede）。
 import { describe, it, assert, eq } from "./runner.mjs";
 import { PaintingWorkpiece } from "../src/workpiece/painting-workpiece.ts";
 import { UndoStack } from "../src/workpiece/undo-stack.ts";
@@ -81,6 +82,36 @@ describe("persp-component · doc 变换 remap 记账", () => {
     let threw = false;
     try { persp.remapForDocTransform((p) => p); } catch { threw = true; }
     assert(threw, "无令牌必须 throw");
+  });
+});
+
+describe("persp-component · VP 编辑拖动记账（v0.8.29，user「拖一次可以undo一次」）", () => {
+  it("commitPreApplied：desk transient 直写到位 + before 快照收口 → 一步；undo/redo 逐拖往返", () => {
+    const { wp2, stack, host, persp } = mk();
+    const before = persp.view();                    // pointerdown 拍快照
+    host.read().p1.vp1 = { x: 200.5, y: 80.5 };     // 拖动期间 desk 直写（transient 预览）
+    const t = wp2.begin("perspEdit");
+    persp.commitPreApplied(before);                 // pointerup 收口
+    t.commit();
+    eq(stack.depth(), 1, "一次拖动 = 一步");
+    stack.undo();
+    eq(host.read().p1.vp1.x, 100.5, "undo 回拖前");
+    stack.redo();
+    eq(host.read().p1.vp1.x, 200.5, "redo 回拖后");
+    stack.undo();
+    eq(host.read().p1.vp1.x, 100.5, "二次往返无衰减");
+  });
+
+  it("no-op 拖动（点一下就松）不占步；无令牌 commitPreApplied → throw", () => {
+    const { wp2, stack, persp } = mk();
+    const before = persp.view();
+    const t = wp2.begin("perspEdit");
+    persp.commitPreApplied(before);                 // 没动过 → JSON 比对净零
+    t.commit();
+    eq(stack.depth(), 0, "净变化为零 → 不入栈");
+    let threw = false;
+    try { persp.commitPreApplied(before); } catch { threw = true; }
+    assert(threw, "令牌墙");
   });
 });
 

@@ -91,3 +91,14 @@
 - perspective-frame.ts / pixel-conic.ts / persp-edit.ts 三个新深模块；shape-brush 引擎吃
   frame provider；`_endStroke`/stamp overlay/undo 管线零改动（多 polyline 在引擎内 merge）。
 - 新图标缺口：`perspective`（透视槽）——字形「透」stopgap，登记库 TODO.md。
+
+## 修订记录
+
+- **2026-08-10（v0.8.29）**：§6「取消/ctrl-z=回快照」supersede——快照回滚从未实现（C4 普查
+  census §7 分歧#2 上呈），user 裁决改为 **VP 编辑全量进 undo**（「persp也全量进undo吧，
+  拖一次可以undo一次」）。落地 = PerspComponent.commitPreApplied：拖动期 desk 直写当 transient
+  预览、pointerup 持 before 快照收口一步（重置/锁切换同为一步、整包记账）；perspEdit 的 ctrl-z
+  语义 abort-transient → history（与 transform 同款——无挂起令牌的会话可逐整点回退，
+  census §3.2 的结构判据）。
+- 注：§7 的「persp 快照进 docTransform undo 信封」已被 ADR-0008 §4 的 PerspComponent
+  升格取代（信封机制退役，remap 走组件记账）——此为落地形态更替，语义（undo 同步还原）不变。

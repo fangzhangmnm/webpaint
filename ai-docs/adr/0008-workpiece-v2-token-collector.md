@@ -65,7 +65,7 @@ undo = entries 倒序 swapRecord；redo = 正序再调一次（自反/对合—�
 | 项 | 归属 | why |
 |---|---|---|
 | 层树/像素/选区/浮层 | recorded | 内容本体，丢=丢画 |
-| persp | **recorded（本 ADR 升格）** | 画坐标系数据、随 doc 几何重映射；undo 不同步还原=透视静默错位（ADR-0006 实测）。持久化去向仍是 editor-state 文件——**存哪个文件与 undo 归属正交**。DocTransform 的 persp 信封机制退役 |
+| persp | **recorded（本 ADR 升格）** | 画坐标系数据、随 doc 几何重映射；undo 不同步还原=透视静默错位（ADR-0006 实测）。持久化去向仍是 editor-state 文件——**存哪个文件与 undo 归属正交**。DocTransform 的 persp 信封机制退役。**v0.8.29 扩到 VP 编辑器**（user 2026-08-10「persp也全量进undo吧，拖一次可以undo一次」——commitPreApplied 每拖一步；旧「VP 编辑不进栈」收窄 supersede，见 ADR-0006 修订记录） |
 | referenceLayerId | recorded | 影响魔棒/fill 取源=影响创作结果 |
 | PendingFill.color | recorded | user 拍板：预览换色可撤；改的是「将要落画布的东西」 |
 | active 焦点 | 不记 | 导航非创作；记了 ctrl-z 变成翻点击史（PS 同判） |
@@ -88,6 +88,10 @@ undo = entries 倒序 swapRecord；redo = 正序再调一次（自反/对合—�
 一步。收益：undo 永远不再改用户调色盘上的当前色（今日实况的别扭）。PendingFill **只收参与 undo
 时间线的操作参数**（判据同 §4），region 归 Selection（fill=选区的消费视图，ADR-0004 不动）。
 文字多色/模态编辑=已记名坑。
+> v0.8.29 落地注：「PendingFill 清」曾漏实现（C4 census §7 分歧#1 上呈，user 2026-08-10
+> 「应该清」）——现 commit 步内 clearRecorded 记账清；留在 fill 时 commit 后用刚落地的色
+> 重新 begin（导航态 re-seed）——「✓ 连续填下一块」色不丢。同批修出口错序（曾先 clear 后
+> commit → 落色错回笔刷色，行为锚钉住）。
 
 ### 7. step.hint：单闭包，非权威附注
 

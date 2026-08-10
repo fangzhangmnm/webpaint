@@ -27,7 +27,7 @@ function makeCtx() {
       setFillProvider: (fn) => { calls.provider = fn; },
       requestRender: () => { calls.requestRender++; },
       invalidateAll: () => {},
-      commitFill: () => { calls.commitFill++; return true; },
+      commitFill: (args) => { calls.commitFill++; calls.commitFillColor = args?.color; return true; },
     },
     history: {
       compound: (_w, fn) => { try { fn(); return { ok: true }; } catch (e) { return { ok: false, msg: String(e) }; } },
@@ -42,9 +42,11 @@ function makeCtx() {
         view() { return this._v; },
         begin(c) { this._v = { color: c }; },
         clear() { this._v = null; },
+        clearRecorded() { this._v = null; calls.pfClearRecorded = (calls.pfClearRecorded || 0) + 1; },
         setColorLive(c) { if (this._v) this._v = { color: c }; },
         commitPreApplied: () => {},
       },
+      selection: { commitPreApplied: () => {} },
       onChange: () => {},
     },
     state: { color: "#ff0000" },
@@ -170,6 +172,36 @@ test("[fill-mode] v0.7.38 送入填色：one-shot 携入不清选区，只生效
     sendSelectionToFill();
     eq(ctx._mode, "lasso", "无选区：不切换");
   } finally { window.removeEventListener("wp:settool", onSetTool); }
+});
+
+test("[fill-mode] v0.8.29 commit 步含 PendingFill 清（ADR-0008 §6）；留在 fill 续填 seed 不丢", () => {
+  const { ctx, calls } = makeCtx();
+  initFillMode(ctx);
+  setMode(ctx, "brush");
+  setMode(ctx, "fill");
+  setColor("#00ff00");
+  ctx.doc.selection = {};
+  commitFillNow();                         // ✓：commit + 清选区，留在 fill
+  eq(calls.commitFillColor, "#00ff00", "落地色 = seed 色");
+  eq(calls.pfClearRecorded, 1, "commit 整点内记账清 seed（user 2026-08-10「应该清」）");
+  eq(ctx.wp2.pendingFill.view().color, "#00ff00", "✓ 后 seed 用刚填的色重新起步——连续填下一块色不丢");
+  // 切出路径：commit 内清、不 re-seed（色板回笔刷色）
+  ctx.doc.selection = {};
+  setMode(ctx, "brush");
+  eq(calls.pfClearRecorded, 2, "切出 commit 同样记账清");
+  eq(ctx.wp2.pendingFill.view(), null, "切出后 seed 不复活");
+});
+
+test("[fill-mode] v0.8.29 切工具 commit 落的是 pending 色（WYSIWYG），不是笔刷色", () => {
+  const { ctx, calls } = makeCtx();
+  initFillMode(ctx);
+  setMode(ctx, "brush");
+  setMode(ctx, "fill");                    // 进 fill：seed = 笔刷色 #ff0000
+  setColor("#00ff00");                     // fill 里换色（无选区 = 换 seed）
+  ctx.doc.selection = {};                  // 圈选 → 预览挂起（预览显示绿）
+  setMode(ctx, "brush");                   // 切工具 = commit（预览所见即所落）
+  eq(calls.commitFill, 1, "切出 commit 走了一次");
+  eq(calls.commitFillColor, "#00ff00", "落地色 = 预览色（曾先清 pendingFill 后 commit → 错落笔刷色）");
 });
 
 test("[fill-mode] v0.8.24 色板 target = fill 全程：无选区改色跟到 seed（color window 退化修复）", () => {

@@ -59,8 +59,9 @@ const CAPS: Record<string, Cap> = {
   //   transform ctrlZ="history"（v0.4.7 S6，spec:214）：lift/拖动/stamp 都是栈上整点，ctrl-z 逐个回退
   //   （undo 过 lift 自然退出浮层，reconciler 收 transient）；取消浮层 = Esc/取消按钮（reject operator）。
   transform:   { canDraw: false, allowsColor: false, cursor: "none",  ctrlZ: "history",         transient: true, onToolSwitch: "apply", returnTo: null },
-  // ADR-0006 VP 编辑（crop 同款半模态）：拖消失点/参考点 gizmo；ctrl-z=取消本次编辑，点工具=apply
-  perspEdit:   { canDraw: false, allowsColor: false, cursor: "none",  ctrlZ: "abort-transient", transient: true, onToolSwitch: "apply", returnTo: null },
+  // ADR-0006 VP 编辑（crop 同款半模态）：拖消失点/参考 box gizmo；v0.8.29 ctrl-z=history
+  //   （user 2026-08-10「拖一次可以undo一次」——每拖一步入栈，undo 逐拖回退；点工具=apply）
+  perspEdit:   { canDraw: false, allowsColor: false, cursor: "none",  ctrlZ: "history",         transient: true, onToolSwitch: "apply", returnTo: null },
   crop:        { canDraw: false, allowsColor: false, cursor: "none",  ctrlZ: "abort-transient", transient: true, onToolSwitch: "apply", returnTo: null },
   adjust:      { canDraw: false, allowsColor: false, cursor: "none",  ctrlZ: "abort-transient", transient: true, onToolSwitch: "apply", returnTo: null },
 };

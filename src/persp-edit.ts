@@ -8,7 +8,10 @@
 //   · 参考 box：VP = SSoT，box 参数只是编辑会话控制面。**顶点分层**（not every vertex is equal）：
 //     A（最前角）= 整体平移不动 VP；B1/B2/B3（连 A 的三个）= 主控——精确单轴（转该轴 VP + 行程，
 //     锁地平线时 VP 沿地平线滑）；C/D（更次级）= 阻尼 GN 全参数微调。
-//   · 应用=保留（transient apply），取消/ctrl-z=回快照。工具条 = lasso 图标风格（重置/锁/✓/✕）。
+//   · 退出恒 apply；**ctrl-z = history（v0.8.29，user 2026-08-10「persp也全量进undo吧，
+//     拖一次可以undo一次」）**：每次拖动/重置/锁切换 = 一步（PerspComponent.commitPreApplied，
+//     拖动期 desk 直写当 transient 预览、pointerup 收口），undo 逐拖回退——supersede ADR-0006
+//     「取消/ctrl-z=回快照」（快照回滚从未实现，census §7 分歧#2 裁决）。工具条 = 重置/锁/✓/✕。
 import { desk } from "./workbench-state.ts";
 import { clampPixelCenter } from "./shape-geometry.ts";
 import { defaultVpsForMode, boxAxesForMode, boxCorners, solveBoxDrag, BOX_EDGES, ISO_AXES } from "./perspective-frame.ts";
@@ -73,6 +76,20 @@ export function perspEditActive(): boolean { return _active; }
 
 function _snap(p: Vp): Vp { return { x: clampPixelCenter(p.x), y: clampPixelCenter(p.y) }; }
 
+// ---- 拖动记账（v0.8.29「拖一次可以undo一次」）----
+// pointerdown 拍 before 快照 → 拖动期 desk 直写当 transient 预览 → pointerup 持 before 收口一步。
+// 净变化为零（点一下就松）由 sealRecord JSON 比对兜，不占步。
+let _dragBefore: unknown = null;
+function _dragStart(): void {
+  if (_ctx) _dragBefore = _ctx.wp2.persp.view();   // view = 深拷贝快照
+}
+function _dragCommit(): void {
+  if (!_ctx || _dragBefore == null) return;
+  const before = _dragBefore;
+  _dragBefore = null;
+  _ctx.history.withPoint("perspEdit", {}, () => _ctx!.wp2.persp.commitPreApplied(before));
+}
+
 // VP 手柄拖拽写回（lockHorizon：拖 VP1 带着 VP2 的 y；拖 VP2 只能沿地平线滑）
 function _moveTo(kind: Kind, screenX: number, screenY: number) {
   const { board } = _ctx!;
@@ -96,12 +113,14 @@ function _mkHandle(kind: Kind, label: string): HTMLElement {
   el.addEventListener("pointerdown", (e: PointerEvent) => {
     e.preventDefault(); e.stopPropagation();
     el.setPointerCapture(e.pointerId);
+    _dragStart();
     const onMove = (ev: PointerEvent) => _moveTo(kind, ev.clientX, ev.clientY);
     const onUp = (ev: PointerEvent) => {
       el.releasePointerCapture(ev.pointerId);
       el.removeEventListener("pointermove", onMove);
       el.removeEventListener("pointerup", onUp);
       el.removeEventListener("pointercancel", onUp);
+      _dragCommit();   // 一次拖动 = 一步（no-op 不占步）
     };
     el.addEventListener("pointermove", onMove);
     el.addEventListener("pointerup", onUp);
@@ -167,6 +186,7 @@ function _syncHandles() {
       el.addEventListener("pointerdown", (e: PointerEvent) => {
         e.preventDefault(); e.stopPropagation();
         el!.setPointerCapture(e.pointerId);
+        _dragStart();
         const onMove = (ev: PointerEvent) => _boxDragTo(k, ev.clientX, ev.clientY);
         const onUp = (ev: PointerEvent) => {
           el!.releasePointerCapture(ev.pointerId);
@@ -174,6 +194,7 @@ function _syncHandles() {
           el!.removeEventListener("pointerup", onUp);
           el!.removeEventListener("pointercancel", onUp);
           _snapVpsToGrid();   // 拖完把 VP 钉回像素中线
+          _dragCommit();      // snap 含进同一步
         };
         el!.addEventListener("pointermove", onMove);
         el!.addEventListener("pointerup", onUp);
@@ -330,7 +351,8 @@ function _resetDefaults() {
   _syncUi();
 }
 
-// 退出恒 apply（user：VP setting 是 editor state 不进 undo history → 没有 commit/cancel）
+// 退出恒 apply（无 cancel——反悔走 ctrl-z 逐拖回退，v0.8.29「拖一次可以undo一次」；
+// 旧注「VP setting 不进 undo history」已 supersede）
 function _finish() {
   if (!_active) return;
   _active = false;
@@ -368,8 +390,12 @@ export function initPerspEdit(ctx: AppContext): void {
   _layer = document.getElementById("perspHandles")!;
   _lockBtn = document.getElementById("perspLockBtn")!;
   _lockUse = document.getElementById("perspLockUse") as unknown as SVGUseElement;
-  document.getElementById("perspResetBtn")!.addEventListener("click", () => _resetDefaults());
+  // 重置/锁切换也是一步（整包记账：锁切换可能带 vp2 吸附地平线，撕开记会账目不齐）
+  document.getElementById("perspResetBtn")!.addEventListener("click", () => {
+    _dragStart(); _resetDefaults(); _dragCommit();
+  });
   _lockBtn.addEventListener("click", () => {
+    _dragStart();
     const g = desk.persp;
     g.lockHorizon = !g.lockHorizon;
     if (g.lockHorizon) {
@@ -377,6 +403,7 @@ export function initPerspEdit(ctx: AppContext): void {
       if (vp1 && vp2) _set("vp2", { x: vp2.x, y: vp1.y });
     }
     _syncUi();
+    _dragCommit();
   });
   // 形状笔透视区里的入口（再点 = 退出，恒 apply；点其他工具 = onToolSwitch apply 同款）
   document.getElementById("shapeVpEditBtn")?.addEventListener("click", () => {
@@ -388,6 +415,12 @@ export function initPerspEdit(ctx: AppContext): void {
   ctx.board.onViewportChange = () => { prev?.(); if (_active) _syncHandles(); };
   // 换文档：收 UI（状态本就 live 在 desk，新 doc 已 Unserialize）
   window.addEventListener("wp:applyEditorState", () => { if (_active) _finish(); });
+  // undo/redo 盖回整包（persp entry 应用）→ 工作引用重灌 + 手柄重摆（ctrlZ=history 后编辑中可撤）
+  ctx.wp2.onChange((e) => {
+    if (e.kind !== "persp" || !_active) return;
+    _box = _loadBox() ?? _defaultBox();
+    _syncUi();
+  });
   // gizmo：淡地平线 + VP 圈 + box 棱线（编辑模式）；绘图态 showGizmo 开 → 只显 VP+地平线
   ctx.board.setPerspGizmoProvider(() => {
     const g = desk.persp;

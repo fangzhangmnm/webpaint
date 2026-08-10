@@ -25,8 +25,11 @@ export declare class PerspComponent implements CollectorComponent {
     remapForDocTransform(f: (p: PerspPt) => PerspPt, opts?: {
         unlockHorizon?: boolean;
     }): void;
-    /** 整包换配置（token 写；VP 编辑可撤化的预留口——现无调用方，persp-edit 仍 desk 直写）。 */
+    /** 整包换配置（token 写；载入/程序化换配置用——persp-edit 交互走 commitPreApplied）。 */
     set(cfg: unknown): void;
+    /** 记账写（pre-applied）：VP 编辑器一次拖动收口——desk 已被 transient 直写到位，
+     *  before = 拖动起点快照（persp-edit pointerdown 拍）。净变化为零由 sealRecord 兜（不占步）。 */
+    commitPreApplied(before: unknown): void;
     sealRecord(): RecordData | null;
     swapRecord(data: RecordData): RecordData;
     recordBytes(data: RecordData): number;

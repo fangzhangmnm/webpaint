@@ -2,11 +2,13 @@
 // substrate = desk 的 persp 配置（desk.persp——持久化仍进 desk 文件：**存哪个文件与
 // undo 归属正交**，ADR-0008）；组件经注入 host 读写，零 desk 内部知识。
 //
-// 记账范围（刻意收窄）：**只有 remapForDocTransform**（裁剪/翻转/旋转/偏移/重采样的 VP 重映射，
-// ADR-0006）走 token 记账——doc 几何 undo 时透视随同 step 还原（旧 docTransform persp 信封退役）。
-// VP 编辑器（persp-edit）仍是 desk 直写不进栈：user 拍板「VP setting 是 editor state 不进
-// undo history」（persp-edit.ts _finish 注）在案，ADR-0008 升格解决的是「undo 不同步还原 =
-// 透视静默错位」，不改这条。将来要让 VP 编辑可撤，走 set()（已留口，token 写）。
+// 记账范围（v0.8.29 扩到全量，user 2026-08-10「persp也全量进undo吧，拖一次可以undo一次」）：
+//   - remapForDocTransform（裁剪/翻转/旋转/偏移/重采样的 VP 重映射，ADR-0006）——doc 几何
+//     undo 时透视随同 step 还原（旧 docTransform persp 信封退役）。
+//   - commitPreApplied（VP 编辑器 persp-edit）：拖动期间 desk transient 直写当预览，
+//     pointerup 持 before 快照收口一步——每次拖动/重置/锁切换 = 一步，ctrl-z 逐拖回退。
+//     旧「VP 编辑不进栈」收窄（曾引 persp-edit _finish 注）随此 supersede；ADR-0006 的
+//     「取消=回快照」同被 supersede（快照回滚从未实现，census §7 分歧#2 的裁决）。
 //
 // record = { v: 整包深拷贝快照 }；swap = 快照互换自反。undo docTransform 会把 remap 之后的
 // desk 直写一并盖回（与旧信封 wholesale restore 行为一致）。
@@ -46,11 +48,18 @@ export class PerspComponent implements CollectorComponent {
     this._host.remap(f, opts);
   }
 
-  /** 整包换配置（token 写；VP 编辑可撤化的预留口——现无调用方，persp-edit 仍 desk 直写）。 */
+  /** 整包换配置（token 写；载入/程序化换配置用——persp-edit 交互走 commitPreApplied）。 */
   set(cfg: unknown): void {
     this._wp._componentWrite(this);
     if (!this._origin) this._origin = { v: this._host.snapshot() };
     this._host.restore(cfg);
+  }
+
+  /** 记账写（pre-applied）：VP 编辑器一次拖动收口——desk 已被 transient 直写到位，
+   *  before = 拖动起点快照（persp-edit pointerdown 拍）。净变化为零由 sealRecord 兜（不占步）。 */
+  commitPreApplied(before: unknown): void {
+    this._wp._componentWrite(this);
+    if (!this._origin) this._origin = { v: before };
   }
 
   // ── CollectorComponent ──
