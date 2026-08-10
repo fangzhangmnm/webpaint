@@ -258,7 +258,39 @@
   ⑤**决定论 encode**：ora zip entry 时间戳钉死 1980 epoch（同内容→同字节；提案 §3 已回写）。
   验收：tsc 0、**1221 绿**（+12：工厂 3/逐字节 round-trip 3+sidecar/exportImage 响亮失败 2/双 backend
   并发 2/dispose/onChange）、build 全 lint、GL smoke PASSED。无新真机锚（搬家+新增面，无 UI 行为
-  变化；「iCCP PNG 导入照常」由回退移壳覆盖，属既有导入锚）。**C7 剩余（后棒）**：app.ts 壳迁移
-  消费 WebPaintBackend（app-context 39 键瘦版落点）、B2 store 窄接口、多 tab GPU tile arena 归 Port
-  + per-tenant 合成注入、psd open 路由（psd.ts 移 backend）、无令牌像素写 throw 硬化（census §3.6）、
-  frontend toolkit .h、filter 档口 wire 细节。
+  变化；「iCCP PNG 导入照常」由回退移壳覆盖，属既有导入锚）。~~**C7 剩余（后棒）**~~（↓ v0.8.34-38
+  清账完毕）。
+- **C7 完 ✅ v0.8.34-38（2026-08-10）——后棒五片清账**：
+  ①**v0.8.34 壳迁移**：app.ts 消费 `WebPaintBackend.blank({2048×2048}, inject)`——组合根不再自装配
+  history/wp2/view/layers（唯一装配根 = backend，UNDO 配额归它）；壳编排经 `inject.hooks`
+  （onHistChange→wp:histchange / onApplied→面板+重绘 / onUnrecoverable→banner / status→状态栏）+
+  persp host 注入；ctx 加 `backend` 键（五引擎键保留 = 协作面直取投影，收敛留后续骑士）；换文档仍走
+  wp2.load（tab 管理器「弃旧建新」= embedding 纪元）。行为不变纯搬家。
+  ②**v0.8.35 psd 实勘改判**：全仓**无 psd 解码器**——psd 是只写格式（handoff 原「psd open 路由」
+  的前提不成立）；编码器 psd.ts 物理迁 `src/backend/psd.ts`（已零 canvas），open 对 8BPS 响亮失败
+  =终态、错误文案改诚实（「转存 .ora/.png 再导入」）。
+  ③**v0.8.36 无令牌像素写硬化**（census §3.6）：`_onTileSwap` 静默口收死——suspend 白名单窗放行 →
+  他家 backend 放行 → **无令牌 + 有主（我的 substrate）= 响亮 throw**；无主临时件（替身/scratch/
+  内核直测）令牌外照旧放行；dispose/驱逐/换血路先摘戳（`_disposeOwned`——record 驱逐的逐格 notify
+  发生在令牌外，属 collector 自家授权释放）。测试种子写全量迁显式声明态：`test/helpers.mjs seedWrite`
+  （经 `_collectorOwner` 戳开 suspend 窗）+ 纯引擎 rig 三文件（shape-brush/brush-collect-stamps/
+  layer-cap-budget）整体声明 scratch 域；gl-smoke harness mergedown fill 同改。+3 负/正锚。
+  ④**v0.8.37 B2 裁定落地**：app 消费面实测**只有四面**（file/files/collection/encryption，其余 grep
+  命中皆旧注释）→ `AppStorePort = Pick<Store, 四面>` 落接缝 app-store.ts（**派生**自库类型 SSoT，
+  零镜像零 drift）；AppContext.store 换窄 Port；Collection/EncryptedBlob 类型经接缝转口（app-prefs/
+  app-state 的 type-only import 擦除、不成 i18n 运行时环）。**全量手写镜像裁定不做**——headless 分层
+  = WebPaintBackend 零 store 依赖，「物理删除仍编译」无受益方（epoch-handoff §B2 的怀疑成立）。
+  ⑤**v0.8.38 per-tenant 合成注入**：backend/LayersFace 各持 `inject.compositorBytes`
+  （encodeOra/exportImage/mergeDown），缺省回落 doc-render 全局接缝（壳单租户语义不变；psd/session
+  等壳模块继续吃全局面）；app.ts 注入 board 面 thunk；双 backend 各持己面锚。**arena 归 Port 推迟
+  C8**：接口形状与 SoftGl2Port 同批设计（§6.3 不提前固化）；多 backend 记账串账已由多播观察者+
+  所有权戳解决，GPU 配额的租户记账等第二真租户（C8 mock multiplayer/embedding）。
+  ⑥收尾：filter 档口 wire 两条 pin 进接口文件（互斥 = per-backend 令牌墙，跨租户互斥结构上不存在；
+  超时 = 进程内无超时/远程断联即 cancel，数值随 C8 transport 定）；**frontend toolkit .h** 落
+  `20260810-frontend-toolkit-h.md`（策展索引，签名真值=api/；物理搬 toolkit/ 归 UI/E 骑士）。
+  验收：tsc 0、**1225 绿**（1221+3 硬化锚+1 per-tenant 锚）、build 五 lint 全过、GL smoke PASSED。
+  **真机锚（追加真机批）**：画/擦/液化/形状笔/调整/变换/填色/裁剪全流程无「无令牌像素写」红 banner
+  （硬化误伤探测——任何一处弹了就是抓到真 bug 或白名单漏登记）；开画→画→存→图库缩略图/导出
+  PNG·JPG/mergedimage 观感如旧（壳迁移+per-tenant 注入回归）；`?nostore` 打开照常能画能导出
+  （B2 窄 Port 不改运行时）。**下一片 = C8**（SoftGl2Port + MCP + 测试分级；`gl` 裸口收编 + arena
+  归 Port 接口同批设计）。

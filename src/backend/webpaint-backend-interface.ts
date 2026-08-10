@@ -88,6 +88,10 @@ export interface WebPaintBackendInterface {
   strokeEnd(id: StrokeId): boolean;                         // 平滑+栅格+bake+记账全在 backend；false=no-op
   strokeCancel(id: StrokeId): void;
   // filter 档（参数重算；原型 = filters-adjust surrogate 逐字升格）
+  // wire 裁定（C7，补 §6.3 留白的两条）：①互斥归属 = **per-backend**——每 backend 自持 workpiece
+  //   单令牌墙，租户即独立 doc，跨租户互斥结构上不存在（多 tab 各锁各的）。②session 超时：进程内壳
+  //   无超时（收口权在 UI，挂任意长人类时间 = adjust 现语义）；远程面（MCP/Worker）断联 = cancel
+  //   （interrupt=cancel 家规）——具体心跳/超时值随 C8 transport 一起定，此处只 pin 语义不 pin 数值。
   filterBegin(leafId: number, filterId: string): FilterSessionId;
   filterSetParams(id: FilterSessionId, params: Record<string, unknown>): void;
   filterCommit(id: FilterSessionId): boolean;               // false = no-op

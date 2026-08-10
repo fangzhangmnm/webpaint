@@ -130,6 +130,19 @@ export interface WebPaintBackendInterface {
 > 已验收：node 无 GL open→指令→undo→encode **逐字节** round-trip + 双 backend 并发（tile 换手观察者
 > 单槽→多播 + tileset 所有权戳）+ dispose/onChange，12 锚。未接（响亮 throw 占位）：stroke/filter
 > 进程内档口（C8 栅格域）、psd open 路由、per-tenant 合成注入 + GPU tile arena 归 Port（C7 后棒）。
+>
+> **C7 后棒落地回写（v0.8.34-38）**：①**壳迁移完成**——app.ts 消费 WebPaintBackend.blank()（组合根不再
+> 自装配 history/wp2/view/layers；壳编排经 `inject.hooks`：onHistChange/onApplied/onUnrecoverable/status，
+> persp host 同注入；ctx 加 backend 键，doc/history/layers/wp2/layerTiles 五键 = backend 协作面直取投影）。
+> ②**psd 路由实勘改判**：全仓无 psd 解码器——psd 是**只写格式**（编码器迁 `backend/psd.ts`）；open 对
+> 8BPS 响亮失败是**终态**非待接路由（导入 psd = 新功能另立项）。③**无令牌像素写硬化落地**（census §3.6）：
+> 有主 substrate 令牌墙外换手 = throw；无主临时件放行；dispose/驱逐路先摘戳；测试种子写迁显式声明态。
+> ④**B2 裁定落地**：AppStorePort = Pick<Store, file|files|collection|encryption>（派生窄 Port，四面实测）；
+> 全量手写镜像**裁定不做**（headless=WebPaintBackend 零 store 依赖，「物理删除仍编译」无受益方，镜像=drift 源）。
+> ⑤**per-tenant 合成注入落地**：backend/LayersFace 各持 `inject.compositorBytes`（缺省回落全局接缝=壳单租户）；
+> **GPU tile arena 归 Port 推迟 C8**——接口形状与 SoftGl2Port 同批设计（§6.3 不提前固化；多 backend 记账
+> 串账已由多播观察者+所有权戳解，arena 配额记账等第二真租户）。⑥filter 档口 wire 两条已 pin 进接口文件
+> （互斥 per-backend / 超时语义），toolkit .h 落 `20260810-frontend-toolkit-h.md`。
 
 - **brush rack 全库失踪 backend 照跑**：backend 只认 ResolvedBrush 快照；rack/设置/云同步 =
   frontend+store 的事。（笔刷试笔 = blank + 固定点序列 + stroke + readback，零新机制。）
