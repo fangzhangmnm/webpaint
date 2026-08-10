@@ -1,7 +1,7 @@
 import { BrushEngine } from "./brush.ts";
 import type { ClipBox } from "./shape-geometry.ts";
 import type { Family, PerspConfig, Mat3 } from "./perspective-frame.ts";
-import type { LayerSnap } from "./doc.ts";
+import type { ViewLeafSnap as LayerSnap } from "./workpiece/painting-view.ts";
 import type { ViewLeaf } from "./workpiece/painting-view.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
 import type { Pt } from "./shape-geometry.ts";

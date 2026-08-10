@@ -2,8 +2,9 @@ import { LayerPixels, type PixelsSnapshot } from "../tiles/tile-layer.ts";
 import type { PaintingWorkpiece } from "./painting-workpiece.ts";
 import type { LayerTiles } from "./layer-tiles.ts";
 import type { Selection } from "../selection.ts";
-type Bitmap = OffscreenCanvas | HTMLCanvasElement;
-type Ctx2D = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
+export declare const LAYER_HARD_CEIL = 64;
+export declare function layerByteBudget(): number;
+export declare function computeMaxLayers(currentLeafCount: number, residentBytes: number, budgetBytes?: number): number;
 export interface ViewLeafSnap {
     pixels: PixelsSnapshot;
 }
@@ -23,26 +24,20 @@ export declare class ViewLeaf {
     /** @internal 属性回灌（端口 resync 用）。 */
     _pixelsRef: number;
     private _tiles;
-    private _mat;
-    private _empty;
+    private _bounds;
     constructor(tiles: LayerTiles, id: number);
     /** 活像素（tileset 注册表解析；叶已被删时端口不再发出本对象，getter 假定 ref 有效）。 */
     get pixels(): LayerPixels;
     /** 内容版本（全局单调不复用；flat-coloring-oracle 等 (id,rev) 缓存键）。 */
     get contentRev(): number;
-    private _ensureMat;
-    /** 纯腾内存（GL 模式每帧后调；下次访问按需重建）。 */
-    releaseMaterialized(): void;
-    residentBytes(countMat: boolean): number;
-    get canvas(): Bitmap;
-    get ctx(): Ctx2D;
+    private _contentBounds;
+    residentBytes(): number;
     get bboxX(): number;
     get bboxY(): number;
     get bboxW(): number;
     get bboxH(): number;
     get width(): number;
     get height(): number;
-    editRegion(x0: number, y0: number, w: number, h: number, fn: (ctx: CanvasRenderingContext2D, ox: number, oy: number) => void): void;
     editRegionBytes(x0: number, y0: number, w: number, h: number, fn: (buf: Uint8ClampedArray, ox: number, oy: number) => void): void;
     replaceFromBytes(data: Uint8ClampedArray, ox: number, oy: number, w: number, h: number): void;
     clearAll(): void;
@@ -88,7 +83,6 @@ export declare class PaintingView {
     private _leafCache;
     private _lastRoot;
     private _memBudgetBytes;
-    private _memCountMat;
     constructor(wp: PaintingWorkpiece);
     private get _tree();
     /** 根引用身份同步：LayerTree 每写换新根 → 引用变了才重建镜像（叶按 id 复用）。 */
@@ -126,7 +120,6 @@ export declare class PaintingView {
     set selection(v: Selection | null);
     /** 换文档收尾（跨 session 不沿用选区——旧 adoptState 语义）。 */
     clearSelectionOnLoad(): void;
-    configureMemory(budgetBytes: number, countMat: boolean): void;
+    configureMemory(budgetBytes: number): void;
     get maxLayers(): number;
 }
-export {};

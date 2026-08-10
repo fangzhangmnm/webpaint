@@ -1,4 +1,4 @@
-import type { LineartPartition } from "./backend/algorithms/flat-coloring/partition.ts";
+import type { FlatColoringPartition } from "./backend/algorithms/flat-coloring/partition.ts";
 import { Selection } from "./selection.ts";
 /** 结构化最小依赖（≈ floodSelectFrom 的 mock 面）：node 直测不拖 doc.ts */
 export interface OracleSourceLayer {
@@ -8,7 +8,7 @@ export interface OracleSourceLayer {
         data: Uint8ClampedArray;
     };
 }
-export declare class LineartOracle {
+export declare class FlatColoringOracle {
     private _cache;
     private _params;
     /** 命中缓存则查表即回；否则同步重建分区（调用方自行决定要不要 busy 提示）。 */
@@ -51,8 +51,8 @@ export declare class LineartOracle {
     }, sourceLayer: OracleSourceLayer | null): {
         w: number;
         h: number;
-        keypoints: LineartPartition["keypoints"];
-        bridges: LineartPartition["bridges"];
+        keypoints: FlatColoringPartition["keypoints"];
+        bridges: FlatColoringPartition["bridges"];
     } | null;
     private _ensurePartition;
 }

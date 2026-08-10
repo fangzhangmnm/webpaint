@@ -125,9 +125,29 @@
   encodePngFromCanvas 后门从 ora/session 拔除（png-codec 里的导出函数还在，剩余消费者=0，下一棒
   顺手删）。**真机锚（追加真机批）**：存档缩略图/图库 peek/mergedimage 观感如旧；导出 PNG 透明保持、
   JPG 底色正确、含选区裁剪导出；blender 推图 POT 缩放；参考图 >2048 导入缩存。
-  **C3 剩余（下一棒接着做）**：⑥债 b——tile-layer canvas 三件套（materialize/editRegion(fn ctx)/
-  replaceFromCanvas）+ doc.ts/painting-view canvas·ctx getter 物化缓存：真写者 ≈ input.ts(7 处)/
-  selection-ops(2)/filters-adjust(2)/psd/ora/import-image 各 1，逐个迁 editRegionBytes/replaceFromBytes
-  后拆 facade（reference/board/palette 的自持屏显 canvas 是壳域合法，不在债内）；⑦死代码：doc.ts
-  PaintDoc 类（405–1152 生产零引用）、gallery-model merge 系列（仅测试引用）、survey §3 化石注释；
-  ⑧符号改名：LineartOracle→FlatColoringOracle 等（持久化 key "lineart"/desk.magicWand.lineart* 一律不动）。
+  ~~**C3 剩余（下一棒接着做）**：⑥债 b、⑦死代码、⑧符号改名~~（↓ v0.8.28 收账完毕）
+- **C3 完 ✅ v0.8.28（2026-08-10）**：①**债 b 实勘比 handoff 估的小得多**——真写者早在 v0.6.39-46
+  批已字节化，剩的全是死声明/死 getter：selection-ops 剪贴板复制是唯一 `.canvas` 真读者（→
+  encodePngFromBytes 全字节）；filters-adjust/import-image/selection.ts 三处接口成员纯死（剪除）；
+  Selection 的 fromAlphaCanvas/materializeMaskCanvas 死口拆除（lasso 早走 rasterizePolygonGray8）；
+  ViewLeaf canvas/ctx/_mat 物化视图拆除，bbox= contentBounds rev-keyed 缓存，releaseMaterialized/
+  countMat 档随葬（board 双份计费分支删）；encodePngFromCanvas 后门删除。**src/ 生产面零 canvas
+  facade**；canvas trio 迁 `test/gl-smoke/canvas2d-facade.ts`（2D 参照域合法住所）。
+  ②**死代码比 handoff 估的更大**：doc.ts **物理消灭**（PaintDoc/Layer/LayerGroup/树工具/freeze
+  全系生产零引用——活面只剩预算三件迁 painting-view + LayerSnap 消费者切 ViewLeafSnap）；
+  gallery-model merge/slice/classify 系列拆除（store 库 listing/trash-merge/reconcile 已收编，
+  锚在 store 侧测试）；psd 死变量 c+死类型/cloud-thumb-cache fileSize 死参链/session-name _opts/
+  survey §3 化石注释全清；tsconfig include 死条目清扫（+补 backend/gallery/workpiece glob）。
+  ③**12 个 PaintDoc-fixture 测试迁 v2 基座**：brush-collect-stamps/shape-brush/liquify-bbox=
+  wp2 rig 换壳；doc-offset/doc-rotate=LayerPixels 内核直测（零 stub canvas，+flippedHorizontal
+  新锚）；crop-geometry=lp.cropped+resampleBytes 组合；ora-tree=OraDoc 鸭形直构；selection-tiles
+  fromLayerAlpha=LayerPixels 鸭形；layer-cap-budget=computeMaxLayers 纯函数+PaintingView 装配；
+  **doc-mergedown-clip=LayersFace.mergeDown 真路径新覆盖**（同一 setDocCompositorBytes 注入 seam，
+  旧注「mergeDown 走 GL node 不可测」不成立，clip 语义+undo 还原全锚）；freeze-encode/layer-tree
+  删除（死行为；v2 锚在 painting-workpiece/workpiece-layer-tree/layer-tree-json）。gl-smoke
+  harness 两处 PaintDoc→wp2 rig，reference-2d 类型改本地鸭形。④⑧符号改名：LineartOracle→
+  FlatColoringOracle 族（Params/Partition/DEFAULT_PARAMS/buildPartition）；`"lineart"` 持久化
+  key 与算法 id 挂钩的 lasso 公有方法名（setLineartX/lineartReady/lineartDebug）不动。
+  验收：tsc 0、**1186 绿**（1233−47：删死行为锚、增 v2 锚）、build 四 lint 全过、GL smoke
+  PASSED（含迁移后 mergedown/brushpipe 对拍）。无新真机锚（行为不变；剪贴板复制 PNG 已有
+  旧锚覆盖，属真机批既有条目）。**下一片 = C4 普查**（预览/事务违规户盘点，产物回写提案 §6）。

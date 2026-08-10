@@ -1,5 +1,5 @@
 import { Selection } from "./selection.ts";
-import { LineartOracle } from "./flat-coloring-oracle.ts";
+import { FlatColoringOracle } from "./flat-coloring-oracle.ts";
 import type { ColorMetric } from "./common/color-dist.ts";
 import { FloatingTransform } from "./floating-transform.ts";
 import type { WarpBakeFn } from "./floating-transform.ts";
@@ -48,7 +48,7 @@ export declare class LassoEngine {
     _fillGapPx: number;
     _magicAutoExpandPx: number;
     _magicAlgorithm: MagicAlgorithm;
-    _lineartOracle: LineartOracle;
+    _flatColoringOracle: FlatColoringOracle;
     _points: Point[];
     _rect: DraftRect | null;
     _magicStart: Point | null;
@@ -95,11 +95,11 @@ export declare class LassoEngine {
     lineartDebugInfo(sourceLayer: ViewLeaf | null): {
         w: number;
         h: number;
-        keypoints: import("./backend/algorithms/flat-coloring/partition.ts").LineartPartition["keypoints"];
-        bridges: import("./backend/algorithms/flat-coloring/partition.ts").LineartPartition["bridges"];
+        keypoints: import("./backend/algorithms/flat-coloring/partition.ts").FlatColoringPartition["keypoints"];
+        bridges: import("./backend/algorithms/flat-coloring/partition.ts").FlatColoringPartition["bridges"];
     } | null;
     setSampleMode(m: string): void;
-    getSampleMode(): "bicubic" | "nearest" | "bilinear" | "spline" | "rotsprite";
+    getSampleMode(): "nearest" | "bilinear" | "bicubic" | "spline" | "rotsprite";
     setConstrainSquare(on: unknown): void;
     getConstrainSquare(): boolean;
     beginPath(x: number, y: number): void;

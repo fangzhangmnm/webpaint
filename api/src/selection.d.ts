@@ -1,11 +1,10 @@
 import { type TileHandle } from "./tiles/cpu-tile-pool.ts";
-type Bitmap = OffscreenCanvas | HTMLCanvasElement;
 interface LayerLike {
     bboxX: number;
     bboxY: number;
     snapshotImageData(): LayerSnapLike;
     putImageData(docX: number, docY: number, img: ImageData): void;
-    editRegion(x0: number, y0: number, w: number, h: number, fn: (ctx: CanvasRenderingContext2D, ox: number, oy: number) => void): void;
+    editRegionBytes(x0: number, y0: number, w: number, h: number, fn: (buf: Uint8ClampedArray, ox: number, oy: number) => void): void;
 }
 interface LayerSnapLike {
     bboxX: number;
@@ -23,8 +22,7 @@ export declare class Selection {
     private _tiles;
     private _disposed;
     private _bboxMask;
-    private _maskCanvas;
-    /** 内部构造：接管 tiles 里句柄的所有权。外部走工厂（full/fromGray8Region/fromAlphaCanvas/compose…）。 */
+    /** 内部构造：接管 tiles 里句柄的所有权。外部走工厂（full/fromGray8Region/fromLayerAlpha/compose…）。 */
     private constructor();
     /** 零拷贝别名副本（句柄 acquire）。存进快照/长期持有处用它，别裸存引用。 */
     clone(): Selection;
@@ -43,8 +41,6 @@ export declare class Selection {
      * 负坐标部分裁掉（选区恒在 doc 网格 ≥0 侧；v125 起所有入口 clip 到 doc）。
      */
     static fromGray8Region(x0: number, y0: number, w: number, h: number, data: Uint8Array | Uint8ClampedArray): Selection | null;
-    /** 从「alpha = mask」的 canvas 建（lasso freehand/ellipse 的 AA 光栅器仍是 Canvas2D，vetted）。 */
-    static fromAlphaCanvas(x0: number, y0: number, canvas: Bitmap): Selection | null;
     /** 从图层 alpha 建（v0.7.38「从当前图层建选区」）。α≥128 → 255（恒二值不变量同上）；
      *  空层 → null（= 没选区）。像素走 tiles 直读口 getImageData（v0.6.39 唯一正确读法，零 canvas
      *  往返）；剪贴蒙版层按**原始** alpha（未被裁剪的），与 Procreate 一致。 */
@@ -87,12 +83,6 @@ export declare class Selection {
         h: number;
         data: Uint8Array;
     };
-    /**
-     * Canvas2D 物化（懒缓存；**只读**，别画上去）：bbox 尺寸，RGBA 白 + alpha=mask——
-     * 与旧 maskCanvas 的 drawImage 语义逐像素一致。剩余 Canvas2D 消费者（filters/浮层 lift/剪贴板）
-     * 的过渡口，S8/S9 收缩 Canvas2D 残余时一并日落。
-     */
-    materializeMaskCanvas(): Bitmap;
     applyMaskPostStroke(layer: LayerLike, preSnap: LayerSnapLike | null): void;
     fillOnLayer(layer: LayerLike, color: string): void;
     clearOnLayer(layer: LayerLike): void;
@@ -105,7 +95,7 @@ export declare class Selection {
      *   新 bbox：newX=bboxY, newY=docW-(bboxX+bboxW), newW=bboxH, newH=bboxW。
      */
     rotated90CCW(docW: number, _docH: number): Selection | null;
-    /** 重采样：mask 同步缩放 (sx,sy)。缩放器 = Canvas2D drawImage（与 layer 同一 vetted 路径）。 */
+    /** 重采样：mask 同步缩放 (sx,sy)。v0.6.46 字节版：面积平均缩放 → ≥128 二值化（选区不变量：恒 0/255）。零 canvas。 */
     resampledTo(sx: number, sy: number): Selection | null;
     /** 偏移环绕：随 doc.offsetWrap 平移。dx,dy 已归一化到 [0,W)/[0,H)。整数平移，硬搬像素。 */
     offsetWrapped(dx: number, dy: number, docW: number, docH: number): Selection | null;

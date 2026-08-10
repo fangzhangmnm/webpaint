@@ -1,6 +1,6 @@
 import type { Keypoint } from "./border.ts";
 import type { BridgeDebug } from "./closing.ts";
-export interface LineartParams {
+export interface FlatColoringParams {
     /** 白底合成亮度 ≤ 此值（0..255）判为笔画 */
     binarizeThreshold: number;
     /** 法线平滑核半径 L */
@@ -22,8 +22,8 @@ export interface LineartParams {
     /** 粗笔自动细化（腐蚀到几 px 再分析；论文 §3） */
     erode: boolean;
 }
-export declare const DEFAULT_LINEART_PARAMS: LineartParams;
-export interface LineartPartition {
+export declare const DEFAULT_FLAT_COLORING_PARAMS: FlatColoringParams;
+export interface FlatColoringPartition {
     w: number;
     h: number;
     /** 每像素区域号 1..regionCount；0 = 无区域（仅整图全笔画的病态情形） */
@@ -44,19 +44,19 @@ export interface LineartPartition {
     inkDepth: Uint8Array | null;
 }
 /** 懒补 inkDepth（v0.7.19）：Ib0 = 原始二值墨水（oracle 按同一墨线判定重新 binarize）。 */
-export declare function attachInkDepth(part: LineartPartition, Ib0: Uint8Array): void;
+export declare function attachInkDepth(part: FlatColoringPartition, Ib0: Uint8Array): void;
 /** RGBA（straight alpha）→ 二值笔画图：合成到白底的亮度 ≤ θ 判为笔画。透明 = 白 = 背景。 */
 export declare function binarizeLuma(rgba: Uint8Array | Uint8ClampedArray, w: number, h: number, threshold: number): Uint8Array;
 /** 笔画半宽估计：每个 8-连通笔画组件取「到背景距离」最大值，全体取中位数（§3）。 */
 export declare function strokeHalfWidthMedian(Ib: Uint8Array, w: number, h: number, distSq: Int32Array): number;
-/** 二值笔画图 → 分区（测试与调参入口；buildLineartPartition 的后半段）。 */
-export declare function buildPartitionFromBinary(Ib0: Uint8Array, w: number, h: number, params?: LineartParams): LineartPartition;
+/** 二值笔画图 → 分区（测试与调参入口；buildFlatColoringPartition 的后半段）。 */
+export declare function buildPartitionFromBinary(Ib0: Uint8Array, w: number, h: number, params?: FlatColoringParams): FlatColoringPartition;
 /** 总入口：RGBA → 分区。 */
-export declare function buildLineartPartition(rgba: Uint8Array | Uint8ClampedArray, w: number, h: number, params?: LineartParams): LineartPartition;
+export declare function buildFlatColoringPartition(rgba: Uint8Array | Uint8ClampedArray, w: number, h: number, params?: FlatColoringParams): FlatColoringPartition;
 /** tap 查表：(x,y) 所在区域的 tight-bbox gray8 mask（255/0）。无区域 → null。
  *  bleedPx（v0.7.17 蔓延距离，query-time 参数不碰缓存）：-1=自动（填到中线，现行为）；
  *  ≥0 = 最多陷进真墨水 bleedPx（0=像素画模式，真墨水一个不碰；虚拟闭合桥不是墨水，恒可跨）。 */
-export declare function regionMaskAt(part: LineartPartition, x: number, y: number, bleedPx?: number): {
+export declare function regionMaskAt(part: FlatColoringPartition, x: number, y: number, bleedPx?: number): {
     x: number;
     y: number;
     w: number;

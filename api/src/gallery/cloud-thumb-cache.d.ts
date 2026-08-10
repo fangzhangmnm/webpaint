@@ -24,10 +24,9 @@ export declare function invalidateCachedThumb(name: string): Promise<void>;
  *
  * @param {string} name       库的裸 session 名（item.name，无后缀 = store.file 的 key）
  * @param {string} token      新鲜度戳（cloud.lastModifiedDateTime 优先，退 size）；变 = 重拉
- * @param {number} fileSize   文件总字节（cloud.size）——供 ZIP fallback 判偏移；缺省 0 = 未知
  * @returns {Promise<{ blob: Blob, fromCache: boolean }>}
  */
-export declare function getOrFetchCloudThumb(name: string, token: string, fileSize?: number): Promise<{
+export declare function getOrFetchCloudThumb(name: string, token: string): Promise<{
     blob: Blob;
     fromCache: boolean;
 }>;

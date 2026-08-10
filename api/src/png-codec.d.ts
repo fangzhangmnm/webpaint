@@ -8,7 +8,6 @@ export declare function insertPhys(png: Uint8Array, dpi: number): Uint8Array;
 export declare function encodePngFromBytes(data: Uint8ClampedArray, w: number, h: number, opts?: {
     dpi?: number;
 }): Promise<Uint8Array>;
-export declare function encodePngFromCanvas(canvas: OffscreenCanvas | HTMLCanvasElement): Promise<Uint8Array>;
 /** PNG 字节 → straight RGBA。主路 UPNG（全格式、零 canvas、零 premult 损）；
  *  iCCP 色彩配置 / 解码失败 → canvas 回退（安全网，永不删——数据安全 >> 纯度）。 */
 export declare function decodePngToBytes(bytes: Uint8Array | Blob): Promise<RgbaPlane>;

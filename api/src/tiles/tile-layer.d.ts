@@ -49,13 +49,4 @@ export declare class LayerPixels {
     private _setTileBuf;
     private _releaseAll;
 }
-type Bitmap2D = HTMLCanvasElement | OffscreenCanvas;
-export declare function materialize(lp: LayerPixels, tight?: boolean): {
-    canvas: Bitmap2D;
-    ox: number;
-    oy: number;
-} | null;
 export declare function editRegionBytes(lp: LayerPixels, rx0: number, ry0: number, rw: number, rh: number, fn: (buf: Uint8ClampedArray, ox: number, oy: number) => void): void;
-export declare function editRegion(lp: LayerPixels, rx0: number, ry0: number, rw: number, rh: number, fn: (ctx: CanvasRenderingContext2D, ox: number, oy: number) => void): void;
-export declare function replaceFromCanvas(lp: LayerPixels, srcCanvas: CanvasImageSource, ox: number, oy: number, w: number, h: number): void;
-export {};
