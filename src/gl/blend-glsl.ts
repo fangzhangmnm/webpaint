@@ -9,11 +9,10 @@
 // 约定：bfn(Cb,Cs) 在**直值**(unpremultiplied, [0,1]) 上算，逐通道。源/背景的预乘与合成在主 shader。
 
 // 我们支持的 12 个 canvas blend mode（值即 globalCompositeOperation / layer.mode）。
-export const BLEND_MODES = [
-  "source-over", "multiply", "screen", "overlay", "darken", "lighten",
-  "color-dodge", "color-burn", "hard-light", "soft-light", "difference", "exclusion",
-] as const;
-export type BlendMode = (typeof BLEND_MODES)[number];
+// C8 起枚举+CPU 公式住 common/blend-modes.ts（SoftGl2Port 共用）；此处 re-export 保住既有消费面。
+import type { BlendMode } from "../common/blend-modes.ts";
+export { BLEND_MODES } from "../common/blend-modes.ts";
+export type { BlendMode } from "../common/blend-modes.ts";
 
 // 每模式：bfn(float Cb, float Cs) 的**函数体**（return 一个 float）。W3C §10.1 逐条。
 const BLEND_BODY: Record<BlendMode, string> = {
