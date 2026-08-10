@@ -256,10 +256,11 @@ board.setStampProvider(() => input.collectActiveStamps());
 // 形状笔视口相对几何（矩形/圆拟合沿屏幕轴；斜的 = 转视口画）——rot 注入，引擎不认识 Board。
 input.shapeBrush.setViewportRotProvider(() => board.viewport.rot);
 // strokeActiveHint：任一笔画进行中 → board 走 livePreview（直接合成，不用静态缓存）。
-//   含 brush/像素笔/liquify/filterBrush（liquify/filter/pixel 另经 setLiveSyncProvider 把活动层每帧重传 GPU）。
+//   含 brush/像素笔/liquify/filterBrush（各自的显示宿见下两条接缝 + StrokeSession 的 shadow 注入）。
 board.setStrokeActiveHint(() => input.isStrokeActive());
-// GL live-sync：原地改像素的笔（liquify/filterBrush/pixelMode）描边中要把活动层每帧重传 GPU 才显预览
-//   （buffered brush 走 GPU stamp overlay，此处返 null）。仅 GL 模式生效（board 内部门控）。
+// GL live-sync：原地改真层的笔（draw/erase pixelMode）描边中把活动层每帧重传 GPU 才显预览。
+//   buffered 笔走 GPU stamp overlay；液化/filterBrush/形状笔 pixelMode 走 stroke 替身
+//   （StrokeSession→board.setStrokeShadow，C6）——此处都返 null。仅 GL 模式生效（board 内部门控）。
 board.setLiveSyncProvider(() => input.liveMutatedLeaf());
 // 自由变换 commit 烤定走 GPU warp（board.glWarpBakeFn）；lasso 仍 GL-blind，经 provider 拿。
 input.lasso.setWarpBakeProvider(() => board.glWarpBakeFn());

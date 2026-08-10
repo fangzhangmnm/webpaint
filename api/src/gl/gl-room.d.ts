@@ -8,7 +8,7 @@ import { GLStampRasterizer } from "./gl-stamp.ts";
 import type { Stamp, StrokeShape } from "./gl-stamp.ts";
 import type { PlanNode, PlanStep, SegBuild } from "../render/render-plan.ts";
 import type { PooledFBO, FBOPrec, Gl2Port } from "../common/gl2-port.ts";
-export interface SurrogateInput {
+export interface SurrogatePlaneInput {
     layerId: number;
     bytes: {
         data: Uint8ClampedArray;
@@ -20,6 +20,11 @@ export interface SurrogateInput {
     w: number;
     h: number;
 }
+export interface SurrogateShadowInput {
+    layerId: number;
+    pixels: LayerPixels;
+}
+export type SurrogateInput = SurrogatePlaneInput | SurrogateShadowInput;
 export interface FloatInput {
     layerId: number;
     srcW: number;
@@ -122,7 +127,7 @@ export declare class GlRoom {
     handleContextRestored(): void;
     syncLeafSafe(leafId: number, pixels: LayerPixels, docW: number, docH: number): void;
     private _syncPixels;
-    syncSurrogate(s: SurrogateInput, docW: number, docH: number): void;
+    syncSurrogate(s: SurrogatePlaneInput, docW: number, docH: number): void;
     recAlive(rec: {
         byKey: Map<number, number>;
     }): boolean;

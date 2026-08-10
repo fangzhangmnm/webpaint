@@ -147,3 +147,9 @@ transform 裁定**无档口**：变换会话 = frontend UX 括号（EditMode tra
 > （transient 直写 + pointerup 收口），本质归类从「desk 累积真改」改判「参数重算 + 原子整点」
 > （transform 同款：会话无挂起事务、每 verb 一步）。fill 一行 commit 步 entries 变为
 > tiles+selection+pendingFill 三件套。
+>
+> C6 落地更新（v0.8.31）：§6.1/§6.2 已施工——液化/滤镜笔与形状笔 pixelMode 的「交互期写谁」
+> 自「真层就地写」改为「**stroke 替身叶**」（StrokeShadow，src/stroke-session.ts；显示 = surrogate
+> 影子变体增量 sync；cancel = 丢替身零回滚）；§6.4 顺手账两笔已清（液化 cancel 化石注释、
+> adjust commit 整层 clear → applyRegionDiff 只封真变 tile）。§3.4 的宿②③中，真层就地写只剩
+> draw/erase pixelMode（stroke 档合法写）；魔棒（§6.3）仍待迁。

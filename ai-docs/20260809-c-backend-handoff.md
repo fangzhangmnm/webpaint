@@ -197,3 +197,32 @@
   **Gl2Port 动词面全量收编（§6.3 点名 C5/C8）本片未动**——C5 没碰 gl/，排 C8。
   **下一片 = C6 违规户迁移**（液化第一户笔内替身化 → 魔棒拖选、形状笔 pixelMode 跟上；
   census §6 施工单是现成情报，行为锚先迁后拆）。
+- **C6 前半 ✅ v0.8.31（2026-08-10）——户1 液化/滤镜笔 + 户2 形状笔 pixelMode**：
+  ①**StrokeShadow 替身叶落 `src/stroke-session.ts`**：像素 = 真叶零拷贝快照克隆（tile 句柄
+  共享），呈现 ViewLeaf 引擎读写面（bbox/getImageData/putImageData/editRegionBytes/snapshot 系
+  ——引擎零改动）；session 五参改 preview 三态（overlay/livesync/shadow），`session.target` =
+  引擎写靶。**描边期真层零写**；End = 句柄 diff（CoW：id 不变⇔没写过）putTile 落账真层——
+  undo 包 = 引擎真触过的 tile 集（与旧 in-place 扣押集逐 tile 相同）+ 删格（被擦空）写透明
+  回收；Cancel = 丢替身零回滚。替身自身换手被 collector 扣押但 seal 作废（layer-tiles 既有
+  「解析不到 layerId 的实例」机制，头注就是为临时实例留的——workpiece 零改动）。
+  ②**显示 = surrogate 影子变体**：SurrogateInput 拆 Plane/Shadow 联合（gl-room），render-tree/
+  raster-service 按 `"pixels" in surrogate` 分派——影子走 syncLeafSafe **per-tile 增量上传**
+  （未变 tile 句柄同真叶 → GPU 桥去重免费；对比 adjust 平面替身全 bbox 重传）；吸管
+  pickColor 同路 WYSIWYG；markDocDirty 门补 `!_strokeShadow`（段缓存 sb0 承诺不破）。
+  board.setStrokeShadow 开关，接 StrokeSessionDeps.setShadow（deps 第七点，board 注入）。
+  ③**接线**：filterBrush（液化+锐化模糊）与形状笔 pixelMode → "shadow"；draw/erase pixelMode
+  维持 livesync（stroke 档合法的令牌内真层写，提案 §6.1——**非违规户不迁**）；buffered 照旧
+  overlay。形状笔 preSnap-restore/cancel 双保险退役成无害冗余（restore 落在替身上）。
+  ④**顺手账（census §6.4/§7.3）**：液化 cancelStroke v1「PixelEdit abort」化石注释清；adjust
+  commit `replaceFromBytes`（整层 clear+重写）→ `applyRegionDiff`（逐 tile memcmp 只封真变
+  tile，undo 包 = 实际改动，字节逐位同旧）；filters.ts BrushLayer 死 `ctx` 声明剪除。
+  ⑤ADR-0008 后果节补 C6 落地注；census 尾注更新。验收：tsc 0、**1209 绿**（+8：替身生命周期
+  5 锚=真层零写/落账一步/cancel 无痕/no-op/删格回收 + finalize 次序 + 液化全程替身集成 2 锚
+  =字节与 in-place 逐位一致/cancel 逐位不变）、build 五 lint 全过、GL smoke PASSED。
+  **真机锚（追加真机批）**：液化推/收/胀/旋手感与 v0.8.30 无差（含选区边界三模式、采样核
+  切换）；液化/模糊锐化描边中二指转手势 = 无痕取消（此前靠 collector 回滚，现在丢替身）；
+  形状笔像素模式拖拽预览如旧、Esc/切子工具取消无痕；调整面板（HSV 等）Apply 后 undo 正常。
+  **偏差记录**：参考窗 live 镜像（wp:docpixeldirty 消费者）在液化/形状笔像素描边中显笔前内容、
+  抬笔跟上（与 adjust 面板预览同款既有语义——compositeOnce 导出路径不传 surrogate）。
+  **C6 剩余 = 户3 魔棒拖选**（census §6.3 两候选路现场定）+ 液化 cancel UI 入口（UX 判断，
+  留人类拍板）。

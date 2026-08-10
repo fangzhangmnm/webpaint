@@ -21,8 +21,8 @@ function rig() {
   const undo = new UndoStack({ maxQuotaBytes: 1 << 30 });
   const wp2 = new PaintingWorkpiece({ undo, tree: { width: 64, height: 64 }, onTokenLeak: () => {} });
   const doc = new PaintingView(wp2);
-  const r = { undo, wp2, doc, layer: doc.layers[0], committed: [], gpuCommit: false, selection: null };
-  // 注入面 = input._strokeDeps 同形（commitStamps/invalidate 换 fake——GPU 不在 node）
+  const r = { undo, wp2, doc, layer: doc.layers[0], committed: [], gpuCommit: false, selection: null, shadow: null };
+  // 注入面 = input._strokeDeps 同形（commitStamps/invalidate/setShadow 换 fake——GPU/board 不在 node）
   r.deps = {
     begin: (label) => wp2.begin(label),
     tokenChanged: (id) => wp2.layerTiles.tokenChanged(id),
@@ -30,6 +30,7 @@ function rig() {
     getSelection: () => r.selection,
     commitStamps: (cs) => { r.committed.push(cs); return r.gpuCommit; },
     invalidate: () => {},
+    setShadow: (layerId, pixels) => { r.shadow = (layerId != null && pixels) ? { layerId, pixels } : null; },
   };
   _rigs.push(r);
   return r;
@@ -42,7 +43,7 @@ describe("stroke-session · 事务生命周期（一笔=一令牌=一步）", ()
   it("pixel 笔一笔 = 一步 undo；undo 还原像素", () => {
     const r = rig();
     const eng = new BrushEngine();
-    const s = new StrokeSession(r.deps, eng, r.layer, SPEC, true);
+    const s = new StrokeSession(r.deps, eng, r.layer, SPEC, "livesync");
     eng.beginStroke(r.layer, pixelBrush(), 8, 8, 1.0, "brush");
     s.extend(30, 8, 1.0, null);
     assert(r.layer.sampleAt(8, 8)[3] > 0, "描边中像素已就地落层");
@@ -59,7 +60,7 @@ describe("stroke-session · 事务生命周期（一笔=一令牌=一步）", ()
   it("cancel 无痕：像素回滚 + 不占步（interrupt=cancel 家规）", () => {
     const r = rig();
     const eng = new BrushEngine();
-    const s = new StrokeSession(r.deps, eng, r.layer, SPEC, true);
+    const s = new StrokeSession(r.deps, eng, r.layer, SPEC, "livesync");
     eng.beginStroke(r.layer, pixelBrush(), 8, 8, 1.0, "brush");
     s.extend(30, 8, 1.0, null);
     assert(r.layer.sampleAt(8, 8)[3] > 0, "描边中像素已落");
@@ -72,13 +73,13 @@ describe("stroke-session · 事务生命周期（一笔=一令牌=一步）", ()
   it("单令牌墙：上一 session 未收口 → 第二个 begin 响亮拒绝（throw），收口后放行", () => {
     const r = rig();
     const engA = new BrushEngine();
-    const sA = new StrokeSession(r.deps, engA, r.layer, SPEC, true);
+    const sA = new StrokeSession(r.deps, engA, r.layer, SPEC, "livesync");
     engA.beginStroke(r.layer, pixelBrush(), 8, 8, 1.0, "brush");
     let threw = false;
-    try { new StrokeSession(r.deps, new BrushEngine(), r.layer, SPEC, true); } catch { threw = true; }
+    try { new StrokeSession(r.deps, new BrushEngine(), r.layer, SPEC, "livesync"); } catch { threw = true; }
     assert(threw, "开着期间第二个 begin 必须 throw（不排队不静默）");
     sA.cancel();
-    const sB = new StrokeSession(r.deps, new BrushEngine(), r.layer, SPEC, true);   // 收口后可再开
+    const sB = new StrokeSession(r.deps, new BrushEngine(), r.layer, SPEC, "livesync");   // 收口后可再开
     sB.cancel();
     assert(true, "cancel 后新 begin 放行");
   });
@@ -88,7 +89,7 @@ describe("stroke-session · 事务生命周期（一笔=一令牌=一步）", ()
     r.gpuCommit = true;   // 假 GPU：报告「已 commit + 选区已裁」
     r.selection = Selection.fromGray8Region(0, 0, 32, 64, new Uint8Array(32 * 64).fill(255));
     const eng = new BrushEngine();
-    const s = new StrokeSession(r.deps, eng, r.layer, SPEC, false);
+    const s = new StrokeSession(r.deps, eng, r.layer, SPEC, "overlay");
     eng.beginStroke(r.layer, resolveBrush({ size: 8, color: "#3399ee", spacing: 0.5 }), 8, 8, 1.0, "brush");
     s.extend(30, 8, 1.0, null);
     s.extend(50, 8, 1.0, null);
@@ -103,7 +104,7 @@ describe("stroke-session · 事务生命周期（一笔=一令牌=一步）", ()
     const r = rig();
     r.selection = Selection.fromGray8Region(0, 0, 32, 64, new Uint8Array(32 * 64).fill(255));   // 左半
     const eng = new BrushEngine();
-    const s = new StrokeSession(r.deps, eng, r.layer, SPEC, true);
+    const s = new StrokeSession(r.deps, eng, r.layer, SPEC, "livesync");
     eng.beginStroke(r.layer, pixelBrush(), 8, 8, 1.0, "brush");
     s.extend(56, 8, 1.0, null);   // 横穿选区边界（x=32）
     assert(r.layer.sampleAt(50, 8)[3] > 0, "描边中选区外也落了（pixel 无 live 裁剪）");

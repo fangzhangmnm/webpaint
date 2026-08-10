@@ -25,7 +25,12 @@ import type { BlendMode } from "./blend-glsl.ts";
 
 // ---- board 输入（原 render-tree-gl 同名接口原样迁入） ----
 // v0.6.39 去 canvas 化：替身 = straight 字节平面（filters-adjust 的预览 buffer 直传，就地更新）。
-export interface SurrogateInput { layerId: number; bytes: { data: Uint8ClampedArray; w: number; h: number }; bx: number; by: number; w: number; h: number; }
+export interface SurrogatePlaneInput { layerId: number; bytes: { data: Uint8ClampedArray; w: number; h: number }; bx: number; by: number; w: number; h: number; }
+// C6 影子变体：替身 = 整个 LayerPixels（stroke 档替身叶，src/stroke-session.ts StrokeShadow）。
+//   未变 tile 与真叶共享句柄 → syncLeafSafe 走 per-tile 增量上传（对比平面变体的全 bbox 重传）；
+//   三面预览旗语义不变（surrogate = 活动层换源显示，吸管/合成 WYSIWYG 同待遇）。
+export interface SurrogateShadowInput { layerId: number; pixels: LayerPixels; }
+export type SurrogateInput = SurrogatePlaneInput | SurrogateShadowInput;
 
 // v0.6.38 全 typed array（零 canvas premult 往返）：u8Plane = straight 源字节（原尺寸，或 rotsprite
 // 的 EPX 放大平面——此时 srcW/srcH 已是放大尺寸、mode=0）；mode 3 用 splinePlane（RGBA16F）。
@@ -174,7 +179,9 @@ export class GlRoom {
     rec.gen = gen;
   }
 
-  syncSurrogate(s: SurrogateInput, docW: number, docH: number): void {
+  // 平面替身（adjust 面板）：临时 LayerPixels 全 bbox 重建重传。影子替身走 syncLeafSafe（增量），
+  //   分派在消费者侧（render-tree/raster-service 的 "pixels" in surrogate 分支）。
+  syncSurrogate(s: SurrogatePlaneInput, docW: number, docH: number): void {
     const tmp = new LayerPixels(docW, docH);
     tmp.putRegion(s.bx, s.by, s.w, s.h, s.bytes.data);
     this.syncLeafSafe(s.layerId, tmp, docW, docH);

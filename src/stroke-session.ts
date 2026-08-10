@@ -9,21 +9,34 @@
 // 令牌开合 / GPU commit / 选区 finalize / 记账编排全在这（令牌墙 fail-loud 兜底）。
 // begin 即开令牌（单令牌墙：第二个 begin 会被 workpiece throw——响亮拒绝，不排队不静默）；
 // 引擎 beginStroke 由调用方随后自调（各引擎 begin 签名不同：brush 8 参 / filterBrush 吃
-// Filter+params+selection）；begin 失败调用方必须 cancel() 收口令牌，否则后续 begin 全被挡死。
+// Filter+params+selection）；**引擎的写靶 = session.target**（shadow 模式下是替身叶，真叶只在
+// 收口一刻被令牌写）；begin 失败调用方必须 cancel() 收口令牌，否则后续 begin 全被挡死。
 //
-// deps 全函数面：正好是原 input._endStroke/_abortStroke 摸过的六个点，不多不少。
-// commitStamps/invalidate 是屏显侧（board）的注入——终态归 backend 自持（Gl2Port），C7/C8 收编。
+// 预览宿三态（C6，census §3.4「预览有三种宿」）：
+//   overlay  —— buffered 笔（brush/形状笔）：描边活在 smoother/stamps，GPU overlay 显示，零 substrate 写。
+//   livesync —— draw/erase pixelMode：stroke 档合法的令牌内真层就地写（§6.1），live-sync 每帧增量重传。
+//   shadow   —— 液化/filterBrush/形状笔 pixelMode：引擎写**替身叶**（StrokeShadow，零拷贝快照起步，
+//               「预览是引擎自持物」成立）；显示走 surrogate 影子变体（per-tile 增量上传，句柄共享免费）；
+//               End 按 tile 句柄 diff 落账真层（undo 只含真变 tile）；Cancel 丢替身零回滚。
+//
+// deps 全函数面：原 input._endStroke/_abortStroke 摸过的六个点 + shadow 显示注入（setShadow）。
+// commitStamps/invalidate/setShadow 是屏显侧（board）的注入——终态归 backend 自持（Gl2Port），C7/C8 收编。
 
 import type { BrushEngine } from "./brush.ts";
 import type { FilterBrushEngine } from "./filter-brush.ts";
 import type { ShapeBrushEngine } from "./shape-brush.ts";
-import type { ViewLeaf } from "./workpiece/painting-view.ts";
+import type { ViewLeaf, ViewLeafSnap } from "./workpiece/painting-view.ts";
 import type { WriteToken } from "./workpiece/workpiece.ts";
 import type { Selection } from "./selection.ts";
+import { LayerPixels, disposePixelsSnapshot } from "./tiles/tile-layer.ts";
+import { TILE_SIZE } from "./common/tile-geometry.ts";
 
 // 液化 = filterBrush 的 LiquifyFilter payload（v132 起无直连双轨）。
 export type StrokeEngine = BrushEngine | FilterBrushEngine | ShapeBrushEngine;
 export type StampCollect = NonNullable<ReturnType<BrushEngine["collectStamps"]>>;
+
+/** 预览宿（census §3.4；见文件头）。 */
+export type StrokePreview = "overlay" | "livesync" | "shadow";
 
 export interface StrokeSessionDeps {
   /** wp2.begin —— 单令牌墙的开口（第二个 begin → throw） */
@@ -38,6 +51,8 @@ export interface StrokeSessionDeps {
   commitStamps(cs: StampCollect): boolean;
   /** board.invalidateAll —— 落层/回滚后的重渲通知 */
   invalidate(): void;
+  /** board.setStrokeShadow —— shadow 预览宿的显示注入（surrogate 影子变体；(null,null) 关） */
+  setShadow(layerId: number | null, pixels: LayerPixels | null): void;
 }
 
 // begin 期策略（engine-registry PIXEL_STROKE_SPECS 的子集：session 只关心事务面）
@@ -48,23 +63,121 @@ export interface StrokeSessionSpec {
   finalize: boolean;
 }
 
+// ---- StrokeShadow：stroke 档的替身叶（C6，census §6.1 施工单）----
+// 引擎写靶的替身：像素 = 真叶的零拷贝快照克隆（tile 句柄共享），呈现 ViewLeaf 的引擎读写面
+// （bbox/getImageData/putImageData/editRegionBytes/snapshot 系——引擎无感）。真叶在描边期零写。
+// 观察者纪律：token 开着时替身的 tile 换手也会被 collector 扣押，但 seal 时按「解析不到 layerId
+// 的实例扣押作废」（layer-tiles 既有机制，正是为临时实例留的）——不入 undo、不占步。
+// 显示：board 走 surrogate 影子变体 syncLeafSafe(pixels)——未变 tile 与真叶共享句柄，GPU 桥按
+// 句柄 id 去重 → per-tile 增量上传免费（对比 adjust 平面替身的全 bbox 重传）。
+export class StrokeShadow {
+  readonly pixels: LayerPixels;
+  readonly id: number;
+  readonly isGroup = false as const;
+  readonly lockAlpha: boolean;
+  readonly docW: number;
+  readonly docH: number;
+  private _bounds: { b: { x: number; y: number; w: number; h: number } | null; forRev: number } | null = null;
+
+  constructor(layer: ViewLeaf) {
+    this.id = layer.id;
+    this.lockAlpha = layer.lockAlpha;
+    const lp = layer.pixels;
+    this.docW = lp.docW;
+    this.docH = lp.docH;
+    this.pixels = new LayerPixels(lp.docW, lp.docH);
+    const snap = lp.snapshot();
+    this.pixels.restore(snap);
+    disposePixelsSnapshot(snap);
+  }
+
+  // ---- ViewLeaf 引擎面（painting-view.ts 同款语义）----
+  private _contentBounds(): { x: number; y: number; w: number; h: number } | null {
+    const rev = this.pixels.contentVersion;
+    if (this._bounds && this._bounds.forRev === rev) return this._bounds.b;
+    this._bounds = { b: this.pixels.contentBounds(true), forRev: rev };
+    return this._bounds.b;
+  }
+  get bboxX(): number { return this._contentBounds()?.x ?? 0; }
+  get bboxY(): number { return this._contentBounds()?.y ?? 0; }
+  get bboxW(): number { return this._contentBounds()?.w ?? 0; }
+  get bboxH(): number { return this._contentBounds()?.h ?? 0; }
+
+  editRegionBytes(x0: number, y0: number, w: number, h: number, fn: (buf: Uint8ClampedArray, ox: number, oy: number) => void): void {
+    if (w <= 0 || h <= 0) return;
+    const buf = this.pixels.getRegion(x0, y0, w, h);
+    fn(buf, x0, y0);
+    this.pixels.putRegion(x0, y0, w, h, buf);
+  }
+  getImageData(docX: number, docY: number, w: number, h: number): ImageData {
+    return new ImageData(this.pixels.getRegion(docX, docY, w, h), w, h);
+  }
+  putImageData(docX: number, docY: number, img: ImageData): void {
+    this.pixels.putRegion(docX, docY, img.width, img.height, img.data);
+  }
+  sampleAt(docX: number, docY: number): [number, number, number, number] {
+    return this.pixels.sampleAt(Math.floor(docX), Math.floor(docY)) as [number, number, number, number];
+  }
+  snapshot(): ViewLeafSnap { return { pixels: this.pixels.snapshot() }; }
+  restoreFromSnapshot(snap: ViewLeafSnap): void { this.pixels.restore(snap.pixels); }
+  snapshotImageData(): { bboxX: number; bboxY: number; bboxW: number; bboxH: number; imageData: ImageData | null } {
+    const b = this.pixels.contentBounds(true);
+    if (!b) return { bboxX: 0, bboxY: 0, bboxW: 0, bboxH: 0, imageData: null };
+    return { bboxX: b.x, bboxY: b.y, bboxW: b.w, bboxH: b.h, imageData: new ImageData(this.pixels.getRegion(b.x, b.y, b.w, b.h), b.w, b.h) };
+  }
+
+  // ---- 收口：句柄 diff 落账真层（token 内；putTile 走观察者 → undo 只含真变 tile）----
+  // 未变 tile 与真叶同句柄（快照克隆 + CoW：任何真写换新句柄）→ diff = 引擎真触过的 tile 集，
+  // 与今日 in-place 路径的 collector 扣押集逐 tile 相同（undo 包不涨）。删格（被擦空回收）写
+  // 全透明 → _setTileBuf 回收真层同格。
+  commitTo(layer: ViewLeaf): void {
+    const real = layer.pixels;
+    const puts: { tx: number; ty: number; bytes: Uint8ClampedArray }[] = [];
+    this.pixels.forEachTileHandle((tx, ty, h) => {
+      const cur = real.getTileHandle(tx, ty);
+      if (!cur || cur.id !== h.id) puts.push({ tx, ty, bytes: h.clampedView() });
+    });
+    const dels: { tx: number; ty: number }[] = [];
+    real.forEachTileHandle((tx, ty) => {
+      if (!this.pixels.getTileHandle(tx, ty)) dels.push({ tx, ty });
+    });
+    for (const p of puts) real.putTile(p.tx, p.ty, p.bytes);
+    if (dels.length) {
+      const zeros = new Uint8ClampedArray(TILE_SIZE * TILE_SIZE * 4);
+      for (const d of dels) real.putTile(d.tx, d.ty, zeros);
+    }
+  }
+
+  dispose(): void { this.pixels.dispose(); }
+}
+
 export class StrokeSession {
   readonly engine: StrokeEngine;
   readonly layer: ViewLeaf;
-  /** 描边中原地写真层（liquify/filterBrush/pixelMode）——board live-sync 判据 */
+  /** 描边中原地写真层（draw/erase pixelMode）——board live-sync 判据 */
   readonly inPlace: boolean;
+  /** 引擎写靶：shadow 模式 = 替身叶（真叶描边期零写），否则真叶。引擎 beginStroke 必须喂它。 */
+  readonly target: ViewLeaf;
   private readonly finalize: boolean;
   private readonly token: WriteToken;
   private readonly deps: StrokeSessionDeps;
+  private _shadow: StrokeShadow | null = null;
   private _open = true;
 
-  constructor(deps: StrokeSessionDeps, engine: StrokeEngine, layer: ViewLeaf, spec: StrokeSessionSpec, inPlace: boolean) {
+  constructor(deps: StrokeSessionDeps, engine: StrokeEngine, layer: ViewLeaf, spec: StrokeSessionSpec, preview: StrokePreview) {
     this.deps = deps;
     this.engine = engine;
     this.layer = layer;
     this.finalize = spec.finalize;
-    this.inPlace = inPlace;
+    this.inPlace = preview === "livesync";
     this.token = deps.begin(spec.historyType);
+    if (preview === "shadow") {
+      this._shadow = new StrokeShadow(layer);
+      deps.setShadow(layer.id, this._shadow.pixels);
+      this.target = this._shadow as unknown as ViewLeaf;   // 引擎面同形（ViewLeaf 的引擎读写子集）
+    } else {
+      this.target = layer;
+    }
   }
 
   get open() { return this._open; }
@@ -77,7 +190,7 @@ export class StrokeSession {
   /** 引擎累积的 dirty bbox（board.markDocDirty 用）；无 → null */
   flushDirty() { return this.engine.flushDirty(); }
 
-  /** GPU stamp overlay 拉取（brush/形状笔有；liquify/filterBrush 无 → null，走 live-sync） */
+  /** GPU stamp overlay 拉取（brush/形状笔有；liquify/filterBrush 无 → null，走 shadow/live-sync） */
   collectStamps(): StampCollect | null {
     const eng = this.engine as { collectStamps?: () => StampCollect | null };
     return eng.collectStamps?.() ?? null;
@@ -85,16 +198,21 @@ export class StrokeSession {
 
   // 抬笔收口（原 input._endStroke，S8 语义逐字迁入）：
   //   buffered（brush/形状笔）→ engine.endStroke 返 StampCollect → GPU commit（选区/锁α/blend/
-  //   opacity 全在 shader，live 即 commit 所见）；liquify/filterBrush/pixelMode 返 null（描边中
-  //   已 in-place 落层）→ 只清状态。finalize（applyMaskPostStroke CPU 兜选区）只兜没走 GPU
-  //   commit 的路径；pre 图从 collector 现算（tokenBeforeImage）——只有真动过层且带选区才付
-  //   物化钱；兜出来的回写仍在令牌内（首捕获已在，undo 包不变）。
+  //   opacity 全在 shader，live 即 commit 所见）；livesync（draw/erase pixelMode）描边中已 in-place
+  //   落层 → 只清状态；shadow（液化/filterBrush/形状笔 pixelMode）→ 替身句柄 diff 落账真层
+  //   （唯一的真层写，在令牌内）。finalize（applyMaskPostStroke CPU 兜选区）只兜没走 GPU commit
+  //   的路径，在 shadow 落账**之后**跑（pre 图从 collector 现算——只有真动过层且带选区才付物化钱；
+  //   兜出来的回写仍在令牌内，undo 包不变）。
   end() {
     if (!this._open) return;
     this._open = false;
     const cs = (this.engine.endStroke() ?? null) as StampCollect | null;
     let gpuCommitted = false;
     if (cs && cs.stamps.length) gpuCommitted = this.deps.commitStamps(cs);
+    if (this._shadow) {
+      this._shadow.commitTo(this.layer);
+      this.deps.setShadow(null, null);
+    }
     const sel = (this.finalize && !gpuCommitted && this.deps.tokenChanged(this.layer.id)) ? this.deps.getSelection() : null;
     if (sel) {
       sel.applyMaskPostStroke(
@@ -102,15 +220,19 @@ export class StrokeSession {
         this.deps.tokenBeforeImage(this.layer.id));
     }
     this.token.commit();
+    if (this._shadow) { this._shadow.dispose(); this._shadow = null; }   // 令牌已关，释放不再进观察者
     this.deps.invalidate();
   }
 
-  // 取消（原 input._abortStroke）：引擎丢状态 + collector 倒序回滚，无痕（interrupt=cancel 家规）。
+  // 取消（原 input._abortStroke）：引擎丢状态；shadow 模式真层从未被写 → 丢替身即无痕（零回滚）；
+  // livesync 模式 collector 倒序回滚（interrupt=cancel 家规）。
   cancel() {
     if (!this._open) return;
     this._open = false;
-    this.engine.cancelStroke();
+    this.engine.cancelStroke();   // shape pixelMode 会 preSnap-restore 到替身——无害（替身随即丢弃）
+    if (this._shadow) this.deps.setShadow(null, null);
     this.token.cancel();
+    if (this._shadow) { this._shadow.dispose(); this._shadow = null; }
     this.deps.invalidate();
   }
 }

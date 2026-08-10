@@ -74,13 +74,12 @@ export interface Filter {
   flushDirty?(state: ColorBrushState): DirtyRect | null;
 }
 
-// color-brush 行为操作的 app-domain 对象（doc.js / brush 输入未类型化 → 描述用到的字段）。
+// color-brush 行为操作的层读写面（ViewLeaf/StrokeShadow 同形——C6 起引擎写靶可能是替身叶）。
 export interface BrushLayer {
   bboxX: number;
   bboxY: number;
   bboxW: number;
   bboxH: number;
-  ctx: CanvasRenderingContext2D;
   getImageData(docX: number, docY: number, w: number, h: number): ImageData;
   putImageData(docX: number, docY: number, img: ImageData): void;
 }

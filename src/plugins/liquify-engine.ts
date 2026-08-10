@@ -326,8 +326,8 @@ export class LiquifyEngine {
   isActive() { return !!this._stroke; }
 
   cancelStroke() {
-    // 调用方（input.js _abortLiquify）会用 PixelEdit 事务 abort() 还原 layer，
-    // 这里只清状态
+    // C6：引擎写靶 = StrokeSession 的替身叶（stroke shadow），真层描边期零写——
+    // cancel 由 session 丢替身即无痕，这里只清状态。（旧注「PixelEdit 事务 abort 还原」是 v1 化石。）
     this._stroke = null;
   }
 

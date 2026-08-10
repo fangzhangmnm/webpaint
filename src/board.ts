@@ -15,6 +15,7 @@ import type { GLDoc, GLLeaf } from "./gl/gl-board.ts";
 import type { PaintingView, ViewLeaf } from "./workpiece/painting-view.ts";
 import { layerByteBudget } from "./workpiece/painting-view.ts";
 import { eachViewLeaf } from "./workpiece/painting-view.ts";
+import type { LayerPixels } from "./tiles/tile-layer.ts";
 
 // ---- 本文件用到的结构类型（局部定义，只覆盖 board 实际访问的成员）----
 
@@ -143,6 +144,8 @@ export class Board {
   _activeSurrogateBytes?: { data: Uint8ClampedArray; w: number; h: number } | null;
   _activeSurrogateBx?: number;   // 替身 canvas 的 doc 左上（GL 上传 tiles 用）
   _activeSurrogateBy?: number;
+  // C6 stroke 替身叶（StrokeShadow.pixels）：描边期活动层换源显示（surrogate 影子变体，增量 sync）。
+  _strokeShadow?: { layerId: number; pixels: LayerPixels } | null;
   _showFps?: boolean;
   _lastFrameT?: number | null;
   _fps?: number | null;
@@ -280,11 +283,10 @@ export class Board {
 
   // 由 BrushEngine 报告："layer 像素被改"（脏 bbox 参数现仅语义/旁观者用；GL-only 后无 partial-blit 消费它）。
   markDocDirty(_x0: number, _y0: number, _x1: number, _y1: number) {
-    // S8e：原地引擎（液化/滤镜笔/像素笔）描边中每 move 都到这里——活动叶已在执行器 updated 集
-    //   （liveSyncProvider），contentVersion 快路径只重传变更 tile；此时若 markContentDirty 会把
-    //   全部段缓存每帧掀翻（S7 承诺的「液化每帧 sb0」被它打破）。描边中只请求重渲，
-    //   抬笔 commit 的 invalidateAll 才全失效。
-    if (!this._liveSyncProvider?.()) this._glBoard?.markContentDirty();
+    // S8e：描边中每 move 都到这里——活动叶已在执行器 updated 集（liveSync 叶或 C6 stroke 影子替身），
+    //   contentVersion 快路径只重传变更 tile；此时若 markContentDirty 会把全部段缓存每帧掀翻
+    //   （S7 承诺的「液化每帧 sb0」被它打破）。描边中只请求重渲，抬笔 commit 的 invalidateAll 才全失效。
+    if (!this._liveSyncProvider?.() && !this._strokeShadow) this._glBoard?.markContentDirty();
     // 通知挂在 doc 上的旁观者（如 reference live 镜像）。每个 brush stamp 都会触发，
     // 但 reference 端 markLiveDirty 仅置 flag + 走 rAF，不真合成，开销 ≪ 1ms。
     if (!Board._dispatchingDirty) {
@@ -431,11 +433,24 @@ export class Board {
     this.invalidateAll();
   }
 
-  // GL 渲染用：当前活动层替身（颜色调整 preview）→ SurrogateInput（无替身=null）。
+  // C6 stroke 替身叶（液化/filterBrush/形状笔 pixelMode）：描边期活动层换源到 StrokeShadow.pixels
+  //   （surrogate 影子变体——真 LayerPixels，未变 tile 与真叶共享句柄 → per-tile 增量上传）。
+  //   开关走 StrokeSession（deps.setShadow）；描边中不 markContentDirty（段缓存 sb0 承诺，见 markDocDirty），
+  //   收口后 session invalidate → 从真像素恢复。
+  setStrokeShadow(layerId: number | null, pixels: LayerPixels | null) {
+    this._strokeShadow = (layerId != null && pixels) ? { layerId, pixels } : null;
+    this.requestRender();
+  }
+
+  // GL 渲染用：当前活动层替身（颜色调整平面 / stroke 影子叶）→ SurrogateInput（无替身=null）。
+  //   两者互斥（单令牌墙：adjust 面板挂令牌时不可能起笔，反之亦然）。
   _glSurrogate(): SurrogateInput | null {
     const b = this._activeSurrogateBytes;
-    if (!b || this._activeSurrogateLayerId == null || !b.w || !b.h) return null;
-    return { layerId: this._activeSurrogateLayerId, bytes: b, bx: this._activeSurrogateBx ?? 0, by: this._activeSurrogateBy ?? 0, w: b.w, h: b.h };
+    if (b && this._activeSurrogateLayerId != null && b.w && b.h) {
+      return { layerId: this._activeSurrogateLayerId, bytes: b, bx: this._activeSurrogateBx ?? 0, by: this._activeSurrogateBy ?? 0, w: b.w, h: b.h };
+    }
+    if (this._strokeShadow) return { layerId: this._strokeShadow.layerId, pixels: this._strokeShadow.pixels };
+    return null;
   }
 
   // 注：层合成全在 GL（render-tree 执行器）。旧 2D 规范合成器接缝（ensureCompositeCache/_layerCompositeOpts/
@@ -608,8 +623,9 @@ export class Board {
   //   本 2D canvas 清透明、只画 lasso overlay + doc 边框（GL 透出 doc）。
   _renderFullGL(ctx: Ctx2D, W: number, H: number) {
     const docBg = this._showCheckerboard ? "checker" : (this.doc.backgroundColor || "#ffffff");   // 棋盘背景接缝（GL 合成器 doc 空间棋盘）
-    // live-sync：原地改像素的笔（liquify/filterBrush/pixelMode）描边中把活动叶标 updated
-    //   （执行器 contentVersion 快路径每帧只重传变更 tile）。
+    // live-sync：原地改真层的笔（draw/erase pixelMode）描边中把活动叶标 updated
+    //   （执行器 contentVersion 快路径每帧只重传变更 tile）。液化/filterBrush/形状笔 pixelMode
+    //   改走 _glSurrogate 的影子变体（C6 stroke 替身叶，同一条增量 sync 路）。
     const liveSync = this._liveSyncProvider?.() ?? null;
     const stampOverlay = this._glStampOverlay();
     this._lastStampCount = this._showFps ? ((stampOverlay && !("kind" in stampOverlay)) ? stampOverlay.stamps.length : 0) : 0;   // HUD only（fill overlay 无 stamps）

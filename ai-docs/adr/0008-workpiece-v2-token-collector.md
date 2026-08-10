@@ -128,5 +128,11 @@ Tx=transaction 词义保留，三个 Tx 类溶解（PixelTx/SelectionPreviewTx/t
   （其行为锚测试迁移为 v2 锚）。
 - 已记名未排期：预览违规户迁移（液化就地写、魔棒拖选直写 selection、形状笔 pixelMode）、
   tool state 全局类、color 编辑器模态化、C 骑士 headless（RasterService 即其接缝）。
+  > 落地注（C6 / v0.8.31）：液化/filterBrush/形状笔 pixelMode 已迁 **stroke 替身叶**
+  > （StrokeSession + StrokeShadow，src/stroke-session.ts）——描边期引擎写替身（真层零写），
+  > End 句柄 diff 在令牌内一次落账、Cancel 丢替身零回滚；显示走 surrogate 影子变体
+  > （per-tile 增量 sync）。§8 三面旗语义不变（替身仍是 surrogate 旗，吸管/合成 WYSIWYG 同待遇）；
+  > draw/erase pixelMode 是 stroke 档合法的令牌内真层写（提案 §6.1），维持 live-sync。
+  > 魔棒拖选迁移排 C6 后半（census §6.3）。
 - .h ritual 见家族总 CLAUDE.md（`scripts/gen-api.sh` → `api/`）。
 - 目标 API 全签名：`ai-docs/20260807-workpiece-v2-proposal-h.md`；施工序：`ai-docs/20260807-workpiece-v2-handoff.md`。

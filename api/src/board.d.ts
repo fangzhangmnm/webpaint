@@ -15,6 +15,7 @@ type StampCollect = {
     bh: number;
 } | null;
 import type { PaintingView, ViewLeaf } from "./workpiece/painting-view.ts";
+import type { LayerPixels } from "./tiles/tile-layer.ts";
 interface Viewport {
     tx: number;
     ty: number;
@@ -167,6 +168,10 @@ export declare class Board {
     } | null;
     _activeSurrogateBx?: number;
     _activeSurrogateBy?: number;
+    _strokeShadow?: {
+        layerId: number;
+        pixels: LayerPixels;
+    } | null;
     _showFps?: boolean;
     _lastFrameT?: number | null;
     _fps?: number | null;
@@ -214,6 +219,7 @@ export declare class Board {
         w: number;
         h: number;
     } | null, bx?: number, by?: number): void;
+    setStrokeShadow(layerId: number | null, pixels: LayerPixels | null): void;
     _glSurrogate(): SurrogateInput | null;
     _docTransformParams(): [number, number, number, number, number, number];
     _applyDocTransform(ctx: Ctx2D): void;

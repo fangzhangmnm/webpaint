@@ -344,7 +344,7 @@ export class InputController {
   wp2: PaintingWorkpiece | null;
   layerTiles: LayerTiles | null;
   _activeStroke: StrokeSession | null = null;
-  // StrokeSession 的注入面（六个点 = 原 _endStroke/_abortStroke 摸过的全部外部接触面）。
+  // StrokeSession 的注入面（原 _endStroke/_abortStroke 摸过的外部接触面 + C6 shadow 显示注入）。
   //   闭包读 this.*（wp2/layerTiles 构造时可能还没接线，begin 时才解引用）。
   _strokeDeps: StrokeSessionDeps = {
     begin: (label) => this.wp2!.begin(label),
@@ -353,6 +353,7 @@ export class InputController {
     getSelection: () => this.doc.selection,
     commitStamps: (cs) => this.board.commitBrushStroke(cs),
     invalidate: () => this.board.invalidateAll(),
+    setShadow: (layerId, pixels) => this.board.setStrokeShadow(layerId, pixels),
   };
 
   constructor(board: Board, doc: Doc, opts: InputOpts = {}) {
@@ -893,8 +894,12 @@ export class InputController {
     const spec = pixelStrokeSpec(rec.role as string)!;   // draw / erase / shapeBrush → 同 stroke 事务 + finalize
     // engineKey 查表（registry 注释的本意）：draw/erase → brush；shapeBrush → 形状笔。签名一致。
     const eng = this[spec.engineKey as "brush" | "shapeBrush"];
-    // C5：session 构造 = wp2.begin 开令牌（stroke 档口；单令牌墙在 workpiece 侧 fail-loud）
-    this._activeStroke = new StrokeSession(this._strokeDeps, eng, layer, spec, !!settings.pixelMode);
+    // C5：session 构造 = wp2.begin 开令牌（stroke 档口；单令牌墙在 workpiece 侧 fail-loud）。
+    // C6 预览宿三态（census §3.4）：buffered=overlay；draw/erase pixelMode=livesync（stroke 档合法
+    //   就地写）；形状笔 pixelMode=shadow（参数重算——每帧 restore+重画改在替身叶上，真层只在
+    //   收口一刻被令牌写，cancel 丢替身零回滚）。
+    const preview = !settings.pixelMode ? "overlay" : (rec.role === "shapeBrush" ? "shadow" : "livesync");
+    this._activeStroke = new StrokeSession(this._strokeDeps, eng, layer, spec, preview);
 
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX!, rec.smY!);
     const pressure = effectivePressureFor(rec, e);
@@ -906,7 +911,7 @@ export class InputController {
     const scale = this.board.viewport.scale || 1;
     // v249：时间常数指数追踪 + 死区。{tau, deadzone}。
     const smooth = buffered ? _resolveSmooth(settings, scale) : {};
-    eng.beginStroke(layer, settings, dx, dy, pressure, mode, smooth, e.timeStamp);
+    eng.beginStroke(this._activeStroke.target, settings, dx, dy, pressure, mode, smooth, e.timeStamp);
     const bbox = eng.flushDirty();
     if (bbox) this.board.markDocDirty(bbox[0], bbox[1], bbox[2], bbox[3]);
     this.board.requestRender();
@@ -930,7 +935,7 @@ export class InputController {
   // board._strokeActiveHint 用它判 livePreview（描边中走直接合成 / GL 门控），含像素笔/liquify/filterBrush。
   isStrokeActive() { return !!this._activeStroke; }
   // GPU stamp overlay 拉取口（app 接给 board.setStampProvider）：当前活动引擎的 stamps。
-  //   brush 与形状笔都有 collectStamps；liquify/filterBrush 无（in-place，走 live-sync）。
+  //   brush 与形状笔都有 collectStamps；liquify/filterBrush 无（写替身叶，走 stroke shadow 显示，C6）。
   collectActiveStamps(): ReturnType<BrushEngine["collectStamps"]> {
     // v0.7.25 选区笔：同一 overlay 拉取口出色带预览（selPenBand 旗 → board 跳过 selMask/lockAlpha 裁剪）
     if (this._selPenLive) {
@@ -942,8 +947,9 @@ export class InputController {
   // 公开取消口（toolbar 描边中切形状笔子工具 = cancel 不进 undo，同画一半被手势接管）
   abortActiveStroke() { this._abortStroke(); }
 
-  // GL live-sync 接缝：描边中原地改像素的笔（liquify/filterBrush/pixelMode brush）→ 返回活动叶，
-  //   board 每帧把它重传 GPU 才能显 live 预览（buffered brush 走 GPU stamp overlay，返 null）。非描边 / overlay 笔 → null。
+  // GL live-sync 接缝：描边中原地改真层的笔（draw/erase pixelMode）→ 返回活动叶，board 每帧把它
+  //   重传 GPU 才能显 live 预览。buffered 笔走 GPU stamp overlay、液化/filterBrush/形状笔 pixelMode
+  //   走 stroke 替身（board.setStrokeShadow，C6）→ 都返 null。
   liveMutatedLeaf(): ViewLeaf | null {
     const as = this._activeStroke;
     if (!as || !as.inPlace) return null;
@@ -964,12 +970,13 @@ export class InputController {
     const layer = this.doc.activeLayer as ViewLeaf;   // 组已被上游硬拒，此处确为叶
     const spec = pixelStrokeSpec(rec.role as string)!;   // filterBrush → "stroke" 事务，finalize:false
     // filterBrush 在 beginStroke 时已吃了 selection，stamp 内 mask 外保留 pre → 无需 post-stroke finalize（spec.finalize=false）
-    this._activeStroke = new StrokeSession(this._strokeDeps, this.filterBrush, layer, spec, true);
+    // C6：预览宿=shadow——液化/滤镜笔改写替身叶（census §6.1 第一户），真层只在收口一刻被令牌写。
+    this._activeStroke = new StrokeSession(this._strokeDeps, this.filterBrush, layer, spec, "shadow");
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX!, rec.smY!);
     const pressure = effectivePressureFor(rec, { pressure: rec.lastP ?? 1 });
     try {
       // fbState.Filter 对 input 不透明（BrushFilter 未 export）→ 在引擎接缝处断言到 beginStroke 入参类型。
-      this.filterBrush.beginStroke(layer, fbState.Filter as Parameters<FilterBrushEngine["beginStroke"]>[1], fbState.params, brushSettings, this.doc.selection, dx, dy, pressure);
+      this.filterBrush.beginStroke(this._activeStroke.target, fbState.Filter as Parameters<FilterBrushEngine["beginStroke"]>[1], fbState.params, brushSettings, this.doc.selection, dx, dy, pressure);
     } catch (e) {
       reportError(new Error("[filter brush] begin failed: " + String(e)), "log");
       const s = this._activeStroke;

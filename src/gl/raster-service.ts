@@ -118,7 +118,12 @@ export class RasterService {
     const all = new Set<number>(plan.liveLeaves);
     for (const b of plan.builds.values()) for (const id of b.members) all.add(id);
     for (const id of all) {
-      if (surrogate && id === surrogate.layerId) { room.syncSurrogate(surrogate, docW, docH); continue; }
+      if (surrogate && id === surrogate.layerId) {
+        // 影子变体（C6 stroke 替身叶）增量 sync；平面变体（adjust）全 bbox 重传。
+        if ("pixels" in surrogate) room.syncLeafSafe(id, surrogate.pixels, docW, docH);
+        else room.syncSurrogate(surrogate, docW, docH);
+        continue;
+      }
       const leaf = leafById.get(id); if (leaf) room.syncLeafSafe(id, leaf.pixels, docW, docH);
     }
     room.comp.begin(docW, docH);

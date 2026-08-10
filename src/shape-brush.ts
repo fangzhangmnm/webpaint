@@ -143,7 +143,7 @@ export class ShapeBrushEngine {
   }
 
   // 抬手：buffered → 本帧合成缓存（与 live 同一份 StampCollect，input 走 board.commitBrushStroke）；
-  //   pixelMode → 像素已 in-place 落层，清态返 null。
+  //   pixelMode → 像素已写进写靶（C6 起 = StrokeSession 替身叶，落账真层由 session 收口做），清态返 null。
   endStroke(): StampCollect | null {
     const st = this._st;
     if (!st) return null;
@@ -154,7 +154,8 @@ export class ShapeBrushEngine {
     return out;
   }
 
-  // cancel = 无痕：pixelMode 把画上的擦回去（caller 的 tx.abort 也会还原，双保险不依赖调用序）。
+  // cancel = 无痕：pixelMode 把画上的擦回写靶。C6 起写靶 = session 替身叶（随即被丢弃）——
+  //   这里的 preSnap restore 从「双保险」退役成无害冗余，真层无痕由 session 丢替身保证。
   cancelStroke() {
     const st = this._st;
     if (!st) return;
@@ -167,7 +168,7 @@ export class ShapeBrushEngine {
     this._st = null;
   }
 
-  // GPU stamp overlay 拉取口（live 预览）。pixelMode 走 live-sync（in-place），无 stamps。
+  // GPU stamp overlay 拉取口（live 预览）。pixelMode 走 stroke 替身显示（C6，board.setStrokeShadow），无 stamps。
   collectStamps(): StampCollect | null {
     if (!this._st || this._st.settings.pixelMode) return null;
     return this._st.cs;

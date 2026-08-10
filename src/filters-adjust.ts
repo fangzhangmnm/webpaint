@@ -176,10 +176,13 @@ function _closeFilterPanel(applied: boolean) {
   if (_adjustState._rafId) { cancelAnimationFrame(_adjustState._rafId); _adjustState._rafId = 0; }
   board.setActiveLayerSurrogate?.(null, null);
   if (applied) {
-    // 烤进 layer（surrogate 字节已是最终结果 → 直落 tile，零 canvas）
-    (L as unknown as { replaceFromBytes: (d: Uint8ClampedArray, x: number, y: number, w: number, h: number) => void })
-      .replaceFromBytes(_adjustState.out, L.bboxX, L.bboxY, _adjustState.srcImg.width, _adjustState.srcImg.height);
-    // 令牌收口：replaceFromBytes 的换手已被 collector 扣押 → 一步入栈（wp:histchange 由栈 onChange 派）。
+    // 烤进 layer（surrogate 字节已是最终结果 → 直落 tile，零 canvas）。
+    // C6 顺手账（census §6.4）：replaceFromBytes（整层 clear+重写 → collector 扣押整层）换
+    //   applyRegionDiff——逐 tile memcmp 只封真变 tile，undo 包 = 实际改动（bbox 外无内容、
+    //   bbox 内未变 tile 不再陪葬）。字节结果与旧路径逐位一致。
+    (L as unknown as { applyRegionDiff: (x: number, y: number, w: number, h: number, src: Uint8ClampedArray) => unknown })
+      .applyRegionDiff(L.bboxX, L.bboxY, _adjustState.srcImg.width, _adjustState.srcImg.height, _adjustState.out);
+    // 令牌收口：applyRegionDiff 的换手已被 collector 扣押 → 一步入栈（wp:histchange 由栈 onChange 派）。
     _adjustState.token.commit();
     setStatus(t("mi.filterApplied", { title: _adjustState.Filter.title, name: L.name }));
   } else {

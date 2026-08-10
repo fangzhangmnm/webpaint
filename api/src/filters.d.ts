@@ -18,7 +18,6 @@ export interface BrushLayer {
     bboxY: number;
     bboxW: number;
     bboxH: number;
-    ctx: CanvasRenderingContext2D;
     getImageData(docX: number, docY: number, w: number, h: number): ImageData;
     putImageData(docX: number, docY: number, img: ImageData): void;
 }
