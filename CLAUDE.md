@@ -12,7 +12,7 @@ Procreate 级绘画 PWA + **家族 sync-store 引擎的开发面**（shared-lib-
 - `journal/cached feedback.md` = 人类专属反馈日志，AI 只读，永不写。
 - 人类钉死的区域：手感（streamline/taper/压感 gamma）、UI/UX 决策、store model。其余按 greenfield 标准大胆重构。
 - 测试纪律：mock + node test 先行（store 200+ 测试）；需要真机的积批，"我只测一次。就是交付"；每 commit bump vN + 版本水印（反煤气灯——不确定部署版本时先对水印）。
-- **长跑纪律（user 2026-08-10）**：测试/构建每条**实时 flush 耗时**（runner 已内建每测 ms + 总时；≥1s 标黄）；**每测默认 10s 超时墙**，确需更久在声明处 `it(name, fn, { timeout: ms })` 申请（挂死→响亮红，不再吊死全套件）；长跑输出落**共享日志文件**（`tmp/`，AI 和人类都能随时看），不许把结果攒到最后梭哈；重活（test/smoke/gen-api）**不并行**互相抢。测试异常变慢先怀疑挂死而非"测试就是慢"——2026-08-10 出过：34min"慢" 实为 boot smoke 挂死（全量真实耗时 ~30s），先 `ps` 看 CPU 时间再下结论。
+- **长跑纪律（user 2026-08-10）**：测试/构建每条**实时 flush 耗时**（runner 已内建每测 ms + 总时；≥1s 标黄）；**每测默认 10s 超时墙**，确需更久在声明处 `it(name, fn, { timeout: ms })` 申请（挂死→响亮红，不再吊死全套件）；**全量硬线 <1min**（1-2min = 黄警告需要干预；**2min runner watchdog 硬切** exit 1；不搞分级，交付照跑全量）；长跑输出落**共享日志文件**（`tmp/`，AI 和人类都能随时看），不许把结果攒到最后梭哈；重活（test/smoke/gen-api）**不并行**互相抢。测试异常变慢先怀疑挂死而非"测试就是慢"——2026-08-10 出过：34min"慢" 实为 boot smoke 挂死（全量真实耗时 ~22s），先 `ps` 看 CPU 时间再下结论。注意「全量」= `npm test`（node）；playwright smoke 是另一档（分钟级，不在硬线内）。
 - 云同步已知弱点清单：`ai-docs/20260528-backlog.md` 的「云同步审计 2026-06-09」节 + `ai-docs/reports/20260609-store-cloud-sync-audit.md`（gitignored，只在本机）。
 - **worktree 落地**：在 worktree 里改完别只 push remote——改动也要带回 local 工作区（merge/ff 本地 main，或把文件落回主 checkout），否则 local 落后于 remote、下个 agent 在旧版上接着改（曾出现 remote=v256 而 local main=v242）。
 

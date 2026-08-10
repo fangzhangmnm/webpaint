@@ -41,7 +41,15 @@ export async function run() {
   if (filter) console.log(`\n  TEST_FILTER="${filter}" → ${tests.length}/${_tests.length} 条（开发期快捷，交付仍跑全量）\n`);
   let pass = 0, fail = 0;
   const t0all = performance.now();
+  // 全量硬线（user 2026-08-10）：<1min 随便；1-2min 需要干预（下面黄警告）；2min 硬切——
+  // watchdog 直接 exit 1 并报当前在跑的测试（与每测 10s 墙互补：单测挂死归 10s 墙，整体膨胀归这里）。
+  let _current = "(未开始)";
+  const hardWall = setTimeout(() => {
+    console.log(`\n  \x1b[31m✗ 全量 >2min 硬切\x1b[0m（硬线 <1min；当前在跑：${_current}）\n`);
+    process.exit(1);
+  }, 120_000);
   for (const t of tests) {
+    _current = t.name;
     // 每条测试立刻 flush 耗时（user 2026-08-10：计时别梭哈）；≥1s 标黄，肉眼即抓大头。
     const t0 = performance.now();
     const ms = () => { const v = performance.now() - t0; return v >= 1000 ? `\x1b[33m${(v / 1000).toFixed(1)}s\x1b[0m` : `\x1b[90m${v.toFixed(0)}ms\x1b[0m`; };
@@ -51,7 +59,10 @@ export async function run() {
     catch (e) { console.log(`  \x1b[31m✗\x1b[0m ${t.name} ${ms()}\n      `, e.message); fail++; }
     finally { clearTimeout(wall); }
   }
-  const totalS = ((performance.now() - t0all) / 1000).toFixed(1);
+  clearTimeout(hardWall);
+  const totalMs = performance.now() - t0all;
+  const totalS = (totalMs / 1000).toFixed(1);
+  if (totalMs > 60_000) console.log(`\n  \x1b[33m⚠ 全量 ${totalS}s 超过 1min 硬线——需要干预（拆慢测/查挂死；2min 会被硬切）\x1b[0m`);
   if (_todos.length) {
     console.log("");
     for (const name of _todos) console.log("  \x1b[33m○ todo\x1b[0m", name);

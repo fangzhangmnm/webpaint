@@ -14,11 +14,11 @@
   （user 2026-08-08：「现在只是 0.8 的前 1/3」）；bump minor 必须 user 显式说版本号。
 - **测试基线**：1232 node 绿 + tsc 0 + `bash scripts/build.sh` 全 lint + `npm run smoke` GL smoke
   PASSED。`test/run.mjs` 是显式清单，新测试必须注册。
-  **2026-08-10 插曲存档（供接棒者防重蹈）**：C9 交付时全量看似「跑不完」（34min），user 一度裁定
-  慢测试退出 ritual；随后计时诊断证明**套件从来不慢（全量 ~30s）**——真凶是 C9 引入的 boot smoke
-  挂死链（shim 缺 toggleAttribute → 子进程收集器吞主线抛错 → 父测试无超时），v0.8.48 修复后
-  user 撤回该裁定。留下的硬教训（已入 CLAUDE.md 长跑纪律）：每条测试实时 flush 耗时、长跑落
-  共享日志、重活不并行、测试异常变慢先 `ps` 查 CPU 时间分辨「慢 vs 挂死」。
+  **全量硬线（user 2026-08-10 拍板）**：`npm test` 全量（node 1258 条，实测 ~22s）**< 1min**；
+  1-2min = 需要干预（拆慢测/查挂死）；**2min 硬切**（runner 内建 watchdog exit 1）。不搞分级、
+  交付照跑全量。注意「全量」不含 playwright smoke（`npm run smoke`，真浏览器另一档 ~分钟级）
+  与 run-full 全量层。长跑纪律（实时 flush 耗时/共享日志/重活不并行/异常慢先 `ps` 分辨挂死
+  ——2026-08-10 boot smoke 挂死曾被误读成「测试慢」）见 CLAUDE.md。
 - **中间态纪律**（v2 同款，user 拍板沿用）：不推 dev 不等真机直接接力施工；「写完了才算数，一口气
   写不完可以接力。中间怕错可以模块化测试」；过渡态自己裁不上呈，上呈只有终态契约偏离/undo 白黑
   名单/数据安全。**测试分级从 C8 起生效前，先维持全量 npm test**；C8 落地后中间棒可只跑相关模块+tsc。
@@ -499,6 +499,9 @@
   （≥1s 标黄）+ 总时 + **默认 10s/条超时墙**（user 点子：挂死→响亮红；延长在声明处
   `it(name,fn,{timeout:ms})` 申请，已发 boot smoke 60s/组合根 30s/mcp-redteam 30s 三户；
   JS 杀不掉泄逸 promise，超时=判负继续跑）；实测全量 **1258 绿 21.3s**（墙钟 30s；最慢 =
-  boot smoke 5.9s、组合根 smoke 2.9s、mcp-redteam 1.9s——SoftGl2 计算占比可忽略）。⑤当日「慢测试退出 ritual」裁定
-  经此诊断由 user 撤回（见 §0 插曲存档）；CLAUDE.md 换成长跑纪律（实时 flush/共享日志/不并行）。
+  boot smoke 5.9s、组合根 smoke 2.9s、mcp-redteam 1.9s——SoftGl2 计算占比可忽略）。⑤长跑纪律入 CLAUDE.md（实时 flush/共享日志/不并行）。
   无新真机锚（test 基建 + `?.` 防御，浏览器行为不变）。
+- **测试硬线 ✅（2026-08-10，test-infra only 不 bump）**：user 拍板「全量 <1min（2min 硬切，
+  超过 1min 需要干预，1min 以下随便），不需要分级」。runner 内建：总时 >60s → 黄色大警告
+  「需要干预」；**120s watchdog → 红报当前在跑的测试名 + exit 1**（与每测 10s 墙互补：单测挂
+  死 10s 墙抓，整体膨胀/多测慢 2min 墙兜底）。run-full 层共用同一 runner 同享两墙。
