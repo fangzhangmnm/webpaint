@@ -8,7 +8,9 @@ import { t } from "./i18n/index.ts";
 import { ReferenceWindow } from "./reference.ts";
 import { PaletteWindow } from "./palette.ts";
 import { els } from "./els.ts";
-import { decodeImageFile, fitWithin, canvasToBlob } from "./resample.ts";
+import { decodeImageFile, imageSourceToBytes } from "./shell/image-io.ts";
+import { areaResampleBytes } from "./backend/algorithms/resample-bytes.ts";
+import { encodePngFromBytes } from "./png-codec.ts";
 import { setColor } from "./color-panel.ts";
 import { setMenuOpen } from "./settings-menu.ts";
 import type { AppContext } from "./app-context.ts";
@@ -113,15 +115,29 @@ export function initSideWindows(ctx: AppContext) {
 export async function setReferenceFromFile(file: File | Blob): Promise<void> {
   const decoded = await decodeImageFile(file);          // C：鲁棒解码（修 Windows createImageBitmap 失效）
   const REF_MAX = 2048;                                 // B：参考图最大边（≈2048² 面积上限）
-  const fit = fitWithin(decoded, REF_MAX, REF_MAX);     // 超了 step-halving 缩小
-  // 缩了就存缩小后的 PNG（省 .ora 体积）；没缩存原文件 Blob
-  const persistBlob = fit.scaled ? await canvasToBlob(fit.source as Parameters<typeof canvasToBlob>[0]) : file;
+  const sw = decoded.width || (decoded as HTMLImageElement).naturalWidth;
+  const sh = decoded.height || (decoded as HTMLImageElement).naturalHeight;
+  const scaled = sw > REF_MAX || sh > REF_MAX;
+  let source: ImageBitmap | HTMLImageElement = decoded;
+  let persistBlob: Blob = file;
+  let fw = sw, fh = sh;
+  if (scaled) {
+    // C3 全字节：解码边界读出一次 → areaResampleBytes 缩小 → UPNG 存（省 .ora 体积）；
+    //   显示位图从缩好的字节再造（createImageBitmap(ImageData)）。
+    const k = Math.min(REF_MAX / sw, REF_MAX / sh);
+    fw = Math.round(sw * k); fh = Math.round(sh * k);
+    const px = imageSourceToBytes(decoded);
+    const small = areaResampleBytes(px.data, sw, sh, fw, fh);
+    const png = await encodePngFromBytes(small, fw, fh);
+    persistBlob = new Blob([png as unknown as BlobPart], { type: "image/png" });
+    source = await createImageBitmap(new ImageData(small, fw, fh));
+  }
   referenceWindow.open();
-  referenceWindow.setBitmap(fit.source, { persistBlob });
-  if (fit.scaled) (decoded as ImageBitmap).close?.();   // 缩放后原 bitmap 没用了，释放
+  referenceWindow.setBitmap(source, { persistBlob });
+  if (scaled) (decoded as ImageBitmap).close?.();       // 缩放后原 bitmap 没用了，释放
   // v0.8.5（S5·ADR-0007）：参考图 = sidecar（跟 ora 走 ∧ 不进 undo）——走正名的 wp:sidecarchange
   // 通道（编辑门/保存状态都听它）。旧姿势（markEdited + 伪造 wp:histchange）已死：那是「合法不记账
   // 却无合法标脏通道」逼出来的，undo 按钮态靠填真值才不被污染。
   window.dispatchEvent(new CustomEvent("wp:sidecarchange", { detail: { kind: "reference" } }));
-  setStatus(t("mi.referenceLoaded", { name: (file as File).name || "", scaled: fit.scaled ? t("mi.referenceScaled", { w: fit.w, h: fit.h }) : "" }));
+  setStatus(t("mi.referenceLoaded", { name: (file as File).name || "", scaled: scaled ? t("mi.referenceScaled", { w: fw, h: fh }) : "" }));
 }

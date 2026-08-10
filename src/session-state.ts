@@ -13,8 +13,8 @@
 import { reactive } from "../vendor/vue/vue.esm-browser.prod.js";
 import { WEBPAINT_VERSION } from "./version.ts";
 import { reportError } from "./error-badge.ts";
-import { thumbBlobFromCanvas, setCurrentSessionName } from "./session.ts";
-import { renderNodesToCanvas } from "./doc-render.ts";
+import { thumbBlobFromBytes, setCurrentSessionName } from "./session.ts";
+import { renderNodesToBytes } from "./doc-render.ts";
 import { encodeDocToOra, decodeOraToPainting, paintingDataToEncodeDoc, parseAppVersion, type DecodedPainting } from "./ora.ts";
 import { flattenViewLeaves } from "./workpiece/painting-view.ts";
 import { tLatin } from "./i18n/index.ts";
@@ -165,15 +165,16 @@ function _buildOraMeta() {
 //   且不阻塞用户（tile 不可变 ⇒ 后续编辑全是 CoW 新 tile）。达意实现 spec「保存阻塞锁写不锁读」，
 //   比字面锁更强——待追认（S8 报告拍板清单）。
 async function _encodeCurrentOraWithPeek(): Promise<{ bytes: Blob; peek: Blob | null }> {
-  // merged（GL 合成）与 freeze 在**同一同步刻**取自活 doc → mergedimage/缩略图/层数据三者一致。
-  //   GL 不可用（context lost 中的 autosave）→ merged=null：ora 用透明占位、peek 省略——层数据照常落盘。
-  const merged = renderNodesToCanvas(doc.layers, doc.width, doc.height);
+  // merged（GL 合成字节，C3 全字节管线）与 freeze 在**同一同步刻**取自活 doc → mergedimage/缩略图/
+  //   层数据三者一致。GL 不可用（context lost 中的 autosave）→ merged=null：ora 用透明占位、
+  //   peek 省略——层数据照常落盘。
+  const merged = renderNodesToBytes(doc.layers, doc.width, doc.height);
   // v2 冻结形（T3b-2）：exportData 当场拷出全部字节（同步刻，与 merged 同源一致）→ 编码期任何
   //   编辑都追不进快照；无句柄、无 dispose。paintingDataToEncodeDoc 只是纯切片视图。
   const frozen = paintingDataToEncodeDoc(wp2.exportData());
   const meta = _buildOraMeta();
-  const bytes = await encodeDocToOra(frozen, { ...meta, mergedCanvas: merged }) as Blob;
-  const peek = merged ? await thumbBlobFromCanvas(merged, 256) : null;
+  const bytes = await encodeDocToOra(frozen, { ...meta, mergedBytes: merged }) as Blob;
+  const peek = merged ? await thumbBlobFromBytes(merged, 256) : null;
   return { bytes, peek };
 }
 

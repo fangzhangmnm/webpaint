@@ -19,7 +19,9 @@ import { reportError } from "./error-badge.ts";
 import { session } from "./session-state.ts";
 import type { ViewLeaf } from "./workpiece/painting-view.ts";
 import { renderDocToImageBlob } from "./session.ts";
-import { smartResample, canvasToBlob , imageSourceToBytes } from "./resample.ts";
+import { imageSourceToBytes } from "./shell/image-io.ts";
+import { resampleBytes } from "./backend/algorithms/resample-bytes.ts";
+import { encodePngFromBytes } from "./png-codec.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { setMenuOpen } from "./settings-menu.ts";
 import { desk } from "./workbench-state.ts";
@@ -227,17 +229,17 @@ function parseTargetSize(): { w: number; h: number } | null {
 }
 
 // 把 doc 渲成要推的 PNG。target===null → 原 doc 尺寸直接用合成器产物；
-// 否则缩到 W×H：拉伸（不裁不留边），缩放全走 smartResample 深模块（抗锯齿）。
+// 否则缩到 W×H：拉伸（不裁不留边），缩放走 resampleBytes（C3 全字节：缩→area/放→bicubic，α 加权）。
 async function renderPushPng(scope: string, target: { w: number; h: number } | null): Promise<Blob> {
   const blob = await renderDocToImageBlob(ctx.doc, "image/png", undefined, scope);
   if (!blob) throw new Error("渲染画布失败");
   if (!target) return blob;
   const bmp = await createImageBitmap(blob);
   try {
-    const scaled = smartResample(bmp, target.w, target.h);   // stretch → W×H，安全缩小
-    const out = await canvasToBlob(scaled, "image/png");
-    if (!out) throw new Error("编码 PNG 失败");
-    return out;
+    const px = imageSourceToBytes(bmp);   // 解码边界唯一读出
+    const scaled = resampleBytes(px.data, px.w, px.h, target.w, target.h, "auto");   // stretch → W×H
+    const png = await encodePngFromBytes(scaled, target.w, target.h);
+    return new Blob([png as unknown as BlobPart], { type: "image/png" });
   } finally {
     bmp.close();
   }

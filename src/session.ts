@@ -18,8 +18,10 @@
 //     把"加载失败的 path"当 oldName 删掉
 //   - **破坏性操作永远用「真正载入的路径」**，不用这里的 getCurrentSessionName()
 
-import { renderNodesToCanvas } from "./doc-render.ts";
-import { smartResample, canvasToBlob } from "./resample.ts";
+import { renderNodesToBytes } from "./doc-render.ts";
+import { areaResampleBytes } from "./backend/algorithms/resample-bytes.ts";
+import { encodePngFromBytes } from "./png-codec.ts";
+import { canvasToBlob } from "./shell/image-io.ts";
 import { appState } from "./app-state.ts";   // active session name = appState.currentFile（synced-app-state，跨设备 resume）
 import type { PaintingView } from "./workpiece/painting-view.ts";
 
@@ -50,17 +52,17 @@ export function setCurrentSessionName(name: string) {
 //  吃掉一个加密文件的（见 feedback-phantom-current-path）。留着 = 一把上了膛的枪，删掉最省心。
 //  现役破坏性操作全部用「真正载入的路径」（item.name / _activeSessionName，后者只在 es.open() 成功后升级）。）
 
-/** 合成图 canvas → 缩略图 blob（最长边 = maxSide）。PNG 保 alpha（容器 CSS 背景可独立调色）。
- *  S9：不再自己合成——merged 由调用方给（GL doc-render 渲出，与 display/存档同源同刻）。 */
-export async function thumbBlobFromCanvas(merged: HTMLCanvasElement | OffscreenCanvas, maxSide = 256) {
-  const W = merged.width, H = merged.height;
-  const scale = Math.min(1, maxSide / Math.max(W, H));
-  const tw = Math.max(1, Math.round(W * scale));
-  const th = Math.max(1, Math.round(H * scale));
-  // step-halving 缩小（抗锯齿，缩略图更干净）；scale=1 时 smartResample 直接收尾不失真
-  const thumb = smartResample(merged, tw, th);
+/** 合成字节 → 缩略图 blob（最长边 = maxSide）。PNG 保 alpha（容器 CSS 背景可独立调色）。
+ *  S9：不再自己合成——merged 由调用方给（GL doc-render 渲出，与 display/存档同源同刻）。
+ *  C3：全字节管线——areaResampleBytes（面积平均，α 加权）+ UPNG，零 canvas。 */
+export async function thumbBlobFromBytes(merged: { data: Uint8ClampedArray; w: number; h: number }, maxSide = 256) {
+  const scale = Math.min(1, maxSide / Math.max(merged.w, merged.h));
+  const tw = Math.max(1, Math.round(merged.w * scale));
+  const th = Math.max(1, Math.round(merged.h * scale));
+  const px = scale < 1 ? areaResampleBytes(merged.data, merged.w, merged.h, tw, th) : merged.data;
   // PNG 保 alpha；体积通常 5-25KB（立绘透明区压缩好），可接受
-  return await canvasToBlob(thumb, "image/png");
+  const png = await encodePngFromBytes(px, tw, th);
+  return new Blob([png as unknown as BlobPart], { type: "image/png" });
 }
 
 // 本地 session 列举（listSessions / isTrashKey / _detectEncrypted）已删（v415）：它读的 `sessions`
@@ -89,41 +91,55 @@ export async function thumbBlobFromCanvas(merged: HTMLCanvasElement | OffscreenC
 // 去向（分享/下载/剪贴板）是正交的 sink，见 shareOrDownloadBlob。故此函数公开。
 // #16（v0.5）：cropRect = 「仅导出选区范围」（选区 bbox，doc 坐标）；null/undefined = 全文档（旧行为）。
 export async function renderDocToImageBlob(doc: PaintingView, mime = "image/png", quality?: number, scope = "merged", cropRect?: { x: number; y: number; w: number; h: number } | null) {
-  const c = document.createElement("canvas");
-  c.width = doc.width;
-  c.height = doc.height;
-  const ctx = c.getContext("2d")!;
-  // v134 (user：「导出 png 保留透明度！！」) 只 JPG 涂 doc 背景（无 alpha 通道）
-  //   PNG 永远不涂，empty 区域 = 透明，user 想要白底自己加图层
-  const wantBg = mime === "image/jpeg";
-  if (wantBg) {
-    ctx.fillStyle = doc.backgroundColor || "#ffffff";
-    ctx.fillRect(0, 0, doc.width, doc.height);
-  }
-  // S9：合成走 GL（doc-render，与 display 同源，含 clip + 组隔离）。
+  // S9：合成走 GL（doc-render，与 display 同源，含 clip + 组隔离）。C3（债 d）：全字节管线——
+  //   合成字节 → 裁剪/铺底全在字节上做；canvas 只剩 JPEG 编码边界（提案 §4 壳域合法名单）。
   //   scope==="active"：仅当前节点（组照常整树合成）；剥掉节点**自身**的 clippingMask（基底不在导出里，
   //   否则 planner 判 clip 无基底不渲染——对齐旧 ignoreSelfClip 语义），组/叶内部 clip 不受影响。
   const nodes = scope === "active"
     ? (doc.activeLayer ? [{ ...(doc.activeLayer as unknown as Record<string, unknown>), clippingMask: false }] : [])
     : (doc.layers as unknown[]);
-  const merged = nodes.length ? renderNodesToCanvas(nodes, doc.width, doc.height) : null;
-  if (nodes.length && !merged) throw new Error("GL 不可用，无法合成导出图");
-  if (merged) ctx.drawImage(merged, 0, 0);
-  // #16：裁剪到选区 bbox（合成仍整 doc 做——GL 合成一次性的，裁剪只是末端取样）
-  let out = c;
+  let plane = nodes.length ? renderNodesToBytes(nodes, doc.width, doc.height) : { data: new Uint8ClampedArray(doc.width * doc.height * 4), w: doc.width, h: doc.height };
+  if (!plane) throw new Error("GL 不可用，无法合成导出图");
+  // #16：裁剪到选区 bbox（合成仍整 doc 做——GL 合成一次性的，裁剪只是末端行拷贝）
   if (cropRect && cropRect.w > 0 && cropRect.h > 0) {
-    const cc = document.createElement("canvas");
-    cc.width = cropRect.w; cc.height = cropRect.h;
-    cc.getContext("2d")!.drawImage(c, -cropRect.x, -cropRect.y);
-    out = cc;
+    const cw = cropRect.w, ch = cropRect.h;
+    const cut = new Uint8ClampedArray(cw * ch * 4);
+    const x0 = Math.max(0, cropRect.x), x1 = Math.min(plane.w, cropRect.x + cw);
+    const y0 = Math.max(0, cropRect.y), y1 = Math.min(plane.h, cropRect.y + ch);
+    for (let y = y0; y < y1; y++) {
+      const si = (y * plane.w + x0) * 4;
+      const di = ((y - cropRect.y) * cw + (x0 - cropRect.x)) * 4;
+      cut.set(plane.data.subarray(si, si + (x1 - x0) * 4), di);
+    }
+    plane = { data: cut, w: cw, h: ch };
   }
-  const blob = await new Promise<Blob | null>((resolve) => out.toBlob(resolve, mime, quality));
+  // v134 (user：「导出 png 保留透明度！！」) PNG 永远不涂底，empty 区域 = 透明，user 想要白底自己加图层。
+  if (mime !== "image/jpeg") {
+    const png = await encodePngFromBytes(plane.data, plane.w, plane.h);
+    return new Blob([png as unknown as BlobPart], { type: "image/png" });
+  }
+  // JPG 无 alpha 通道 → doc 背景直下（straight source-over 到不透明底，纯字节数学）。
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec((doc.backgroundColor || "#ffffff").trim());
+  const br = m ? parseInt(m[1], 16) : 255, bgc = m ? parseInt(m[2], 16) : 255, bb = m ? parseInt(m[3], 16) : 255;
+  const flat = new Uint8ClampedArray(plane.w * plane.h * 4);
+  const src = plane.data;
+  for (let p = 0; p < src.length; p += 4) {
+    const a = src[p + 3] / 255;
+    flat[p] = src[p] * a + br * (1 - a);
+    flat[p + 1] = src[p + 1] * a + bgc * (1 - a);
+    flat[p + 2] = src[p + 2] * a + bb * (1 - a);
+    flat[p + 3] = 255;
+  }
+  // canvas 仅当 JPEG 编码器（壳域名单：jpg 编码）。全走 HTMLCanvasElement.toBlob，
+  // 避开 Safari OffscreenCanvas.convertToBlob JPEG 返 null 的 bug。
+  const c = document.createElement("canvas");
+  c.width = plane.w; c.height = plane.h;
+  c.getContext("2d")!.putImageData(new ImageData(flat, plane.w, plane.h), 0, 0);
+  const blob = await new Promise<Blob | null>((resolve) => c.toBlob(resolve, mime, quality));
   if (blob) return blob;
-  // jpg 返 null 兜底走 png
-  if (mime !== "image/png") {
-    return await new Promise<Blob | null>((resolve) => out.toBlob(resolve, "image/png"));
-  }
-  throw new Error("canvas.toBlob 返 null");
+  // jpg 返 null 兜底走 png（铺过底的字节直接 UPNG）
+  const png = await encodePngFromBytes(flat, plane.w, plane.h);
+  return new Blob([png as unknown as BlobPart], { type: "image/png" });
 }
 
 // 只有移动端（iOS/iPadOS/Android）才优先 share（→ 相册/Files 才是自然"保存"路径）。

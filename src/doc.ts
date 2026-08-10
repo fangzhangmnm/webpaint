@@ -7,7 +7,6 @@
 //   · 「doc」一词回归 user 术语 = 惰化持久格式（EncodeDoc/decode 侧）；活文档叫 workpiece，
 //     app 读口叫端口（ctx.doc = PaintingView，保留端口形——提案 .h T5 评估选项①）。
 
-import { smartResample } from "./resample.ts";
 import { makeBitmap } from "./bitmap.ts";
 import { LayerPixels, materialize, editRegion as editPixels, editRegionBytes as editPixelsBytes, replaceFromCanvas as replacePixels, disposePixelsSnapshot, type PixelsSnapshot } from "./tiles/tile-layer.ts";
 import { renderNodesToBytes } from "./doc-render.ts";

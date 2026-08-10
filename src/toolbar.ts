@@ -16,7 +16,7 @@ import { makeRampSlider } from "./ui/ramp-slider.ts";
 import type { RampSliderHandle } from "./ui/ramp-slider.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { desk } from "./workbench-state.ts";   // pickMode → desk.colorPicker.layerMode SSoT（binding 写反应式）
-import { fillResampleSelect } from "./resample.ts";
+import { fillResampleSelect } from "./frontend/resample-modes.ts";
 import { t } from "./i18n/index.ts";
 import { fillPreviewActive, commitFillNow, sendSelectionToFill } from "./fill-mode.ts";
 import { anchorPopupToBtn } from "./anchored-popup.ts";

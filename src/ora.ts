@@ -21,9 +21,8 @@
 
 import { reportError } from "./error-badge.ts";
 import { zipPack, zipUnpack } from "./zip.ts";
-import { smartResample } from "./resample.ts";
-import { makeBitmap } from "./bitmap.ts";
-import { encodePngFromBytes, encodePngFromCanvas, decodePngToBytes } from "./png-codec.ts";
+import { areaResampleBytes } from "./backend/algorithms/resample-bytes.ts";
+import { encodePngFromBytes, decodePngToBytes } from "./png-codec.ts";
 // 纯树↔stack.xml 序列化（嵌套组 + id + active）抽到独立深模块（无 canvas 依赖，可纯 node 测）。
 import { buildStackXml, parseStackXml } from "./ora-stack-xml.ts";
 import type { ParsedNode } from "./ora-stack-xml.ts";
@@ -93,7 +92,7 @@ export function paintingDataToEncodeDoc(data: PaintingData): EncodeDoc {
 }
 // encode opts：两个可选 WebPaint 私有扩展。
 interface EncodeOpts {
-  mergedCanvas?: OffscreenCanvas | HTMLCanvasElement | null;   // S9：调用方渲好的合成图（GL）；缺省=透明占位
+  mergedBytes?: { data: Uint8ClampedArray; w: number; h: number } | null;   // S9/C3：调用方渲好的合成字节（GL renderNodesToBytes）；缺省=透明占位
   referenceImage?: Blob;
   desk?: object;   // desk.Serialize() → .webpaint/editor-state.json（desk per-doc；不向后兼容 webpaint/state.json）
 }
@@ -122,33 +121,24 @@ function bytesToString(bytes: Uint8Array): string {
 
 /** 缩略图自适应：先按 256 编码，超 70KB 降 192，再超降 128，最后档不论大小都收。
  *  cloud-thumbs.js suffix budget = 80KB；留 ~10KB 给 zip 尾巴（CD + EOCD + 扫描余量）→ thumb ≤ 70KB
- *  返 { canvas, png: Uint8Array }
+ *  返 png: Uint8Array。
+ *  C3：全字节管线——缩小走 areaResampleBytes（面积平均 = 抗锯齿正解，α 加权；旧 canvas
+ *  step-halving 是它的近似，细线稿狗牙教训同样成立）。
  */
-async function renderThumbnailAdaptive(merged: OffscreenCanvas | HTMLCanvasElement, maxBytes = 71680) {
+async function renderThumbnailAdaptive(merged: { data: Uint8ClampedArray; w: number; h: number }, maxBytes = 71680) {
   const sizes = [256, 192, 128];
-  let lastPng: Uint8Array | null = null, lastCanvas: OffscreenCanvas | HTMLCanvasElement | null = null;
+  let lastPng: Uint8Array | null = null;
   for (let i = 0; i < sizes.length; i++) {
-    const c = renderThumbnail(merged, sizes[i]);
-    const png = await encodePngFromCanvas(c);
-    lastPng = png; lastCanvas = c;
-    if (png.byteLength <= maxBytes) return { canvas: c, png };
+    const scale = Math.min(1, sizes[i] / Math.max(merged.w, merged.h));
+    const tw = Math.max(1, Math.round(merged.w * scale));
+    const th = Math.max(1, Math.round(merged.h * scale));
+    const px = scale < 1 ? areaResampleBytes(merged.data, merged.w, merged.h, tw, th) : merged.data;
+    const png = await encodePngFromBytes(px, tw, th);
+    lastPng = png;
+    if (png.byteLength <= maxBytes) return png;
   }
   // 都超：用最小尺寸的结果
-  return { canvas: lastCanvas, png: lastPng };
-}
-
-/** 缩略图：最长边 = maxSide 的小图。
- *
- * step-halving 抗锯齿（细线稿单次大比例 drawImage 会出狗牙）统一收在 resample.js
- * 的 smartResample——之前这里抄了一份且循环条件写成 && 导致细长画布退化成单次缩，
- * 现删除重复实现直接复用 SSoT。
- */
-function renderThumbnail(merged: OffscreenCanvas | HTMLCanvasElement, maxSide = 256) {
-  const srcW = merged.width, srcH = merged.height;
-  const scale = Math.min(1, maxSide / Math.max(srcW, srcH));
-  const tw = Math.max(1, Math.round(srcW * scale));
-  const th = Math.max(1, Math.round(srcH * scale));
-  return smartResample(merged, tw, th);
+  return lastPng!;
 }
 
 /** doc → Blob (.ora)
@@ -161,13 +151,13 @@ function renderThumbnail(merged: OffscreenCanvas | HTMLCanvasElement, maxSide = 
  * opts.referenceImage: optional Blob
  */
 export async function encodeDocToOra(doc: EncodeDoc, opts: EncodeOpts = {}) {
-  // S9：merged 由调用方渲入（opts.mergedCanvas，GL 合成、与 display 同源；v134 约定保 alpha 不涂底）。
+  // S9：merged 由调用方渲入（opts.mergedBytes，GL 合成字节、与 display 同源；v134 约定保 alpha 不涂底）。
   //   缺省（node 测试 / GL lost 的 autosave 兜底）= 透明占位——层数据完整，mergedimage 只是预览件。
-  let merged = opts.mergedCanvas ?? null;
-  if (!merged) { merged = makeBitmap(doc.width, doc.height); merged.getContext("2d"); }
-  const mergedPng = await encodePngFromCanvas(merged);
+  const merged = opts.mergedBytes
+    ?? { data: new Uint8ClampedArray(doc.width * doc.height * 4), w: doc.width, h: doc.height };
+  const mergedPng = await encodePngFromBytes(merged.data, merged.w, merged.h);
   // thumb：自适应尺寸 256→192→128，目标 ≤ 80KB（让云端 48KB suffix 大概率命中）
-  const { png: thumbPng } = await renderThumbnailAdaptive(merged);
+  const thumbPng = await renderThumbnailAdaptive(merged);
 
   // entry 顺序很重要：
   //   1. spec 强制 mimetype 第一
@@ -187,12 +177,8 @@ export async function encodeDocToOra(doc: EncodeDoc, opts: EncodeOpts = {}) {
       // v0.6.42：tiles 字节直读进 codec facade（不再经 L.canvas 物化）
       png = await encodePngFromBytes(L.getImageData(L.bboxX, L.bboxY, L.bboxW, L.bboxH).data, L.bboxW, L.bboxH);
     } else {
-      // 空层 → 1×1 透明 png。**必须先取一次 2d context**：OffscreenCanvas 从未 getContext 就
-      // convertToBlob，Chromium 抛「offscreen canvas has no rendering content」→ 空层/空画布存不了。
-      // （renderMerged 那条路径 makeBitmap 后立刻 getContext，所以不踩；只有这个占位分支漏了。）
-      const c = makeBitmap(1, 1);
-      c.getContext("2d");
-      png = await encodePngFromCanvas(c);
+      // 空层 → 1×1 透明 png（C3：直接字节编码；旧 makeBitmap+getContext 的 Chromium 空 canvas 坑随之蒸发）。
+      png = await encodePngFromBytes(new Uint8ClampedArray(4), 1, 1);
     }
     entries.push({ path: `data/layer${L.id}.png`, data: png });
   }
