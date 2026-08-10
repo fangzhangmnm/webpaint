@@ -38,7 +38,7 @@ const BLEND_BODY: Record<BlendMode, string> = {
   "exclusion": `return Cb + Cs - 2.0*Cb*Cs;`,
 };
 
-// 全屏 quad 顶点（attr location 0 = [0,1]² 位置即 uv；Gl2Port.quadVAO 提供该 buffer）。
+// 全屏 quad 顶点（attr location 0 = [0,1]² 位置即 uv；Gl2Port draw 动词内部提供该 buffer）。
 export const COMPOSITE_VERT = `#version 300 es
 layout(location=0) in vec2 a_pos;
 out vec2 v_uv;

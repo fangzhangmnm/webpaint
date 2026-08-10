@@ -14,12 +14,8 @@ export interface StrokeShape {
 }
 export declare class GLStampRasterizer {
     private _glctx;
-    private _vao;
-    private _instBuf;
-    private _vaoGen;
     private _instData;
     constructor(glctx: Gl2Port);
-    private _ensureVAO;
     rasterize(stamps: Stamp[], shape: StrokeShape, ox: number, oy: number, ow: number, oh: number, scissor?: {
         x: number;
         y: number;

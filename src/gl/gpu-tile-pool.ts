@@ -13,25 +13,26 @@
 //     CPU SSoT 兜底重传）。绘制中不建新 tile（commit 才建）→ 全量作废的感知成本可接受。
 //   - 开新文档/reload/context-loss：clearAll()（context-loss 另加 backend.recreate）。
 //
-// 分层：GpuTilePool 纯记账（node 全测，fake backend）；GLGpuTileBackend 真 GL；
+// 分层：GpuTilePool 纯记账（node 全测，fake backend）；真 GL 承载 = Gl2TileArena（C8 起归 Port
+//   所有——多 tab 公共资源，port.createTileArena 造，结构上满足 GpuTileBackend）；
 //   IndexTexture（tile 坐标→slice 的 R32F 小纹理，原 tile-index.ts 并入）是池的寻址伴侣——
 //   合成 shader 按 doc 坐标查它拿 slice（-1=透明），再进 array 池采像素。
 
 import { TILE_SIZE, tilesAcross, tilesDown } from "../common/tile-geometry.ts";
-import type { Gl2Port } from "../common/gl2-port.ts";
+import type { Gl2Port, Gl2Texture, PooledFBO } from "../common/gl2-port.ts";
 
 export const GPU_TILE_BYTES = TILE_SIZE * TILE_SIZE * 4;
 
-// 池的 GL 承载面（fake backend 即 node 全测；真实现 = GLGpuTileBackend）。
+// 池的 GL 承载面（fake backend 即 node 全测；真实现 = Gl2TileArena，Port 造）。
 export interface GpuTileBackend {
   readonly capacity: number;                              // slices
   // 重建为 newCapacity 的全新空存储（先删旧 + flush 再建，防显存双峰）。旧内容全丢。
   recreate(newCapacity: number): void;
   uploadSlice(slice: number, pixels: Uint8Array): void;
-  // 从**当前绑定的 READ_FRAMEBUFFER** 拷 (srcX,srcY) 起 w×h（≤256²）进 slice 左上（segment 缓存零
+  // 从 from 的颜色附件拷 (srcX,srcY) 起 w×h（≤256²）进 slice 左上（segment 缓存零
   //   readback 入池；doc 边缘 tile 不足 256 → 部分拷贝，slice 余下 texel 是旧值但永不被采样——
   //   sampleTiled 的 docPos < docSize 保证 local uv 不越进 padding）。
-  copySliceFromFramebuffer(slice: number, srcX: number, srcY: number, w: number, h: number): void;
+  copySlice(from: PooledFBO, slice: number, srcX: number, srcY: number, w: number, h: number): void;
 }
 
 export interface PinSets { required: Set<number>; preferred: Set<number> }
@@ -139,12 +140,12 @@ export class GpuTilePool {
     return ids;
   }
 
-  // 分配 + 从当前绑定的 READ_FRAMEBUFFER 拷一批区域（segment 缓存入池；边缘 tile 传 clamp 后的 w/h）。
-  copyBatchFromFramebuffer(items: { srcX: number; srcY: number; w: number; h: number }[]): number[] {
+  // 分配 + 从 src 的颜色附件拷一批区域（segment 缓存入池；边缘 tile 传 clamp 后的 w/h）。
+  copyBatchFrom(src: PooledFBO, items: { srcX: number; srcY: number; w: number; h: number }[]): number[] {
     const ids = this.allocBatch(items.length);
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
-      this._backend.copySliceFromFramebuffer(this._slot.get(ids[i])!, it.srcX, it.srcY, it.w, it.h);
+      this._backend.copySlice(src, this._slot.get(ids[i])!, it.srcX, it.srcY, it.w, it.h);
       this.stats.copies++;
     }
     return ids;
@@ -203,89 +204,22 @@ export class GpuTilePool {
   }
 }
 
-// ---- 真 GL backend（TEXTURE_2D_ARRAY；node 下不构造） ----
-
-export class GLGpuTileBackend implements GpuTileBackend {
-  private _glctx: Gl2Port;
-  private _tex: WebGLTexture | null = null;
-  private _capacity: number;
-
-  constructor(glctx: Gl2Port, initialSlices: number) {
-    this._glctx = glctx;
-    this._capacity = initialSlices;
-    this._alloc();
-  }
-
-  get capacity(): number { return this._capacity; }
-  // 合成器采样用（sampler2DArray）。
-  get texture(): WebGLTexture { return this._tex!; }
-
-  private _alloc(): void {
-    const gl = this._glctx.gl;
-    const tex = gl.createTexture();
-    if (!tex) throw new Error("CREATE_ARRAY_TEX_FAILED");
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
-    // immutable storage：1 mip、RGBA8（straight——预乘概念不进 tile 存储，spec:246）。
-    gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA8, TILE_SIZE, TILE_SIZE, this._capacity);
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
-    this._tex = tex;
-  }
-
-  // 先删旧 → flush（催 GPU 真回收）→ 再建（防显存双峰，spec:175）。context-loss 后旧句柄已死，删除无害。
-  recreate(newCapacity: number): void {
-    const gl = this._glctx.gl;
-    if (this._tex) { try { gl.deleteTexture(this._tex); } catch { /* context 已丢，无害 */ } }
-    gl.flush();
-    this._capacity = newCapacity;
-    this._alloc();
-  }
-
-  uploadSlice(slice: number, pixels: Uint8Array): void {
-    const gl = this._glctx.gl;
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this._tex);
-    gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, slice, TILE_SIZE, TILE_SIZE, 1,
-      gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
-  }
-
-  copySliceFromFramebuffer(slice: number, srcX: number, srcY: number, w: number, h: number): void {
-    const gl = this._glctx.gl;
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this._tex);
-    gl.copyTexSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, slice, srcX, srcY, w, h);
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
-  }
-}
-
 // ---- IndexTexture（原 tile-index.ts 并入）：某「源」（叶层/段）的 tile 坐标 → 池 slice ----
 // R32F across×down；texelFetch 点采；-1=空=透明。整图极小，整传。
 
 export class IndexTexture {
-  private _gl: WebGL2RenderingContext;
-  readonly tex: WebGLTexture;
+  private _port: Gl2Port;
+  readonly tex: Gl2Texture;
   readonly across: number;
   readonly down: number;
   private _data: Float32Array;
 
   constructor(glctx: Gl2Port, docW: number, docH: number) {
-    const gl = glctx.gl;
-    this._gl = gl;
+    this._port = glctx;
     this.across = tilesAcross(docW);
     this.down = tilesDown(docH);
     this._data = new Float32Array(this.across * this.down).fill(-1);
-    const tex = gl.createTexture();
-    if (!tex) throw new Error("CREATE_INDEX_TEX_FAILED");
-    this.tex = tex;
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.R32F, this.across, this.down);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.bindTexture(gl.TEXTURE_2D, null);
+    this.tex = glctx.createTexture();
     this._upload();
   }
 
@@ -302,12 +236,9 @@ export class IndexTexture {
     this._upload();
   }
 
-  dispose(): void { this._gl.deleteTexture(this.tex); }
+  dispose(): void { this._port.deleteTexture(this.tex); }
 
   private _upload(): void {
-    const gl = this._gl;
-    gl.bindTexture(gl.TEXTURE_2D, this.tex);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.across, this.down, gl.RED, gl.FLOAT, this._data);
-    gl.bindTexture(gl.TEXTURE_2D, null);
+    this._port.uploadTexture(this.tex, "r32f", this.across, this.down, this._data);
   }
 }

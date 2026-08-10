@@ -9,7 +9,7 @@ function fakeBackend(capacity = 32) {
     capacity, uploads: 0,
     recreate(n) { be.capacity = n; },
     uploadSlice() { be.uploads++; },
-    copySliceFromFramebuffer() {},
+    copySlice() {},
   };
   return be;
 }

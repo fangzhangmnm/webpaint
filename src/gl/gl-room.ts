@@ -8,10 +8,10 @@
 //   - composeSteps 合成机：display 帧与一次性合成走同一条 pass 序（观感零漂移）。
 // RenderTree 私有的仍在 RenderTree（段缓存/display/plan 签名/frameStats）；本类零策略、零帧决策。
 
-import { GpuTilePool, GLGpuTileBackend, IndexTexture, GPU_TILE_BYTES } from "./gpu-tile-pool.ts";
+import { GpuTilePool, IndexTexture, GPU_TILE_BYTES } from "./gpu-tile-pool.ts";
 import { CpuGpuTileBridge } from "./tile-bridge.ts";
 import { appTilePool } from "../backend/tiles/app-tile-pool.ts";
-import { tilesAcross, tilesDown } from "../common/tile-geometry.ts";
+import { TILE_SIZE, tilesAcross, tilesDown } from "../common/tile-geometry.ts";
 import { GLCompositor } from "./gl-compositor.ts";
 import type { Acc, OverlayDesc, FloatDesc } from "./gl-compositor.ts";
 import { safeMode } from "./gl-doc-bridge.ts";
@@ -20,7 +20,7 @@ import { LayerPixels } from "../backend/tiles/tile-layer.ts";
 import { GLStampRasterizer } from "./gl-stamp.ts";
 import type { Stamp, StrokeShape } from "./gl-stamp.ts";
 import type { Plan, PlanNode, PlanStep, SegBuild } from "../render/render-plan.ts";
-import type { PooledFBO, FBOPrec, Gl2Port } from "../common/gl2-port.ts";
+import type { PooledFBO, FBOPrec, Gl2Port, Gl2Texture, Gl2TexSource, Gl2TileArena } from "../common/gl2-port.ts";
 import type { BlendMode } from "./blend-glsl.ts";
 
 // ---- board 输入（原 render-tree-gl 同名接口原样迁入） ----
@@ -76,7 +76,7 @@ export interface LeafRec { index: IndexTexture; byKey: Map<number, number>; src:
 
 export class GlRoom {
   readonly glctx: Gl2Port;
-  readonly backend: GLGpuTileBackend;
+  readonly arena: Gl2TileArena;      // GPU tile 纹理仓（C8 起归 Port 所有；池记账在 pool）
   readonly pool: GpuTilePool;
   readonly bridge: CpuGpuTileBridge;
   readonly comp: GLCompositor;
@@ -86,13 +86,14 @@ export class GlRoom {
   readonly leaves = new Map<number, LeafRec>();
 
   // pseudo 装置（overlay/float/选区 mask/fill 色）——live 预览与一次性合成（吸管 WYSIWYG）共用。
-  private _overlay: { tex: WebGLTexture; layerId: number; opacity: number; erase: boolean; blendMode: string; ox: number; oy: number; ow: number; oh: number; lockAlpha: boolean; selMask: { tex: WebGLTexture; ox: number; oy: number; ow: number; oh: number } | null } | null = null;
+  private _overlay: { tex: Gl2TexSource; layerId: number; opacity: number; erase: boolean; blendMode: string; ox: number; oy: number; ow: number; oh: number; lockAlpha: boolean; selMask: { tex: Gl2Texture; ox: number; oy: number; ow: number; oh: number } | null } | null = null;
   private _overlayOwnedFBO: PooledFBO | null = null;
-  private _selTex: WebGLTexture | null = null;
+  private _selTex: Gl2Texture | null = null;
   private _selTexSrc: Uint8Array | null = null;
-  private _fillTex: WebGLTexture | null = null;    // fill-mode：1×1 填色纹理（颜色变才重传）
+  private _fillTex: Gl2Texture | null = null;    // fill-mode：1×1 填色纹理（颜色变才重传）
   private _fillTexColor = -1;
-  private _floatTex = new Map<number, { tex: WebGLTexture; canvas: CanvasImageSource | null }>();
+  // 浮层源纹理缓存；contentKey = 平面 typed array 身份（identity 即内容，源变才重传）。
+  private _floatTex = new Map<number, { tex: Gl2Texture; contentKey: unknown }>();
   private _floats = new Map<number, FloatDesc>();
 
   // v0.4.11：live 描边中给 clip-above 用的 merged(base⊕stroke) 整幅纹理（帧内缓存，帧末归还）。
@@ -103,8 +104,8 @@ export class GlRoom {
 
   constructor(glctx: Gl2Port, maxSlices: number, accumPrec: FBOPrec = "u8") {
     this.glctx = glctx;
-    this.backend = new GLGpuTileBackend(glctx, Math.min(64, maxSlices));
-    this.pool = new GpuTilePool(this.backend, maxSlices);
+    this.arena = glctx.createTileArena(TILE_SIZE, Math.min(64, maxSlices));
+    this.pool = new GpuTilePool(this.arena, maxSlices);
     this.bridge = new CpuGpuTileBridge(this.pool);
     this.comp = new GLCompositor(glctx, accumPrec);
     this.rasterizer = new GLStampRasterizer(glctx);
@@ -226,7 +227,7 @@ export class GlRoom {
   // ---- step 合成机（display 帧与一次性合成同一条 pass 序） ----
   // segLookup = RenderTree 的段缓存读口（一次性合成传 null——所有段都在 transient）。
   composeSteps(steps: PlanStep[], acc: Acc, docW: number, docH: number, transient: Map<string, PooledFBO>, segLookup: ((key: string) => IndexTexture | undefined) | null): void {
-    const arrayTex = this.backend.texture;
+    const arena = this.arena;
     for (const step of steps) {
       if (step.t === "leaf") {
         const rec = this.leaves.get(step.id);
@@ -234,7 +235,7 @@ export class GlRoom {
         const clipIdx = step.clipBaseId !== null ? this.leaves.get(step.clipBaseId)?.index ?? null : null;
         const clipTex = this.liveClipTexFor(step.clipBaseId, docW, docH);
         const ov = step.overlay && this._overlay && this._overlay.layerId === step.id ? this.overlayDesc() : null;
-        this.comp.pass(arrayTex, ov ? "overlay" : "tiled", rec.index, null, step.mode as BlendMode, step.opacity, clipIdx, acc, docW, docH, ov, clipTex);
+        this.comp.pass(arena, ov ? "overlay" : "tiled", rec.index, null, step.mode as BlendMode, step.opacity, clipIdx, acc, docW, docH, ov, clipTex);
       } else if (step.t === "seg") {
         // transient 优先（v0.4.11）：compositeOnce 把所有段都现算进 transient——若先查段缓存
         //   会命中上帧真内容、绕过替身换源（吸管 WYSIWYG 取不到替身的病根）。renderFrame 路径
@@ -243,11 +244,11 @@ export class GlRoom {
         const clipIdx = step.clipBaseId !== null ? this.leaves.get(step.clipBaseId)?.index ?? null : null;
         const clipTex = this.liveClipTexFor(step.clipBaseId, docW, docH);
         if (f) {
-          this.comp.pass(arrayTex, "group", null, f.tex, step.mode as BlendMode, step.opacity, clipIdx, acc, docW, docH, null, clipTex);
+          this.comp.pass(arena, "group", null, f, step.mode as BlendMode, step.opacity, clipIdx, acc, docW, docH, null, clipTex);
         } else {
           const segIdx = segLookup?.(step.key);
           if (!segIdx) continue;   // 不可达（缺段必在 transient）；防御性跳过
-          this.comp.pass(arrayTex, "tiled", segIdx, null, step.mode as BlendMode, step.opacity, clipIdx, acc, docW, docH, null, clipTex);
+          this.comp.pass(arena, "tiled", segIdx, null, step.mode as BlendMode, step.opacity, clipIdx, acc, docW, docH, null, clipTex);
         }
       } else if (step.t === "group") {
         const sub = this.comp.newAcc(docW, docH);
@@ -255,7 +256,7 @@ export class GlRoom {
         const res = this.comp.finishAcc(sub);
         const clipIdx = step.clipBaseId !== null ? this.leaves.get(step.clipBaseId)?.index ?? null : null;
         const clipTex = this.liveClipTexFor(step.clipBaseId, docW, docH);
-        this.comp.pass(arrayTex, "group", null, res.tex, step.mode as BlendMode, step.opacity, clipIdx, acc, docW, docH, null, clipTex);
+        this.comp.pass(arena, "group", null, res, step.mode as BlendMode, step.opacity, clipIdx, acc, docW, docH, null, clipTex);
         this.glctx.returnFBO(res);
       } else {   // float
         const desc = this._floats.get(step.id);
@@ -277,17 +278,17 @@ export class GlRoom {
   //   merged(base⊕stroke) 整幅 alpha——用 commit 同一配方（透明底 + overlay pass source-over/op1）
   //   现算一张、帧内缓存。修「clip 层不实时跟随基底 live 笔迹」（真机 2026-07-22）。
   //   基底非活动叶 / 无描边 → null（走原 tile-index 路径）。
-  liveClipTexFor(clipBaseId: number | null, docW: number, docH: number): WebGLTexture | null {
+  liveClipTexFor(clipBaseId: number | null, docW: number, docH: number): Gl2TexSource | null {
     if (clipBaseId === null || !this._overlay || this._overlay.layerId !== clipBaseId) return null;
     if (!this._liveMergedClip) {
       const rec = this.leaves.get(clipBaseId);
       const ovDesc = this.overlayDesc();
       if (!rec || !ovDesc) return null;
       const acc = this.comp.newAcc(docW, docH);
-      this.comp.pass(this.backend.texture, "overlay", rec.index, null, "source-over", 1, null, acc, docW, docH, ovDesc);
+      this.comp.pass(this.arena, "overlay", rec.index, null, "source-over", 1, null, acc, docW, docH, ovDesc);
       this._liveMergedClip = this.comp.finishAcc(acc);
     }
-    return this._liveMergedClip.tex;
+    return this._liveMergedClip;
   }
 
   // 帧末/一次性合成收尾：归还 liveMergedClip 帧内缓存。
@@ -314,26 +315,14 @@ export class GlRoom {
 
   setStampOverlay(ov: OverlayInput, docW: number, docH: number): void {
     if (overlayEmpty(ov)) { this._overlay = null; return; }
-    const gl = this.glctx.gl;
     if ("kind" in ov) {
       // fill：1×1 填色纹理拉伸到选区 bbox。不碰 stamp 光栅器、不借 FBO；shader overlay 分支
       //   bbox 外自透明（uv 越界检查）+ selMask dst-in = 恰为「选区内 source-over 填色」。
-      if (!this._fillTex) {
-        this._fillTex = gl.createTexture()!;
-        gl.bindTexture(gl.TEXTURE_2D, this._fillTex);
-        // 1×1 也必须给全采样参数（默认 MIN_FILTER 要 mip → 纹理不完整采黑），同 _selTex 参数块。
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      }
+      if (!this._fillTex) this._fillTex = this.glctx.createTexture();
       const colorKey = (ov.color[0] << 16) | (ov.color[1] << 8) | ov.color[2];
       if (this._fillTexColor !== colorKey) {
-        gl.bindTexture(gl.TEXTURE_2D, this._fillTex);
-        gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
-          new Uint8Array([ov.color[0], ov.color[1], ov.color[2], 255]));   // straight，alpha=1（裁剪全靠 selMask）
-        gl.bindTexture(gl.TEXTURE_2D, null);
+        // straight，alpha=1（裁剪全靠 selMask）
+        this.glctx.uploadTexture(this._fillTex, "rgba8", 1, 1, new Uint8Array([ov.color[0], ov.color[1], ov.color[2], 255]));
         this._fillTexColor = colorKey;
       }
       const selMask = this._uploadSelMask(ov.selMask);
@@ -343,33 +332,20 @@ export class GlRoom {
     // 整屏 doc FBO + scissor（池每帧同尺寸命中零 malloc)；着色靠 scissor 限回 stamp bbox。
     const fboP = this.rasterizer.rasterize(ov.stamps, ov.shape, 0, 0, docW, docH, { x: ov.bx, y: ov.by, w: ov.bw, h: ov.bh });
     const fboS = this.glctx.borrowFBO(docW, docH, "u8");
-    this.comp.presentTo(fboP.tex, fboS, docW, docH, true);   // 栅格器预乘 → straight
+    this.comp.presentTo(fboP, fboS, docW, docH, true);   // 栅格器预乘 → straight
     this.glctx.returnFBO(fboP);
     if (this._overlayOwnedFBO) this.glctx.returnFBO(this._overlayOwnedFBO);
     this._overlayOwnedFBO = fboS;
     const selMask = ov.selMask ? this._uploadSelMask(ov.selMask) : null;
-    this._overlay = { tex: fboS.tex, layerId: ov.layerId, opacity: ov.opacity, erase: ov.erase, blendMode: ov.blendMode, ox: 0, oy: 0, ow: docW, oh: docH, lockAlpha: ov.lockAlpha, selMask };
+    this._overlay = { tex: fboS, layerId: ov.layerId, opacity: ov.opacity, erase: ov.erase, blendMode: ov.blendMode, ox: 0, oy: 0, ow: docW, oh: docH, lockAlpha: ov.lockAlpha, selMask };
   }
 
   // 选区 mask 上传（stamp/fill 两分支共用）：单张复用纹理，buffer 身份即内容（Selection 不可变）。
   //   ⚠ 若 mask buffer 未来被池化复用，这个身份缓存就是地雷（同 identity 不同内容）——届时换显式版本号。
-  private _uploadSelMask(sm: { data: Uint8Array; ox: number; oy: number; ow: number; oh: number }): { tex: WebGLTexture; ox: number; oy: number; ow: number; oh: number } {
-    const gl = this.glctx.gl;
-    if (!this._selTex) {
-      this._selTex = gl.createTexture()!;
-      gl.bindTexture(gl.TEXTURE_2D, this._selTex);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    }
+  private _uploadSelMask(sm: { data: Uint8Array; ox: number; oy: number; ow: number; oh: number }): { tex: Gl2Texture; ox: number; oy: number; ow: number; oh: number } {
+    if (!this._selTex) this._selTex = this.glctx.createTexture();
     if (this._selTexSrc !== sm.data) {   // Selection 不可变 → buffer 身份即内容
-      gl.bindTexture(gl.TEXTURE_2D, this._selTex);
-      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, sm.ow, sm.oh, 0, gl.RED, gl.UNSIGNED_BYTE, sm.data);
-      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
-      gl.bindTexture(gl.TEXTURE_2D, null);
+      this.glctx.uploadTexture(this._selTex, "r8", sm.ow, sm.oh, sm.data);
       this._selTexSrc = sm.data;
     }
     return { tex: this._selTex, ox: sm.ox, oy: sm.oy, ow: sm.ow, oh: sm.oh };
@@ -378,7 +354,6 @@ export class GlRoom {
   get floats(): ReadonlyMap<number, FloatDesc> { return this._floats; }
 
   setFloats(floats: FloatInput[]): void {
-    const gl = this.glctx.gl;
     this._floats.clear();
     const seen = new Set<number>();
     for (const f of floats) {
@@ -386,36 +361,27 @@ export class GlRoom {
       seen.add(f.layerId);
       let entry = this._floatTex.get(f.layerId);
       if (!entry) {
-        const tex = gl.createTexture()!;
-        gl.bindTexture(gl.TEXTURE_2D, tex);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        entry = { tex, canvas: null };
+        entry = { tex: this.glctx.createTexture(), contentKey: null };
         this._floatTex.set(f.layerId, entry);
       }
       // 内容 key = 平面身份（模式切换 spline↔u8 时 key 变 → 自动重传）。全 typed array 上传：
-      // UNPACK_PREMULTIPLY flag 对 typed array 不适用，字节 verbatim 上卡——canvas 源上传在 Safari
-      // 上的 premult 转换不可靠（柔边变黑），v0.6.38 起禁入浮层管线。
-      const contentKey = ((f.mode === 3 && f.splinePlane) ? f.splinePlane.data : f.u8Plane?.data) as unknown as CanvasImageSource;
+      // 字节 verbatim 上卡——canvas 源上传在 Safari 上的 premult 转换不可靠（柔边变黑），
+      // v0.6.38 起禁入浮层管线。
+      const contentKey = (f.mode === 3 && f.splinePlane) ? f.splinePlane.data : f.u8Plane?.data;
       if (!contentKey) continue;
-      if (entry.canvas !== contentKey) {   // 源内容变（首次/换浮层/换采样族）才重传
-        gl.bindTexture(gl.TEXTURE_2D, entry.tex);
+      if (entry.contentKey !== contentKey) {   // 源内容变（首次/换浮层/换采样族）才重传
         if (f.mode === 3 && f.splinePlane) {
           const p = f.splinePlane;
-          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, p.w + 16, p.h + 16, 0, gl.RGBA, gl.FLOAT, p.data);
+          this.glctx.uploadTexture(entry.tex, "rgba16f", p.w + 16, p.h + 16, p.data);
         } else {
           const p = f.u8Plane!;
-          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, p.w, p.h, 0, gl.RGBA, gl.UNSIGNED_BYTE,
-            new Uint8Array(p.data.buffer, p.data.byteOffset, p.data.byteLength));
+          this.glctx.uploadTexture(entry.tex, "rgba8", p.w, p.h, p.data);
         }
-        entry.canvas = contentKey;
+        entry.contentKey = contentKey;
       }
       this._floats.set(f.layerId, { tex: entry.tex, srcW: f.srcW, srcH: f.srcH, hinv: f.hinv, mode: f.mode });
     }
-    gl.bindTexture(gl.TEXTURE_2D, null);
-    for (const [id, e] of this._floatTex) if (!seen.has(id)) { gl.deleteTexture(e.tex); this._floatTex.delete(id); }
+    for (const [id, e] of this._floatTex) if (!seen.has(id)) { this.glctx.deleteTexture(e.tex); this._floatTex.delete(id); }
   }
 }
 

@@ -1,8 +1,8 @@
 import type { BlendMode, SourceKind } from "./blend-glsl.ts";
 import type { IndexTexture } from "./gpu-tile-pool.ts";
-import type { Gl2Port, PooledFBO, FBOPrec } from "../common/gl2-port.ts";
+import type { Gl2Port, Gl2Texture, Gl2TexSource, Gl2TileArena, PooledFBO, FBOPrec } from "../common/gl2-port.ts";
 export interface OverlayDesc {
-    tex: WebGLTexture;
+    tex: Gl2TexSource;
     opacity: number;
     erase: boolean;
     blendMode: BlendMode;
@@ -12,7 +12,7 @@ export interface OverlayDesc {
     oh: number;
     lockAlpha?: boolean;
     selMask?: {
-        tex: WebGLTexture;
+        tex: Gl2Texture;
         ox: number;
         oy: number;
         ow: number;
@@ -20,7 +20,7 @@ export interface OverlayDesc {
     } | null;
 }
 export interface FloatDesc {
-    tex: WebGLTexture;
+    tex: Gl2Texture;
     srcW: number;
     srcH: number;
     hinv: number[];
@@ -39,20 +39,17 @@ export declare class GLCompositor {
         floatPasses: number;
     };
     constructor(glctx: Gl2Port, accumPrec?: FBOPrec);
-    private _program;
-    begin(docW: number, docH: number, resetStats?: boolean): void;
+    private _ensureProgram;
+    begin(_docW: number, _docH: number, resetStats?: boolean): void;
     end(): void;
     newAcc(docW: number, docH: number, bg?: Background): Acc;
     finishAcc(acc: Acc): PooledFBO;
     returnFBO(f: PooledFBO): void;
     private _drawChecker;
-    pass(arrayTex: WebGLTexture, srcKind: SourceKind, srcIndex: IndexTexture | null, groupTex: WebGLTexture | null, mode: BlendMode, opacity: number, clipIndex: IndexTexture | null, acc: Acc, docW: number, docH: number, overlay?: OverlayDesc | null, clipTex?: WebGLTexture | null): void;
+    pass(arena: Gl2TileArena, srcKind: SourceKind, srcIndex: IndexTexture | null, groupTex: Gl2TexSource | null, mode: BlendMode, opacity: number, clipIndex: IndexTexture | null, acc: Acc, docW: number, docH: number, overlay?: OverlayDesc | null, clipTex?: Gl2TexSource | null): void;
     floatPass(f: FloatDesc, acc: Acc, docW: number, docH: number, clipBase?: FloatDesc | null): void;
-    private _setSampler;
-    presentTo(srcTex: WebGLTexture, target: PooledFBO, w: number, h: number, unpremult?: boolean): void;
-    presentToScreen(srcTex: WebGLTexture, canvasW: number, canvasH: number): void;
-    presentToScreenAffine(srcTex: WebGLTexture, docW: number, docH: number, affine: number[], canvasW: number, canvasH: number, smooth?: boolean): void;
-    private _present;
+    presentTo(srcTex: Gl2TexSource, target: PooledFBO, w: number, h: number, unpremult?: boolean): void;
+    presentToScreenAffine(srcTex: Gl2TexSource, docW: number, docH: number, affine: number[], canvasW: number, canvasH: number, smooth?: boolean, clearColor?: [number, number, number, number] | null): void;
     warpToBytes(srcCanvas: {
         data: Float32Array;
         w: number;
@@ -68,5 +65,4 @@ export declare class GLCompositor {
         dstX: number;
         dstY: number;
     } | null;
-    private _clear;
 }

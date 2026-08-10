@@ -6,8 +6,9 @@
 // Chromium≠iPad GPU，故不当像素美学真相；blend 公式确定性 → 自 diff 对 iPad 也有效。
 // 结果 → window.__SMOKE__ = { ok, checks:[{name,ok,detail}], error, newGoldens }。
 
-import { BrowserGl2Port } from "../../src/shell/browser-gl2-port.ts";
-import { GLGpuTileBackend, GpuTilePool, IndexTexture, GPU_TILE_BYTES } from "../../src/gl/gpu-tile-pool.ts";
+import { BrowserGl2Port, BrowserTileArena } from "../../src/shell/browser-gl2-port.ts";
+import { GpuTilePool, IndexTexture, GPU_TILE_BYTES } from "../../src/gl/gpu-tile-pool.ts";
+import type { PooledFBO, Gl2Texture } from "../../src/common/gl2-port.ts";
 import { TILE_SIZE, tilesAcross } from "../../src/common/tile-geometry.ts";
 import { GLCompositor } from "../../src/gl/gl-compositor.ts";
 import { BLEND_MODES } from "../../src/gl/blend-glsl.ts";
@@ -118,7 +119,7 @@ function uploadLayerToTiles(glctx: BrowserGl2Port, pool: GpuTilePool, layer: { p
 }
 
 // 单 slice 读回（生产路径无 per-slice readback——batch 大 FBO 归 bridge；这里只为 smoke 验上传真到了 GPU）。
-function readSliceRaw(glctx: BrowserGl2Port, backend: GLGpuTileBackend, slice: number): Uint8Array {
+function readSliceRaw(glctx: BrowserGl2Port, backend: BrowserTileArena, slice: number): Uint8Array {
   const gl = glctx.gl;
   const fbo = gl.createFramebuffer()!;
   gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
@@ -226,35 +227,26 @@ function maxPremulDiff(ref: Uint8ClampedArray, glpx: Uint8Array, n: number): { m
 function idx1(glctx: BrowserGl2Port, slice: number): IndexTexture {
   const t = new IndexTexture(glctx, TILE_SIZE, TILE_SIZE); t.setSlice(0, 0, slice); return t;
 }
-// doc 尺寸直值 RGBA8 2D 纹理（live overlay 用）。
-function makeTex2D(glctx: BrowserGl2Port, img: Uint8Array, n: number): WebGLTexture {
-  const gl = glctx.gl; const tex = gl.createTexture()!;
-  gl.bindTexture(gl.TEXTURE_2D, tex);
-  gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, n, n);
-  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, n, n, gl.RGBA, gl.UNSIGNED_BYTE, img);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.bindTexture(gl.TEXTURE_2D, null);
+// doc 尺寸直值 RGBA8 2D 纹理（live overlay 用；C8 走 Port 纹理动词）。
+function makeTex2D(glctx: BrowserGl2Port, img: Uint8Array, n: number): Gl2Texture {
+  const tex = glctx.createTexture();
+  glctx.uploadTexture(tex, "rgba8", n, n, img);
   return tex;
 }
 function L(srcIndex: IndexTexture, opacity: number, mode: string, clip = false): Leaf {
   return { kind: "leaf", srcIndex, opacity, mode, clip, visible: true, hasContent: true };
 }
-function readComposite(glctx: BrowserGl2Port, comp: GLCompositor, accum: { tex: WebGLTexture }, n: number): Uint8Array {
-  const gl = glctx.gl;
+function readComposite(glctx: BrowserGl2Port, comp: GLCompositor, accum: PooledFBO, n: number): Uint8Array {
   const out = glctx.borrowFBO(n, n, "u8");
-  comp.presentTo(accum.tex, out, n, n);   // 累积器已直值（S7）→ 纯拷贝
-  const px = new Uint8Array(n * n * 4);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, out.fbo);
-  gl.readPixels(0, 0, n, n, gl.RGBA, gl.UNSIGNED_BYTE, px);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  comp.presentTo(accum, out, n, n);   // 累积器已直值（S7）→ 纯拷贝
+  const px = glctx.readPixels(out, 0, 0, n, n);
   glctx.returnFBO(out);
   return px;
 }
 
 // ---- B) blend parity ----
 function tolFor(mode: string): number { return (mode === "color-dodge" || mode === "color-burn") ? 12 : 4; }
-function blendParity(glctx: BrowserGl2Port, backend: GLTileBackend, add: Add, prec: "f16" | "f32"): void {
+function blendParity(glctx: BrowserGl2Port, backend: BrowserTileArena, add: Add, prec: "f16" | "f32" | "u8"): void {
   const n = TILE_SIZE; const comp = new GLCompositor(glctx, prec);
   const bd = makeImg(n, (x, y) => [8 + (x % 240), 8 + (y % 240), 8 + ((x + y) % 240), 160 + ((x * 7) % 80)]);
   const src = makeImg(n, (x, y) => [247 - (y % 240), 8 + (x % 240), 8 + ((x * y) % 240), 48 + ((y * 5) % 192)]);
@@ -262,7 +254,7 @@ function blendParity(glctx: BrowserGl2Port, backend: GLTileBackend, add: Add, pr
   const i0 = idx1(glctx, 0), i1 = idx1(glctx, 1); const opacity = 0.8;
   for (const mode of BLEND_MODES) {
     const ref = canvas2dRef(n, bd, src, mode, opacity);
-    const accum = compositeTree(comp, backend.texture, [L(i0, 1, "source-over"), L(i1, opacity, mode)], n, n);
+    const accum = compositeTree(comp, backend, [L(i0, 1, "source-over"), L(i1, opacity, mode)], n, n);
     const glpx = readComposite(glctx, comp, accum, n); glctx.returnFBO(accum);
     const { md, at } = maxPremulDiff(ref, glpx, n); const tol = tolFor(mode);
     add(`blend:${mode} [${prec}] vs Canvas2D`, md <= tol, `maxΔ=${md} ${md > tol ? at : ""}`);
@@ -270,13 +262,13 @@ function blendParity(glctx: BrowserGl2Port, backend: GLTileBackend, add: Add, pr
   i0.dispose(); i1.dispose();
 }
 function opaqueProbe(glctx: BrowserGl2Port, add: Add): void {
-  const n = TILE_SIZE; const backend = new GLGpuTileBackend(glctx, 4); const comp = new GLCompositor(glctx, "f32");
+  const n = TILE_SIZE; const backend = glctx.createTileArena(TILE_SIZE, 4) as BrowserTileArena; const comp = new GLCompositor(glctx, "f32");
   const bd = makeImg(n, (x) => [x, x, x, 255]); const src = makeImg(n, (_x, y) => [y, y, y, 255]);
   backend.uploadSlice(0, bd); backend.uploadSlice(1, src);
   const i0 = idx1(glctx, 0), i1 = idx1(glctx, 1);
   for (const mode of ["color-dodge", "color-burn"] as const) {
     const ref = canvas2dRef(n, bd, src, mode, 1);
-    const accum = compositeTree(comp, backend.texture, [L(i0, 1, "source-over"), L(i1, 1, mode)], n, n);
+    const accum = compositeTree(comp, backend, [L(i0, 1, "source-over"), L(i1, 1, mode)], n, n);
     const glpx = readComposite(glctx, comp, accum, n); glctx.returnFBO(accum);
     const { md, at } = maxPremulDiff(ref, glpx, n);
     add(`probe:${mode} opaque B()`, md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
@@ -284,7 +276,7 @@ function opaqueProbe(glctx: BrowserGl2Port, add: Add): void {
   i0.dispose(); i1.dispose();
 }
 function clipParity(glctx: BrowserGl2Port, add: Add): void {
-  const n = TILE_SIZE; const backend = new GLGpuTileBackend(glctx, 4); const comp = new GLCompositor(glctx, "f32");
+  const n = TILE_SIZE; const backend = glctx.createTileArena(TILE_SIZE, 4) as BrowserTileArena; const comp = new GLCompositor(glctx, "f32");
   const base = makeImg(n, (x, y) => [200, 40 + (x % 200), 40 + (y % 200), (x + y < n) ? 255 : ((x + y) % 256)]);
   const clip = makeImg(n, (x, y) => [40 + (y % 200), 8 + (x % 240), 200, 255]);
   backend.uploadSlice(0, base); backend.uploadSlice(1, clip);
@@ -293,7 +285,7 @@ function clipParity(glctx: BrowserGl2Port, add: Add): void {
     const opacity = 0.9;
     const ref = canvas2dClipRef(n, base, clip, mode, opacity);
     // clip 基底由 composite 内部 resolveClipBases 自动定位（base=底层叶）
-    const accum = compositeTree(comp, backend.texture, [L(i0, 1, "source-over"), L(i1, opacity, mode, true)], n, n);
+    const accum = compositeTree(comp, backend, [L(i0, 1, "source-over"), L(i1, opacity, mode, true)], n, n);
     const glpx = readComposite(glctx, comp, accum, n); glctx.returnFBO(accum);
     const { md, at } = maxPremulDiff(ref, glpx, n);
     add(`clip:${mode} vs Canvas2D`, md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
@@ -303,7 +295,7 @@ function clipParity(glctx: BrowserGl2Port, add: Add): void {
 
 // ---- C) 多 tile ----
 function multiTileParity(glctx: BrowserGl2Port, add: Add): void {
-  const N = 512; const backend = new GLGpuTileBackend(glctx, 8); const comp = new GLCompositor(glctx, "f32");
+  const N = 512; const backend = glctx.createTileArena(TILE_SIZE, 8) as BrowserTileArena; const comp = new GLCompositor(glctx, "f32");
   const bd = makeImg(N, (x, y) => [8 + (x % 240), 8 + (y % 240), 8 + ((x + y) % 240), 255]);
   const top = makeImg(N, (x, y) => ((x < 256 && y < 256) || (x >= 256 && y >= 256)) ? [240 - (x % 240), 8 + (y % 240), 100, 200] : [0, 0, 0, 0]);
   const bdIdx = new IndexTexture(glctx, N, N); let s = 0;
@@ -311,7 +303,7 @@ function multiTileParity(glctx: BrowserGl2Port, add: Add): void {
   const topIdx = new IndexTexture(glctx, N, N);
   backend.uploadSlice(4, subTile(top, N, 0, 0)); topIdx.setSlice(0, 0, 4);
   backend.uploadSlice(5, subTile(top, N, 1, 1)); topIdx.setSlice(1, 1, 5);
-  const accum = compositeTree(comp, backend.texture, [L(bdIdx, 1, "source-over"), L(topIdx, 1, "source-over")], N, N);
+  const accum = compositeTree(comp, backend, [L(bdIdx, 1, "source-over"), L(topIdx, 1, "source-over")], N, N);
   const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
   const ref = canvas2dRef(N, bd, top, "source-over", 1);
   const { md, at } = maxPremulDiff(ref, glpx, N);
@@ -341,7 +333,7 @@ function groupParity(glctx: BrowserGl2Port, add: Add): void {
   ];
 
   for (const { name, spec } of scenes) {
-    const backend = new GLGpuTileBackend(glctx, 16); const comp = new GLCompositor(glctx, "f32");
+    const backend = glctx.createTileArena(TILE_SIZE, 16) as BrowserTileArena; const comp = new GLCompositor(glctx, "f32");
     const indices: IndexTexture[] = [];
     let slice = 0;
     const build = (s: Spec): { gl: unknown; twoD: unknown } => {
@@ -366,7 +358,7 @@ function groupParity(glctx: BrowserGl2Port, add: Add): void {
     compositeLayers(gctx as unknown as CanvasRenderingContext2D, built.map((b) => b.twoD) as never, {});
     const ref = gctx.getImageData(0, 0, n, n).data;
     // GL
-    const accum = compositeTree(comp, backend.texture, built.map((b) => b.gl) as never, n, n);
+    const accum = compositeTree(comp, backend, built.map((b) => b.gl) as never, n, n);
     const glpx = readComposite(glctx, comp, accum, n); glctx.returnFBO(accum);
     const { md, at } = maxPremulDiff(ref, glpx, n);
     add(`group:${name} vs compositeLayers`, md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
@@ -376,7 +368,7 @@ function groupParity(glctx: BrowserGl2Port, add: Add): void {
 
 // ---- live overlay 注入 vs compositeLayers overlayFor（normal + erase）----
 function overlayParity(glctx: BrowserGl2Port, add: Add): void {
-  const n = TILE_SIZE; const backend = new GLGpuTileBackend(glctx, 4); const comp = new GLCompositor(glctx, "f32");
+  const n = TILE_SIZE; const backend = glctx.createTileArena(TILE_SIZE, 4) as BrowserTileArena; const comp = new GLCompositor(glctx, "f32");
   const bg = makeImg(n, (x, y) => [60, 120 + (x % 120), 60 + (y % 180), 255]);          // 底
   const layer = makeImg(n, (x, y) => [200, 60 + (x % 180), 80, 180 + ((x + y) % 76)]);   // 活动叶
   const ov = makeImg(n, (x, y) => ((x + y) % 64 < 40) ? [40 + (x % 200), 220, 60, 160 + (y % 80)] : [0, 0, 0, 0]);  // 描边（带空隙）
@@ -400,7 +392,7 @@ function overlayParity(glctx: BrowserGl2Port, add: Add): void {
     // GL：活动叶带 overlay（blendMode）
     const active = { ...L(i1, 1, "source-over"), overlay: { tex: ovTex, opacity, erase, blendMode: bm, ox: 0, oy: 0, ow: n, oh: n } };
     glctx.gl.getError();  // 清掉之前残留
-    const accum = compositeTree(comp, backend.texture, [L(i0, 1, "source-over"), active] as never, n, n);
+    const accum = compositeTree(comp, backend, [L(i0, 1, "source-over"), active] as never, n, n);
     const glpx = readComposite(glctx, comp, accum, n); glctx.returnFBO(accum);
     const err = glctx.gl.getError();
     const { md, at } = maxPremulDiff(ref, glpx, n);
@@ -421,13 +413,13 @@ function overlayParity(glctx: BrowserGl2Port, add: Add): void {
     const ref = gctx.getImageData(0, 0, n, n).data;
     const active = { ...L(i1, 1, "source-over"), overlay: { tex: ovTex, opacity, erase: false, blendMode: "source-over", lockAlpha: true, selMask: null, ox: 0, oy: 0, ow: n, oh: n } };
     glctx.gl.getError();
-    const accum = compositeTree(comp, backend.texture, [L(i0, 1, "source-over"), active] as never, n, n);
+    const accum = compositeTree(comp, backend, [L(i0, 1, "source-over"), active] as never, n, n);
     const glpx = readComposite(glctx, comp, accum, n); glctx.returnFBO(accum);
     const err = glctx.gl.getError();
     const { md, at } = maxPremulDiff(ref, glpx, n);
     add("overlay:lockAlpha GPU 裁 base.a vs 2D dst-in 层", md <= 4 && err === 0, `maxΔ=${md} err=0x${err.toString(16)} ${md > 4 ? at : ""}`);
   }
-  i0.dispose(); i1.dispose(); glctx.gl.deleteTexture(ovTex);
+  i0.dispose(); i1.dispose(); glctx.deleteTexture(ovTex);
 }
 
 // ---- E) 真桥端到端：doc 节点（bbox 裁剪 Canvas2D 层）→ uploadLayerToTiles → docTreeToComp → GL
@@ -452,7 +444,7 @@ function pixelsFromCanvas(docW: number, docH: number, bx: number, by: number, c:
 }
 function bridgeParity(glctx: BrowserGl2Port, add: Add): void {
   const N = 512;
-  const backend = new GLGpuTileBackend(glctx, 40); const pool = new GpuTilePool(backend, backend.capacity); const comp = new GLCompositor(glctx, "f32");
+  const backend = glctx.createTileArena(TILE_SIZE, 40) as BrowserTileArena; const pool = new GpuTilePool(backend, backend.capacity); const comp = new GLCompositor(glctx, "f32");
   // fake-Layer：bbox 裁剪、含偏移层；canvas=compositeLayers golden 输入，pixels=GL 直读 SoT（同源）。
   const cA = makeLayerCanvas(N, N, (x, y) => [60, 120 + (x % 120), 60 + (y % 160), 255]);
   const cB = makeLayerCanvas(300, 260, (x, y) => [220, 80 + (x % 150), 60, 200]);
@@ -472,7 +464,7 @@ function bridgeParity(glctx: BrowserGl2Port, add: Add): void {
   const ref = gctx.getImageData(0, 0, N, N).data;
 
   const tree = docTreeToComp(nodes as never, (leaf) => { const r = res.get((leaf as { id: number }).id)!; return { index: r.index, hasContent: r.tileCount > 0 }; });
-  const accum = compositeTree(comp, backend.texture, tree, N, N);
+  const accum = compositeTree(comp, backend, tree, N, N);
   const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
   const { md, at } = maxPremulDiff(ref, glpx, N);
   add("bridge:doc→tiles→GL full-doc vs compositeLayers", md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
@@ -566,10 +558,7 @@ function rendertreeParity(glctx: BrowserGl2Port, add: Add): void {
 
   // export 一次性合成（不碰缓存）。
   const once = raster.compositeOnce(nodes as never, N, N);
-  const oncePx = new Uint8Array(N * N * 4);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, once.fbo);
-  gl.readPixels(0, 0, N, N, gl.RGBA, gl.UNSIGNED_BYTE, oncePx);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  const oncePx = glctx.readPixels(once, 0, 0, N, N);
   glctx.returnFBO(once);
   cmp("rt:compositeOnce（export 路径）", ref1, oncePx);
 
@@ -725,10 +714,7 @@ function fillParity(glctx: BrowserGl2Port, add: Add): void {
     //   这条路径同时就是吸管 pickColor 的合成面（一石二鸟）。
     {
       const once = raster.compositeOnce(nodes as never, N, N, undefined, null, ov as never);
-      const px = new Uint8Array(N * N * 4);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, once.fbo);
-      gl.readPixels(0, 0, N, N, gl.RGBA, gl.UNSIGNED_BYTE, px);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      const px = glctx.readPixels(once, 0, 0, N, N);
       glctx.returnFBO(once);
       const { md, at } = maxPremulDiff(ref, px, N);
       add(`fill:overlay 合成${lockAlpha ? "+lockAlpha" : ""} vs CPU fillOnLayer golden`, md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
@@ -743,10 +729,7 @@ function fillParity(glctx: BrowserGl2Port, add: Add): void {
       compositeLayers(g0 as unknown as CanvasRenderingContext2D, [leaf] as never, {});
       const refClean = g0.getImageData(0, 0, N, N).data;
       const once = raster.compositeOnce(nodes as never, N, N);
-      const px = new Uint8Array(N * N * 4);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, once.fbo);
-      gl.readPixels(0, 0, N, N, gl.RGBA, gl.UNSIGNED_BYTE, px);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      const px = glctx.readPixels(once, 0, 0, N, N);
       glctx.returnFBO(once);
       const { md } = maxPremulDiff(refClean, px, N);
       add(`fill:${lockAlpha ? "lockAlpha " : ""}compositeOnce 无 overlay 不漏预览`, md <= 4, `maxΔ=${md}`);
@@ -903,13 +886,8 @@ function cpuStampRef(n: number, stamps: Stamp[], color: [number, number, number]
   return out;
 }
 // 读 FBO 预乘字节。栅格器顶点把 doc y=0 映到 NDC y=-1 → readback row0 = doc y=0，与 CPU 参考同向，无需翻 Y。
-function readFBO(glctx: BrowserGl2Port, fbo: WebGLFramebuffer, w: number, h: number = w): Uint8Array {
-  const gl = glctx.gl;
-  const raw = new Uint8Array(w * h * 4);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-  gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, raw);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  return raw;
+function readFBO(glctx: BrowserGl2Port, f: PooledFBO, w: number, h: number = w): Uint8Array {
+  return glctx.readPixels(f, 0, 0, w, h);
 }
 function maxByteDiff(ref: Uint8ClampedArray, gl: Uint8Array, n: number): { md: number; at: string } {
   let md = 0, ai = 0;
@@ -928,7 +906,7 @@ function stampParity(glctx: BrowserGl2Port, add: Add): void {
   for (const buildup of [false, true]) {
     const hardness = 0.3;
     const fbo = ras.rasterize(stamps, { hardness, color, buildup }, 0, 0, N, N);
-    const glpx = readFBO(glctx, fbo.fbo, N);
+    const glpx = readFBO(glctx, fbo, N);
     glctx.returnFBO(fbo);
     const ref = cpuStampRef(N, stamps, color, hardness, buildup);
     const { md, at } = maxByteDiff(ref, glpx, N);
@@ -939,7 +917,7 @@ function stampParity(glctx: BrowserGl2Port, add: Add): void {
   for (const buildup of [false, true]) {
     const hardness = 0.4;
     const fbo = ras.rasterize(stamps, { hardness, color, buildup, aspect, rotation }, 0, 0, N, N);
-    const glpx = readFBO(glctx, fbo.fbo, N);
+    const glpx = readFBO(glctx, fbo, N);
     glctx.returnFBO(fbo);
     const ref = cpuStampRef(N, stamps, color, hardness, buildup, aspect, rotation);
     const { md, at } = maxByteDiff(ref, glpx, N);
@@ -949,9 +927,10 @@ function stampParity(glctx: BrowserGl2Port, add: Add): void {
   //   证明 doc 尺寸 FBO + scissor 限着色 = bbox FBO 同像素，且 scissor 外被全屏清成透明（无残留）。
   for (const buildup of [false, true]) {
     const hardness = 0.3;
-    const full = readFBO(glctx, (() => { const f = ras.rasterize(stamps, { hardness, color, buildup }, 0, 0, N, N); return f; })().fbo, N);
+    const fFull = ras.rasterize(stamps, { hardness, color, buildup }, 0, 0, N, N);
+    const full = readFBO(glctx, fFull, N); glctx.returnFBO(fFull);
     const fScis = ras.rasterize(stamps, { hardness, color, buildup }, 0, 0, N, N, { x: 0, y: 0, w: 64, h: N });
-    const scis = readFBO(glctx, fScis.fbo, N); glctx.returnFBO(fScis);
+    const scis = readFBO(glctx, fScis, N); glctx.returnFBO(fScis);
     let mdL = 0, maxAR = 0;
     for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
       const i = (y * N + x) * 4;
@@ -972,12 +951,12 @@ function drawCheckerRef(ctx: CanvasRenderingContext2D, w: number, h: number): vo
 }
 function checkerParity(glctx: BrowserGl2Port, add: Add): void {
   const N = 192;
-  const backend = new GLGpuTileBackend(glctx, 16); const pool = new GpuTilePool(backend, backend.capacity); const comp = new GLCompositor(glctx, "f32");
+  const backend = glctx.createTileArena(TILE_SIZE, 16) as BrowserTileArena; const pool = new GpuTilePool(backend, backend.capacity); const comp = new GLCompositor(glctx, "f32");
   // 半透明层（部分覆盖）→ 透明处应显棋盘
   const layerCanvas = makeLayerCanvas(N, N, (x, y) => (x > 48 && x < 144 && y > 48 && y < 144) ? [200, 40, 40, 128] : [0, 0, 0, 0]);
   const lt = uploadLayerToTiles(glctx, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, layerCanvas) }, N, N);
   const tree = [{ kind: "leaf", srcIndex: lt.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: lt.tileCount > 0, overlay: null }];
-  const accum = compositeTree(comp, backend.texture, tree as never, N, N, "checker");
+  const accum = compositeTree(comp, backend, tree as never, N, N, "checker");
   const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
   const ref = document.createElement("canvas"); ref.width = N; ref.height = N;
   const rctx = ref.getContext("2d")!;
@@ -993,49 +972,28 @@ function checkerParity(glctx: BrowserGl2Port, add: Add): void {
 function rectHinv(x0: number, y0: number, w: number, h: number): number[] {
   return [1 / w, 0, -x0 / w, 0, 1 / h, -y0 / h, 0, 0, 1];
 }
-// rotsprite EPX 放大平面 → u8 纹理（对齐 gl-room.setFloats u8Plane 上传）
-function texFromU8Plane(glctx: BrowserGl2Port, p: U8Plane): WebGLTexture {
-  const gl = glctx.gl;
-  const t = gl.createTexture()!;
-  gl.bindTexture(gl.TEXTURE_2D, t);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, p.w, p.h, 0, gl.RGBA, gl.UNSIGNED_BYTE,
-    new Uint8Array(p.data.buffer, p.data.byteOffset, p.data.byteLength));
-  gl.bindTexture(gl.TEXTURE_2D, null);
+// rotsprite EPX 放大平面 → u8 纹理（对齐 gl-room.setFloats u8Plane 上传；C8 走 Port 动词）
+function texFromU8Plane(glctx: BrowserGl2Port, p: U8Plane): Gl2Texture {
+  const t = glctx.createTexture();
+  glctx.uploadTexture(t, "rgba8", p.w, p.h, p.data);
   return t;
 }
 // spline 系数平面 → RGBA16F 纹理（对齐 gl-room.setFloats mode 3 上传）
-function texFromSplinePlane(glctx: BrowserGl2Port, p: SplinePlane): WebGLTexture {
-  const gl = glctx.gl;
-  const t = gl.createTexture()!;
-  gl.bindTexture(gl.TEXTURE_2D, t);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, p.w + 16, p.h + 16, 0, gl.RGBA, gl.FLOAT, p.data);
-  gl.bindTexture(gl.TEXTURE_2D, null);
+function texFromSplinePlane(glctx: BrowserGl2Port, p: SplinePlane): Gl2Texture {
+  const t = glctx.createTexture();
+  glctx.uploadTexture(t, "rgba16f", p.w + 16, p.h + 16, p.data);
   return t;
 }
-function texFromCanvas(glctx: BrowserGl2Port, c: HTMLCanvasElement): WebGLTexture {
-  const gl = glctx.gl;
-  const t = gl.createTexture()!;
-  gl.bindTexture(gl.TEXTURE_2D, t);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, c as unknown as TexImageSource);
-  gl.bindTexture(gl.TEXTURE_2D, null);
+// canvas 源：getImageData 直值字节 → rgba8 上传（typed array verbatim = 旧 UNPACK_PREMULTIPLY=false 同义）
+function texFromCanvas(glctx: BrowserGl2Port, c: HTMLCanvasElement): Gl2Texture {
+  const img = c.getContext("2d")!.getImageData(0, 0, c.width, c.height);
+  const t = glctx.createTexture();
+  glctx.uploadTexture(t, "rgba8", c.width, c.height, new Uint8Array(img.data.buffer, img.data.byteOffset, img.data.byteLength));
   return t;
 }
 function floatParity(glctx: BrowserGl2Port, add: Add): void {
   const N = 192;
-  const backend = new GLGpuTileBackend(glctx, 16); const pool = new GpuTilePool(backend, backend.capacity); const comp = new GLCompositor(glctx, "f32");
+  const backend = glctx.createTileArena(TILE_SIZE, 16) as BrowserTileArena; const pool = new GpuTilePool(backend, backend.capacity); const comp = new GLCompositor(glctx, "f32");
   const baseCanvas = makeLayerCanvas(N, N, () => [40, 80, 160, 255]);   // 不透明底
   const lt = uploadLayerToTiles(glctx, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, baseCanvas) }, N, N);
   const fw = 80, fh = 70, fx = 50, fy = 40;
@@ -1054,12 +1012,12 @@ function floatParity(glctx: BrowserGl2Port, add: Add): void {
   const fstex = texFromSplinePlane(glctx, fplane);
   for (const [name, mode] of [["nearest", 0], ["bilinear", 1], ["bicubic", 2], ["spline", 3]] as const) {
     const tree = [{ kind: "leaf", srcIndex: lt.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: true, overlay: null, float: { tex: mode === 3 ? fstex : ftex, srcW: fw, srcH: fh, hinv: rectHinv(fx, fy, fw, fh), mode } }];
-    const accum = compositeTree(comp, backend.texture, tree as never, N, N);
+    const accum = compositeTree(comp, backend, tree as never, N, N);
     const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
     const { md, at } = maxPremulDiff(refData, glpx, N);
     add(`float:GPU warp pass(身份 ${name}) vs 2D drawImage source-over`, md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
   }
-  lt.index.dispose(); glctx.gl.deleteTexture(ftex); glctx.gl.deleteTexture(fstex);
+  lt.index.dispose(); glctx.deleteTexture(ftex); glctx.deleteTexture(fstex);
 
   // clip 层空基底 + float（变换图层组时 clip 层基底被提空）→ 层不渲染但 float 仍显（修「变换组 clip 消失」）。
   const eb = uploadLayerToTiles(glctx, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, makeLayerCanvas(N, N, () => [0, 0, 0, 0])) }, N, N);
@@ -1068,13 +1026,13 @@ function floatParity(glctx: BrowserGl2Port, add: Add): void {
     { kind: "leaf", srcIndex: eb.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: false, overlay: null, float: null },
     { kind: "leaf", srcIndex: eb.index, opacity: 1, mode: "source-over", clip: true, visible: true, hasContent: false, overlay: null, float: { tex: ftex2, srcW: 70, srcH: 60, hinv: rectHinv(40, 35, 70, 60), mode: 0 } },
   ];
-  const acc2 = compositeTree(comp, backend.texture, tree2 as never, N, N);
+  const acc2 = compositeTree(comp, backend, tree2 as never, N, N);
   const glpx2 = readComposite(glctx, comp, acc2, N); glctx.returnFBO(acc2);
   const ref2 = document.createElement("canvas"); ref2.width = N; ref2.height = N;
   const rctx2 = ref2.getContext("2d")!; rctx2.clearRect(0, 0, N, N); rctx2.drawImage(fc2, 40, 35);   // clip 层空基底=不显，仅 float
   const d2 = maxPremulDiff(rctx2.getImageData(0, 0, N, N).data, glpx2, N);
   add("float:clip 层空基底 → float 仍显（修变换组 clip 消失）", d2.md <= 4, `maxΔ=${d2.md} ${d2.md > 4 ? d2.at : ""}`);
-  eb.index.dispose(); glctx.gl.deleteTexture(ftex2);
+  eb.index.dispose(); glctx.deleteTexture(ftex2);
 }
 
 // ---- E5b) GPU warp vs CPU renderQuadPerPixel 逐位 golden（扭曲 quad，bilinear + bicubic）----
@@ -1090,7 +1048,7 @@ function warpToCanvasVia(comp: GLCompositor, src: Parameters<GLCompositor["warpT
 
 function warpParity(glctx: BrowserGl2Port, add: Add): void {
   const N = 192;
-  const backend = new GLGpuTileBackend(glctx, 16); const pool = new GpuTilePool(backend, backend.capacity); const comp = new GLCompositor(glctx, "f32");
+  const backend = glctx.createTileArena(TILE_SIZE, 16) as BrowserTileArena; const pool = new GpuTilePool(backend, backend.capacity); const comp = new GLCompositor(glctx, "f32");
   const baseCanvas = makeLayerCanvas(N, N, () => [30, 30, 30, 255]);   // 不透明底（warp source-over 其上）
   const lt = uploadLayerToTiles(glctx, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, baseCanvas) }, N, N);
   const sw = 64, sh = 48;
@@ -1108,7 +1066,7 @@ function warpParity(glctx: BrowserGl2Port, add: Add): void {
   for (const [name, mode, sm] of [["bilinear", 1, "bilinear"], ["bicubic", 2, "bicubic"], ["spline", 3, "spline"]] as const) {
     if (!q) { add(`warp:${name} 取 quadWarp`, false, "null"); continue; }
     const tree = [{ kind: "leaf", srcIndex: lt.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: true, overlay: null, float: { tex: mode === 3 ? sptex : stex, srcW: sw, srcH: sh, hinv: q.hinv, mode } }];
-    const accum = compositeTree(comp, backend.texture, tree as never, N, N);
+    const accum = compositeTree(comp, backend, tree as never, N, N);
     const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
     const rr = renderQuadPerPixel(srcImg, sw, sh, mesh as never, sm, splane);   // CPU 参照（straight）
     const ref = document.createElement("canvas"); ref.width = N; ref.height = N;
@@ -1125,7 +1083,7 @@ function warpParity(glctx: BrowserGl2Port, add: Add): void {
     const uptex = texFromU8Plane(glctx, up);
     const upImg = new ImageData(up.data, up.w, up.h);
     const tree = [{ kind: "leaf", srcIndex: lt.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: true, overlay: null, float: { tex: uptex, srcW: up.w, srcH: up.h, hinv: q.hinv, mode: 0 } }];
-    const accum = compositeTree(comp, backend.texture, tree as never, N, N);
+    const accum = compositeTree(comp, backend, tree as never, N, N);
     const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
     const rr = renderQuadPerPixel(upImg, up.w, up.h, mesh as never, "nearest");
     const ref = document.createElement("canvas"); ref.width = N; ref.height = N;
@@ -1142,7 +1100,7 @@ function warpParity(glctx: BrowserGl2Port, add: Add): void {
     if (rr) cpx2.drawImage(rr.canvas as CanvasImageSource, rr.dstX, rr.dstY);
     const d2 = maxPremulDiff(cpx2.getImageData(0, 0, N, N).data, new Uint8Array(gpx2.getImageData(0, 0, N, N).data.buffer), N);
     add("warpbake:commit(rotsprite) GPU warpToCanvas vs CPU", d2.md <= 4, `maxΔ=${d2.md} ${d2.md > 4 ? d2.at : ""}`);
-    glctx.gl.deleteTexture(uptex);
+    glctx.deleteTexture(uptex);
   }
   // commit 烤定路径：comp.warpToBytes（straight，无合成）vs CPU renderQuadPerPixel（straight），同 bbox 逐位。
   if (q) {
@@ -1161,7 +1119,7 @@ function warpParity(glctx: BrowserGl2Port, add: Add): void {
       add(`warpbake:commit(${bn}) GPU warpToCanvas vs CPU renderQuadPerPixel`, md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
     }
   }
-  lt.index.dispose(); glctx.gl.deleteTexture(stex); glctx.gl.deleteTexture(sptex);
+  lt.index.dispose(); glctx.deleteTexture(stex); glctx.deleteTexture(sptex);
 }
 
 // ---- E5c) 组变换 clip 浮层 golden：clip 浮层裁到基底浮层 warp 后 alpha（in-shader gather）vs CPU ----
@@ -1215,7 +1173,7 @@ function mergeDownParity(glctx: BrowserGl2Port, add: Add): void {
 
 function warpClipParity(glctx: BrowserGl2Port, add: Add): void {
   const N = 192;
-  const backend = new GLGpuTileBackend(glctx, 16); const pool = new GpuTilePool(backend, backend.capacity); const comp = new GLCompositor(glctx, "f32");
+  const backend = glctx.createTileArena(TILE_SIZE, 16) as BrowserTileArena; const pool = new GpuTilePool(backend, backend.capacity); const comp = new GLCompositor(glctx, "f32");
   const bgCanvas = makeLayerCanvas(N, N, () => [30, 30, 30, 255]);
   const bg = uploadLayerToTiles(glctx, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, bgCanvas) }, N, N);
   const empty = uploadLayerToTiles(glctx, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, makeLayerCanvas(N, N, () => [0, 0, 0, 0])) }, N, N);
@@ -1236,7 +1194,7 @@ function warpClipParity(glctx: BrowserGl2Port, add: Add): void {
     { kind: "leaf", srcIndex: empty.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: false, overlay: null, float: baseFD },
     { kind: "leaf", srcIndex: empty.index, opacity: 1, mode: "source-over", clip: true, visible: true, hasContent: false, overlay: null, float: clipFD },
   ];
-  const accum = compositeTree(comp, backend.texture, tree as never, N, N);
+  const accum = compositeTree(comp, backend, tree as never, N, N);
   const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
   // CPU 参照：base/clip 各 warp（同 mesh → 同 dst），clip 用 base alpha destination-in，再依次 source-over 底。
   const bw = renderQuadPerPixel(baseImg, sw, sh, mesh as never, "bicubic");
@@ -1254,7 +1212,7 @@ function warpClipParity(glctx: BrowserGl2Port, add: Add): void {
   }
   const { md, at } = maxPremulDiff(rctx.getImageData(0, 0, N, N).data, glpx, N);
   add("warpclip:组变换 clip 浮层裁基底 GPU vs CPU", md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
-  bg.index.dispose(); empty.index.dispose(); glctx.gl.deleteTexture(baseTex); glctx.gl.deleteTexture(clipTex);
+  bg.index.dispose(); empty.index.dispose(); glctx.deleteTexture(baseTex); glctx.deleteTexture(clipTex);
 }
 
 // ---- E3) 全管线 golden：真 BrushEngine 描边 → collectStamps → GPU 栅格 vs 解析公式参照 ----
@@ -1294,7 +1252,7 @@ function brushPipeDiff(glctx: BrowserGl2Port, ras: GLStampRasterizer, mode: stri
     }
   }
   const fbo = ras.rasterize(cs.stamps, cs.shape, cs.bx, cs.by, bw, bh);
-  const gpu = readFBO(glctx, fbo.fbo, bw, bh);
+  const gpu = readFBO(glctx, fbo, bw, bh);
   glctx.returnFBO(fbo);
   let md = 0, ai = 0;
   for (let i = 0; i < bw * bh * 4; i++) { const d = Math.abs(cpu[i] - gpu[i]); if (d > md) { md = d; ai = i - (i % 4); } }
@@ -1334,11 +1292,11 @@ function run(): { ok: boolean; checks: Check[]; error: string | null } {
 
   for (const p of ["u8", "f16", "f32"] as const) {
     if (p !== "u8" && !glctx.caps.floatColorBuffer) continue;
-    try { const f = glctx.borrowFBO(64, 64, p); add(`fbo.${p}.complete`, !!f.fbo); glctx.returnFBO(f); }
+    try { const f = glctx.borrowFBO(64, 64, p); add(`fbo.${p}.complete`, f.w === 64 && f.h === 64); glctx.returnFBO(f); }
     catch (e) { add(`fbo.${p}.complete`, false, String(e)); }
   }
 
-  const backend = new GLGpuTileBackend(glctx, 8);
+  const backend = glctx.createTileArena(TILE_SIZE, 8) as BrowserTileArena;
   try {
     const px = new Uint8Array(GPU_TILE_BYTES);
     px[0] = 12; px[1] = 34; px[2] = 56; px[3] = 78; px[GPU_TILE_BYTES - 4] = 9; px[GPU_TILE_BYTES - 1] = 255;
@@ -1360,7 +1318,7 @@ function run(): { ok: boolean; checks: Check[]; error: string | null } {
 
   try {
     // context-loss 后端重建：recreate() → 全新空 array texture（旧内容没了）+ 重建后上传/读回正常。
-    const rb = new GLGpuTileBackend(glctx, 4);
+    const rb = glctx.createTileArena(TILE_SIZE, 4) as BrowserTileArena;
     rb.uploadSlice(1, new Uint8Array(GPU_TILE_BYTES).fill(77));
     rb.recreate(8);   // grow 语义：先删→flush→新建更大（spec:175）
     const after = readSliceRaw(glctx, rb, 1); const isEmpty = after[0] === 0 && after[GPU_TILE_BYTES - 1] === 0;
@@ -1382,7 +1340,7 @@ function run(): { ok: boolean; checks: Check[]; error: string | null } {
   } catch (e) { add("pool over real GPU（批量+evict 复用）", false, String(e)); }
 
   try {
-    const cb = new GLGpuTileBackend(glctx, 4);
+    const cb = glctx.createTileArena(TILE_SIZE, 4) as BrowserTileArena;
     blendParity(glctx, cb, add, "f32"); blendParity(glctx, cb, add, "f16"); blendParity(glctx, cb, add, "u8");   // u8=S7 显示路径默认精度
     opaqueProbe(glctx, add); clipParity(glctx, add);
   } catch (e) { add("blend/clip parity", false, String(e)); }

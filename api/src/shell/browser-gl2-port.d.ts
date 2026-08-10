@@ -1,4 +1,19 @@
-import type { Gl2Port, Gl2Caps, FBOPrec, PooledFBO } from "../common/gl2-port.ts";
+import type { Gl2Port, Gl2Caps, FBOPrec, PooledFBO, Gl2Texture, Gl2TileArena, Gl2DrawSpec, TexUploadFormat } from "../common/gl2-port.ts";
+export declare class BrowserTileArena implements Gl2TileArena {
+    readonly kind: "arena";
+    readonly tileSize: number;
+    private _gl;
+    private _tex;
+    private _capacity;
+    constructor(gl: WebGL2RenderingContext, tileSize: number, initialSlices: number);
+    get capacity(): number;
+    get texture(): WebGLTexture;
+    private _alloc;
+    recreate(newCapacity: number): void;
+    uploadSlice(slice: number, pixels: Uint8Array): void;
+    copySlice(from: PooledFBO, slice: number, srcX: number, srcY: number, w: number, h: number): void;
+    dispose(): void;
+}
 export declare class BrowserGl2Port implements Gl2Port {
     readonly canvas: HTMLCanvasElement | OffscreenCanvas;
     readonly gl: WebGL2RenderingContext;
@@ -7,6 +22,10 @@ export declare class BrowserGl2Port implements Gl2Port {
     private _programSrc;
     private _fboPool;
     private _quad;
+    private _instVao;
+    private _instBuf;
+    private _ph2d;
+    private _phArr;
     private _invalidated;
     private _lost;
     private _gen;
@@ -14,7 +33,8 @@ export declare class BrowserGl2Port implements Gl2Port {
     get isLost(): boolean;
     get generation(): number;
     onInvalidated(cb: () => void): void;
-    program(name: string, vert?: string, frag?: string): WebGLProgram;
+    program(name: string, vert?: string, frag?: string): void;
+    private _meta;
     private _compile;
     private _shader;
     borrowFBO(w: number, h: number, prec?: FBOPrec): PooledFBO;
@@ -26,7 +46,22 @@ export declare class BrowserGl2Port implements Gl2Port {
         bytes: number;
     };
     clearPool(): void;
+    clearFBO(f: PooledFBO, rgba: [number, number, number, number]): void;
     private _createFBO;
-    quadVAO(): WebGLVertexArrayObject;
+    private _quadVAO;
+    private _instancedVAO;
+    draw(spec: Gl2DrawSpec): void;
+    drawInstanced(spec: Gl2DrawSpec, instances: Float32Array, count: number): void;
+    private _drawCommon;
+    private _setUniforms;
+    private _bindTextures;
+    private _resolve2d;
+    private _placeholder2d;
+    private _placeholderArr;
+    readPixels(src: PooledFBO, x: number, y: number, w: number, h: number): Uint8Array;
+    createTexture(): Gl2Texture;
+    uploadTexture(tex: Gl2Texture, format: TexUploadFormat, w: number, h: number, data: ArrayBufferView): void;
+    deleteTexture(tex: Gl2Texture): void;
+    createTileArena(tileSize: number, initialSlices: number): Gl2TileArena;
     private _rebuildAfterRestore;
 }

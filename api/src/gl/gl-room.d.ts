@@ -1,4 +1,4 @@
-import { GpuTilePool, GLGpuTileBackend, IndexTexture } from "./gpu-tile-pool.ts";
+import { GpuTilePool, IndexTexture } from "./gpu-tile-pool.ts";
 import { CpuGpuTileBridge } from "./tile-bridge.ts";
 import { GLCompositor } from "./gl-compositor.ts";
 import type { Acc, OverlayDesc, FloatDesc } from "./gl-compositor.ts";
@@ -7,7 +7,7 @@ import { LayerPixels } from "../backend/tiles/tile-layer.ts";
 import { GLStampRasterizer } from "./gl-stamp.ts";
 import type { Stamp, StrokeShape } from "./gl-stamp.ts";
 import type { PlanNode, PlanStep, SegBuild } from "../render/render-plan.ts";
-import type { PooledFBO, FBOPrec, Gl2Port } from "../common/gl2-port.ts";
+import type { PooledFBO, FBOPrec, Gl2Port, Gl2TexSource, Gl2TileArena } from "../common/gl2-port.ts";
 export interface SurrogatePlaneInput {
     layerId: number;
     bytes: {
@@ -90,7 +90,7 @@ export interface LeafRec {
 }
 export declare class GlRoom {
     readonly glctx: Gl2Port;
-    readonly backend: GLGpuTileBackend;
+    readonly arena: Gl2TileArena;
     readonly pool: GpuTilePool;
     readonly bridge: CpuGpuTileBridge;
     readonly comp: GLCompositor;
@@ -135,7 +135,7 @@ export declare class GlRoom {
     toPlanNodes(nodes: DocNode[], updated: Set<number>, overlayLeafId: number | null, leafById: Map<number, DocLeaf>): PlanNode[];
     composeSteps(steps: PlanStep[], acc: Acc, docW: number, docH: number, transient: Map<string, PooledFBO>, segLookup: ((key: string) => IndexTexture | undefined) | null): void;
     composeSegTransient(b: SegBuild, docW: number, docH: number, bg: Parameters<GLCompositor["newAcc"]>[2]): PooledFBO;
-    liveClipTexFor(clipBaseId: number | null, docW: number, docH: number): WebGLTexture | null;
+    liveClipTexFor(clipBaseId: number | null, docW: number, docH: number): Gl2TexSource | null;
     releaseLiveClip(): void;
     get hasOverlay(): boolean;
     get overlayLayerId(): number | null;

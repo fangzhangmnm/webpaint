@@ -204,7 +204,6 @@ export class RenderTree {
   // ---- 内部：段建造 ----
   private _buildSeg(b: SegBuild, docW: number, docH: number, bg: Background | undefined, transient: Map<string, PooledFBO>): void {
     const room = this._room;
-    const gl = room.glctx.gl;
     const res = room.composeSegTransient(b, docW, docH, bg);
     // coverage = 成员叶 tile 键并集；withBg（不透明底）= 全 doc tiles。
     const across = tilesAcross(docW), down = tilesDown(docH);
@@ -213,13 +212,11 @@ export class RenderTree {
     else for (const id of b.members) { const rec = room.leaves.get(id); if (rec) for (const k of rec.byKey.keys()) cover.add(k); }
     const keys = [...cover];
     try {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, res.fbo);
-      const gpuIds = room.pool.copyBatchFromFramebuffer(keys.map((k) => {
+      const gpuIds = room.pool.copyBatchFrom(res, keys.map((k) => {
         const { tx, ty } = tileCoord(k, across);
         const x = tx * TILE_SIZE, y = ty * TILE_SIZE;
         return { srcX: x, srcY: y, w: Math.min(TILE_SIZE, docW - x), h: Math.min(TILE_SIZE, docH - y) };
       }));
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       const byKey = new Map<number, number>();
       keys.forEach((k, i) => byKey.set(k, gpuIds[i]));
       const index = new IndexTexture(room.glctx, docW, docH);
@@ -228,18 +225,14 @@ export class RenderTree {
       this.frameStats.segBuilds++;
       room.glctx.returnFBO(res);
     } catch (e) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       if (!(e instanceof Error) || !e.message.startsWith("GPU_POOL_EXHAUSTED")) { room.glctx.returnFBO(res); throw e; }
       transient.set(b.key, res);   // 入池失败 → 本帧当临时段用（compose 后归还），不缓存
     }
   }
 
   private _present(docW: number, docH: number, affine6: number[], canvasW: number, canvasH: number, scale: number, voidRgb: [number, number, number]): void {
-    const gl = this._room.glctx.gl;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.viewport(0, 0, canvasW, canvasH);
-    gl.clearColor(voidRgb[0], voidRgb[1], voidRgb[2], 1);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    this._room.comp.presentToScreenAffine(this._display!.tex, docW, docH, affine6, canvasW, canvasH, scale < 1);
+    // void 底色 clear 并入 present draw（draw spec 的 clear = 全画布，doc 外区域即 void 色）。
+    this._room.comp.presentToScreenAffine(this._display!, docW, docH, affine6, canvasW, canvasH, scale < 1,
+      [voidRgb[0], voidRgb[1], voidRgb[2], 1]);
   }
 }

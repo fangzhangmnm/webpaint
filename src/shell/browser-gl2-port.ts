@@ -1,40 +1,135 @@
-// BrowserGl2Port —— Gl2Port 的真 WebGL2 实现体（壳侧；原 src/gl/gl-context.ts GLContext 改造，C1）。
+// BrowserGl2Port —— Gl2Port 的真 WebGL2 实现体（壳侧；C1 落地，C8 动词面收编）。
 // getContext 全仓唯一创建点在此（造 context 需要 DOM/OffscreenCanvas；用 gl 对象不需要）——
-// WebGL2 quirk 一律不出壳（ADR-0009）。壳造好递入 backend，backend 只见 Gl2Port。
+// WebGL2 quirk 一律不出壳（ADR-0009）。壳造好递入 backend，backend 只见 Gl2Port（无 `gl` 裸口）。
 //
 // 职责（窄接口后面藏掉的脏活）：
 //   - 取 WebGL2 context（无则响亮失败，由 caller 给「需要 WebGL2」提示——不留 2D 回退）。
 //   - 能力探测：max texture size / max array layers / float 颜色缓冲 / 纹理单元数。
-//   - shader program 编译 + 缓存（按 name 复用，避免重复编译）。
+//   - shader program 编译 + 缓存（按 name 复用）+ **uniform/sampler 反射**（getActiveUniform）：
+//     draw 按名设 uniform（类型分派、mat3 row-major 自转置）、sampler 按声明序固定单元、
+//     未提供的 sampler 绑占位纹理（未绑 sampler 默认落单元 0 与 sampler2DArray 类型冲突
+//     = INVALID_OPERATION(0x502)——经典 quirk，收进实现体）。
 //   - FBO 池：按尺寸借/还离屏渲染目标（合成 ping-pong / 笔刷 stroke FBO 复用）。
-//   - 单位 quad VAO（纹理 quad / 全屏 pass 共用）。
+//   - draw/drawInstanced：每 draw 自带全部状态（target/viewport/clear/scissor/blend），画完还原。
+//   - tile arena：TEXTURE_2D_ARRAY 仓（immutable storage；copySlice 零 readback 入池）。
 //   - **context-loss 生命周期（结构自愈契约）**：listen lost(preventDefault)+restored(重编 program/
 //     重建 FBO 池/generation++ → onInvalidated 广播 → backend 下帧从 CPU tile 池全量重传)。
 //     iOS Safari/PWA 后台必丢 → 这是命门。
 //
-// 验证边界：本模块全是 gl.* 调用，node DOM-shim 下是 no-op → **node 测不了，真机批验证**。
-//   故刻意只放标准、可读、无分支魔法的 GL 样板；易错点（FBO 完整性 / float 目标 params）逐行注释。
+// 验证边界：本模块全是 gl.* 调用，node DOM-shim 下是 no-op → **node 测不了**，GL smoke
+//   （Playwright + SwiftShader）+ 真机批验证。故刻意只放标准、可读、无分支魔法的 GL 样板。
 
-import type { Gl2Port, Gl2Caps, FBOPrec, PooledFBO } from "../common/gl2-port.ts";
+import type {
+  Gl2Port, Gl2Caps, FBOPrec, PooledFBO, Gl2Texture, Gl2TileArena,
+  Gl2DrawSpec, Gl2TexSource, TexUploadFormat,
+} from "../common/gl2-port.ts";
 
 // FBO 池上界（防泄露）。count 主防"许多不同尺寸的一次性 FBO"（commit/warp 每笔一张）累积；
 //   bytes 是兜底显存天花板。doc 尺寸热 FBO 每帧复用、是 MRU，不会被驱逐 → 不抖。
 const FBO_POOL_MAX_COUNT = 48;
 const FBO_POOL_BUDGET_BYTES = 384 * 1024 * 1024;
 
+// 池化 FBO 的实现形（契约句柄 + 壳侧真 GL 对象）。
+interface BrowserFBO extends PooledFBO {
+  fbo: WebGLFramebuffer;
+  tex: WebGLTexture;
+}
+
+interface BrowserTexture extends Gl2Texture {
+  tex: WebGLTexture;
+}
+
+// program 反射元数据（link 时一次；draw 按名分派）。
+interface ProgMeta {
+  prog: WebGLProgram;
+  uniforms: Map<string, { loc: WebGLUniformLocation; type: number }>;
+  samplers: { name: string; unit: number; type: number }[];   // type: SAMPLER_2D | SAMPLER_2D_ARRAY
+}
+
+export class BrowserTileArena implements Gl2TileArena {
+  readonly kind = "arena" as const;
+  readonly tileSize: number;
+  private _gl: WebGL2RenderingContext;
+  private _tex: WebGLTexture | null = null;
+  private _capacity: number;
+
+  constructor(gl: WebGL2RenderingContext, tileSize: number, initialSlices: number) {
+    this._gl = gl;
+    this.tileSize = tileSize;
+    this._capacity = initialSlices;
+    this._alloc();
+  }
+
+  get capacity(): number { return this._capacity; }
+  // 壳侧/smoke harness 读回用（off-contract：backend 只见 Gl2TileArena）。
+  get texture(): WebGLTexture { return this._tex!; }
+
+  private _alloc(): void {
+    const gl = this._gl;
+    const tex = gl.createTexture();
+    if (!tex) throw new Error("CREATE_ARRAY_TEX_FAILED");
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
+    // immutable storage：1 mip、RGBA8（straight——预乘概念不进 tile 存储，spec:246）。
+    gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA8, this.tileSize, this.tileSize, this._capacity);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
+    this._tex = tex;
+  }
+
+  // 先删旧 → flush（催 GPU 真回收）→ 再建（防显存双峰，spec:175）。context-loss 后旧句柄已死，删除无害。
+  recreate(newCapacity: number): void {
+    const gl = this._gl;
+    if (this._tex) { try { gl.deleteTexture(this._tex); } catch { /* context 已丢，无害 */ } }
+    gl.flush();
+    this._capacity = newCapacity;
+    this._alloc();
+  }
+
+  uploadSlice(slice: number, pixels: Uint8Array): void {
+    const gl = this._gl;
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this._tex);
+    gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, slice, this.tileSize, this.tileSize, 1,
+      gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
+  }
+
+  copySlice(from: PooledFBO, slice: number, srcX: number, srcY: number, w: number, h: number): void {
+    const gl = this._gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, (from as BrowserFBO).fbo);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this._tex);
+    gl.copyTexSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, slice, srcX, srcY, w, h);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  dispose(): void {
+    if (this._tex) { this._gl.deleteTexture(this._tex); this._tex = null; }
+  }
+}
+
 export class BrowserGl2Port implements Gl2Port {
   readonly canvas: HTMLCanvasElement | OffscreenCanvas;
+  // 壳侧/smoke harness 直用（off-contract：Gl2Port 接口无此口，backend 摸不到）。
   readonly gl: WebGL2RenderingContext;
   readonly caps: Gl2Caps;
 
-  private _programs = new Map<string, WebGLProgram>();
+  private _programs = new Map<string, ProgMeta>();
   private _programSrc = new Map<string, { vert: string; frag: string }>();   // 重建用
-  private _fboPool: PooledFBO[] = [];      // 已归还、待复用
+  private _fboPool: BrowserFBO[] = [];      // 已归还、待复用
   private _quad: WebGLVertexArrayObject | null = null;
+  // drawInstanced 的持久 VAO（loc0=单位 quad static + loc1=vec4/实例 dynamic）。
+  private _instVao: WebGLVertexArrayObject | null = null;
+  private _instBuf: WebGLBuffer | null = null;
+  // 占位纹理（未提供的 sampler 绑它，防单元 0 类型冲突）。
+  private _ph2d: WebGLTexture | null = null;
+  private _phArr: WebGLTexture | null = null;
 
   private _invalidated: (() => void)[] = [];
   private _lost = false;
-  private _gen = 0;   // restore 代际：每次 context 恢复 +1。持久 GL 对象（如 stamp 实例 VAO）按此判失效重建。
+  private _gen = 0;   // restore 代际：每次 context 恢复 +1。
 
   constructor(canvas: HTMLCanvasElement | OffscreenCanvas) {
     this.canvas = canvas;
@@ -77,24 +172,25 @@ export class BrowserGl2Port implements Gl2Port {
   }
 
   get isLost(): boolean { return this._lost; }
-  // 持久 GL 对象的失效令牌：caller 缓存创建时的 generation，与此不等即重建（restore 后旧句柄已废）。
   get generation(): number { return this._gen; }
 
   onInvalidated(cb: () => void): void { this._invalidated.push(cb); }
 
-  // ---- shader program 缓存 ----
-  // 按 name 取已编译 program；首次需给源。源被记下，context restored 后自动重编。
-  program(name: string, vert?: string, frag?: string): WebGLProgram {
-    const cached = this._programs.get(name);
-    if (cached) return cached;
+  // ---- shader program 缓存 + 反射 ----
+  program(name: string, vert?: string, frag?: string): void {
+    if (this._programs.has(name)) return;
     if (vert == null || frag == null) throw new Error(`PROGRAM_NOT_BUILT:${name}`);
     this._programSrc.set(name, { vert, frag });
-    const p = this._compile(vert, frag, name);
-    this._programs.set(name, p);
-    return p;
+    this._programs.set(name, this._compile(vert, frag, name));
   }
 
-  private _compile(vert: string, frag: string, name: string): WebGLProgram {
+  private _meta(name: string): ProgMeta {
+    const m = this._programs.get(name);
+    if (!m) throw new Error(`PROGRAM_NOT_BUILT:${name}`);
+    return m;
+  }
+
+  private _compile(vert: string, frag: string, name: string): ProgMeta {
     const gl = this.gl;
     const vs = this._shader(gl.VERTEX_SHADER, vert, name);
     const fs = this._shader(gl.FRAGMENT_SHADER, frag, name);
@@ -110,7 +206,27 @@ export class BrowserGl2Port implements Gl2Port {
     }
     gl.deleteShader(vs);
     gl.deleteShader(fs);
-    return p;
+    // 反射：uniform 名 → {loc,type}；sampler 按声明序固定单元（link 后设一次 uniform1i，不再变）。
+    const uniforms = new Map<string, { loc: WebGLUniformLocation; type: number }>();
+    const samplers: ProgMeta["samplers"] = [];
+    const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS) as number;
+    gl.useProgram(p);
+    for (let i = 0; i < n; i++) {
+      const info = gl.getActiveUniform(p, i);
+      if (!info) continue;
+      const uname = info.name.replace(/\[0\]$/, "");
+      const loc = gl.getUniformLocation(p, uname);
+      if (!loc) continue;
+      if (info.type === gl.SAMPLER_2D || info.type === gl.SAMPLER_2D_ARRAY) {
+        const unit = samplers.length;
+        samplers.push({ name: uname, unit, type: info.type });
+        gl.uniform1i(loc, unit);
+      } else {
+        uniforms.set(uname, { loc, type: info.type });
+      }
+    }
+    gl.useProgram(null);
+    return { prog: p, uniforms, samplers };
   }
 
   private _shader(type: number, src: string, name: string): WebGLShader {
@@ -127,8 +243,6 @@ export class BrowserGl2Port implements Gl2Port {
   }
 
   // ---- FBO 池 ----
-  // 借一个 ≥ 请求尺寸的渲染目标。f16/f32 要 caps.floatColorBuffer。
-  // 池里找精确同尺寸同精度的复用；否则新建。用完 returnFBO 还回。
   borrowFBO(w: number, h: number, prec: FBOPrec = "u8"): PooledFBO {
     for (let i = 0; i < this._fboPool.length; i++) {
       const f = this._fboPool[i];
@@ -141,10 +255,8 @@ export class BrowserGl2Port implements Gl2Port {
   }
 
   // 归还到池末尾（= MRU）。**有界**：超字节预算或数量上限 → 从队首（LRU）驱逐并真正删 GL 资源。
-  //   修泄露根因：旧版只 push 不删，bbox 尺寸每次不同 → 池只增不减（显存涨 + borrow 线性扫描变慢 = 越画越卡，
-  //   极端下 iOS OOM→闪退）。doc 尺寸的热 FBO 每帧 borrow+return → 总在队尾，不会被前端驱逐（不抖）。
   returnFBO(f: PooledFBO): void {
-    this._fboPool.push(f);
+    this._fboPool.push(f as BrowserFBO);
     while ((this._poolBytes() > FBO_POOL_BUDGET_BYTES || this._fboPool.length > FBO_POOL_MAX_COUNT) && this._fboPool.length > 1) {
       const e = this._fboPool.shift()!;   // 队首 = 最久未用
       this.gl.deleteFramebuffer(e.fbo);
@@ -158,17 +270,23 @@ export class BrowserGl2Port implements Gl2Port {
   private _poolBytes(): number {
     let b = 0; for (const f of this._fboPool) b += this._fboBytes(f); return b;
   }
-  // dev HUD：池占用（确认有界，不再单增）。
   get fboPoolStats(): { count: number; bytes: number } { return { count: this._fboPool.length, bytes: this._poolBytes() }; }
 
-  // 清空 FBO 池并真删 GL 资源。doc 尺寸变（池里全是旧 doc 尺寸、永不再命中）时主动调，
-  //   不必等字节/数量 cap 惰性顶到才驱逐（旧 doc 尺寸 FBO 大，早放早好）。
   clearPool(): void {
     for (const f of this._fboPool) { this.gl.deleteFramebuffer(f.fbo); this.gl.deleteTexture(f.tex); }
     this._fboPool = [];
   }
 
-  private _createFBO(w: number, h: number, prec: FBOPrec): PooledFBO {
+  clearFBO(f: PooledFBO, rgba: [number, number, number, number]): void {
+    const gl = this.gl;
+    gl.disable(gl.SCISSOR_TEST);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, (f as BrowserFBO).fbo);
+    gl.clearColor(rgba[0], rgba[1], rgba[2], rgba[3]);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  private _createFBO(w: number, h: number, prec: FBOPrec): BrowserFBO {
     const gl = this.gl;
     const tex = gl.createTexture();
     if (!tex) throw new Error("CREATE_TEXTURE_FAILED");
@@ -179,7 +297,7 @@ export class BrowserGl2Port implements Gl2Port {
     gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, gl.RGBA, type, null);
     // NEAREST：累积器/中间 FBO 全是 1:1 采样（v_uv 对齐像素网格），不需要 LINEAR。
     //   且 RGBA32F + LINEAR 需 OES_texture_float_linear（iPad/SwiftShader 不保证）→ 纹理不完整、
-    //   采样返回 (0,0,0,1)。视口缩放的屏幕 present（后续接 board）再单独配 LINEAR 采样。
+    //   采样返回 (0,0,0,1)。视口缩放的屏幕 present 用 draw spec 的 filter 选项单独切。
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -199,7 +317,7 @@ export class BrowserGl2Port implements Gl2Port {
   }
 
   // ---- 单位 quad（两个三角形覆盖 [0,1]²；位置即 uv）----
-  quadVAO(): WebGLVertexArrayObject {
+  private _quadVAO(): WebGLVertexArrayObject {
     if (this._quad) return this._quad;
     const gl = this.gl;
     const vao = gl.createVertexArray();
@@ -207,9 +325,7 @@ export class BrowserGl2Port implements Gl2Port {
     gl.bindVertexArray(vao);
     const buf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-    // 两个三角形：(0,0)(1,0)(0,1) + (0,1)(1,0)(1,1)
-    const verts = new Float32Array([0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1]);
-    gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1]), gl.STATIC_DRAW);
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
     gl.bindVertexArray(null);
@@ -217,8 +333,240 @@ export class BrowserGl2Port implements Gl2Port {
     return vao;
   }
 
-  // context restored 后：旧 GL 对象句柄全失效 → 重编所有 program、清空 FBO 池（按需重建）、丢 quad。
-  // tile 纹理由 onInvalidated 回调链重传（backend 标脏 → syncAll 从 CPU tile 池；本模块不持 tile）。
+  // drawInstanced 的持久 VAO：loc0 单位 quad（static）+ loc1 vec4/实例（divisor 1，每 draw 重填）。
+  private _instancedVAO(): WebGLVertexArrayObject {
+    if (this._instVao) return this._instVao;
+    const gl = this.gl;
+    const vao = gl.createVertexArray();
+    if (!vao) throw new Error("CREATE_VAO_FAILED");
+    gl.bindVertexArray(vao);
+    const quadBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    const instBuf = gl.createBuffer();
+    if (!instBuf) throw new Error("CREATE_BUFFER_FAILED");
+    gl.bindBuffer(gl.ARRAY_BUFFER, instBuf);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(1, 1);
+    gl.bindVertexArray(null);
+    gl.bindBuffer(gl.ARRAY_BUFFER, null);
+    this._instVao = vao; this._instBuf = instBuf;
+    return vao;
+  }
+
+  // ---- 绘制动词 ----
+  draw(spec: Gl2DrawSpec): void {
+    this._drawCommon(spec, null, 0);
+  }
+
+  drawInstanced(spec: Gl2DrawSpec, instances: Float32Array, count: number): void {
+    this._drawCommon(spec, instances, count);
+  }
+
+  private _drawCommon(spec: Gl2DrawSpec, instances: Float32Array | null, count: number): void {
+    const gl = this.gl;
+    const meta = this._meta(spec.program);
+
+    // 目标 + viewport
+    if (spec.target === "screen") {
+      if (!spec.viewport) throw new Error("SCREEN_DRAW_NEEDS_VIEWPORT");
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(...spec.viewport);
+    } else {
+      const f = spec.target as BrowserFBO;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, f.fbo);
+      const vp = spec.viewport ?? [0, 0, f.w, f.h];
+      gl.viewport(vp[0], vp[1], vp[2], vp[3]);
+    }
+
+    // clear（全幅，scissor 之外也清）→ scissor → blend
+    gl.disable(gl.SCISSOR_TEST);
+    if (spec.clear) {
+      gl.clearColor(spec.clear[0], spec.clear[1], spec.clear[2], spec.clear[3]);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    }
+    if (spec.scissor) {
+      gl.enable(gl.SCISSOR_TEST);
+      gl.scissor(spec.scissor.x, spec.scissor.y, spec.scissor.w, spec.scissor.h);
+    }
+    const blend = spec.blend ?? "none";
+    if (blend === "none") {
+      gl.disable(gl.BLEND);
+    } else if (blend === "premult-over") {
+      gl.enable(gl.BLEND);
+      gl.blendEquation(gl.FUNC_ADD);
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    } else {   // max-alpha：src/dst factor 被 MAX 方程忽略
+      gl.enable(gl.BLEND);
+      gl.blendEquation(gl.MAX);
+      gl.blendFunc(gl.ONE, gl.ONE);
+    }
+
+    gl.useProgram(meta.prog);
+    if (spec.uniforms) this._setUniforms(meta, spec.uniforms);
+    this._bindTextures(meta, spec.textures);
+
+    if (instances) {
+      gl.bindVertexArray(this._instancedVAO());
+      gl.bindBuffer(gl.ARRAY_BUFFER, this._instBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, instances.subarray(0, count * 4), gl.DYNAMIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, null);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, count);
+    } else {
+      gl.bindVertexArray(this._quadVAO());
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+
+    // 状态还原（无 ambient 状态泄漏到下一个 draw / 外部代码）。
+    gl.bindVertexArray(null);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.disable(gl.BLEND);
+    gl.blendEquation(gl.FUNC_ADD);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  private _setUniforms(meta: ProgMeta, uniforms: NonNullable<Gl2DrawSpec["uniforms"]>): void {
+    const gl = this.gl;
+    for (const name of Object.keys(uniforms)) {
+      const u = meta.uniforms.get(name);
+      if (!u) continue;   // 未声明/被编译器裁掉 → 静默跳过（契约：null-location 语义）
+      const v = uniforms[name];
+      switch (u.type) {
+        case gl.FLOAT: gl.uniform1f(u.loc, v as number); break;
+        case gl.INT:
+        case gl.BOOL: gl.uniform1i(u.loc, typeof v === "boolean" ? (v ? 1 : 0) : (v as number)); break;
+        case gl.FLOAT_VEC2: { const a = v as number[]; gl.uniform2f(u.loc, a[0], a[1]); break; }
+        case gl.FLOAT_VEC3: { const a = v as number[]; gl.uniform3f(u.loc, a[0], a[1], a[2]); break; }
+        case gl.FLOAT_VEC4: { const a = v as number[]; gl.uniform4f(u.loc, a[0], a[1], a[2], a[3]); break; }
+        // 契约：mat3 一律 row-major 9 元素 → transpose=true 上传。
+        case gl.FLOAT_MAT3: gl.uniformMatrix3fv(u.loc, true, v as Float32Array | number[]); break;
+        default: throw new Error(`UNIFORM_TYPE_UNSUPPORTED:${name}:0x${u.type.toString(16)}`);
+      }
+    }
+  }
+
+  private _bindTextures(meta: ProgMeta, textures: Gl2DrawSpec["textures"]): void {
+    const gl = this.gl;
+    for (const s of meta.samplers) {
+      const entry = textures?.[s.name];
+      let src: Gl2TexSource | undefined;
+      let filter: "nearest" | "linear" | undefined;
+      if (entry) {
+        if ("kind" in entry || "prec" in entry) src = entry as Gl2TexSource;
+        else { src = entry.src; filter = entry.filter; }
+      }
+      gl.activeTexture(gl.TEXTURE0 + s.unit);
+      if (s.type === gl.SAMPLER_2D_ARRAY) {
+        const tex = src ? (src as BrowserTileArena).texture : this._placeholderArr();
+        gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
+      } else {
+        const tex = src ? this._resolve2d(src) : this._placeholder2d();
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        if (filter) {
+          const f = filter === "linear" ? gl.LINEAR : gl.NEAREST;
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, f);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, f);
+        }
+      }
+    }
+    gl.activeTexture(gl.TEXTURE0);
+  }
+
+  private _resolve2d(src: Gl2TexSource): WebGLTexture {
+    if ("kind" in src) {
+      if (src.kind === "tex2d") return (src as BrowserTexture).tex;
+      throw new Error("ARENA_BOUND_TO_SAMPLER2D");   // arena 只能进 sampler2DArray
+    }
+    return (src as BrowserFBO).tex;   // PooledFBO 颜色附件
+  }
+
+  private _placeholder2d(): WebGLTexture {
+    if (this._ph2d) return this._ph2d;
+    const gl = this.gl;
+    const tex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    this._ph2d = tex;
+    return tex;
+  }
+
+  private _placeholderArr(): WebGLTexture {
+    if (this._phArr) return this._phArr;
+    const gl = this.gl;
+    const tex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
+    gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA8, 1, 1, 1);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
+    this._phArr = tex;
+    return tex;
+  }
+
+  // ---- 读回 ----
+  readPixels(src: PooledFBO, x: number, y: number, w: number, h: number): Uint8Array {
+    const gl = this.gl;
+    const out = new Uint8Array(w * h * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, (src as BrowserFBO).fbo);
+    gl.readPixels(x, y, w, h, gl.RGBA, gl.UNSIGNED_BYTE, out);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return out;
+  }
+
+  // ---- 2D 纹理 ----
+  createTexture(): Gl2Texture {
+    const gl = this.gl;
+    const tex = gl.createTexture();
+    if (!tex) throw new Error("CREATE_TEXTURE_FAILED");
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    const h: BrowserTexture = { kind: "tex2d", tex };
+    return h;
+  }
+
+  uploadTexture(tex: Gl2Texture, format: TexUploadFormat, w: number, h: number, data: ArrayBufferView): void {
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, (tex as BrowserTexture).tex);
+    // typed array 上传字节 verbatim 上卡（premult 转换 flag 对 typed array 无效，防御性关掉）。
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    if (format === "r8") gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    if (format === "rgba8") {
+      const bytes = data instanceof Uint8Array ? data
+        : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
+    } else if (format === "rgba16f") {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.FLOAT, data as Float32Array);
+    } else if (format === "r8") {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, w, h, 0, gl.RED, gl.UNSIGNED_BYTE, data as Uint8Array);
+    } else {   // r32f
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, w, h, 0, gl.RED, gl.FLOAT, data as Float32Array);
+    }
+    if (format === "r8") gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+  }
+
+  deleteTexture(tex: Gl2Texture): void {
+    this.gl.deleteTexture((tex as BrowserTexture).tex);
+  }
+
+  // ---- tile arena ----
+  createTileArena(tileSize: number, initialSlices: number): Gl2TileArena {
+    return new BrowserTileArena(this.gl, tileSize, initialSlices);
+  }
+
+  // context restored 后：旧 GL 对象句柄全失效 → 重编所有 program、清空 FBO 池（按需重建）、
+  // 丢 quad/instanced VAO/占位纹理。tile 纹理由 onInvalidated 回调链重传（backend 标脏 →
+  // syncAll 从 CPU tile 池；本模块不持 tile）。arena 由持有者经 pool.clearAll → recreate 重建。
   private _rebuildAfterRestore(): void {
     this._gen++;   // 旧 program/FBO/VAO 句柄全废 → 代际 +1，持久对象 holder 据此重建
     this._programs.clear();
@@ -227,5 +575,7 @@ export class BrowserGl2Port implements Gl2Port {
     }
     this._fboPool = [];   // 旧 fbo/tex 句柄已废；池清空，borrow 时重建
     this._quad = null;
+    this._instVao = null; this._instBuf = null;
+    this._ph2d = null; this._phArr = null;
   }
 }

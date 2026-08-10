@@ -5,7 +5,7 @@
 
 import type { GLCompositor, Background, Acc } from "../../src/gl/gl-compositor.ts";
 import type { OverlayDesc, FloatDesc } from "../../src/gl/gl-compositor.ts";
-import type { PooledFBO } from "../../src/common/gl2-port.ts";
+import type { PooledFBO, Gl2TileArena } from "../../src/common/gl2-port.ts";
 import type { IndexTexture } from "../../src/gl/gpu-tile-pool.ts";
 import type { BlendMode } from "../../src/gl/blend-glsl.ts";
 import { safeMode } from "../../src/gl/gl-doc-bridge.ts";
@@ -91,20 +91,20 @@ function docNodeToComp(
 }
 
 // ---- 树递归执行器（原 GLCompositor.composite；驱动 begin/newAcc/pass/floatPass/finishAcc/end 原语）----
-export function compositeTree(comp: GLCompositor, arrayTex: WebGLTexture, nodes: CompNode[], docW: number, docH: number, bg?: Background): PooledFBO {
+export function compositeTree(comp: GLCompositor, arena: Gl2TileArena, nodes: CompNode[], docW: number, docH: number, bg?: Background): PooledFBO {
   comp.begin(docW, docH, true);
-  const result = composeFresh(comp, arrayTex, nodes, docW, docH, bg);
+  const result = composeFresh(comp, arena, nodes, docW, docH, bg);
   comp.end();
   return result;
 }
 
-function composeFresh(comp: GLCompositor, arrayTex: WebGLTexture, nodes: CompNode[], docW: number, docH: number, bg?: Background): PooledFBO {
+function composeFresh(comp: GLCompositor, arena: Gl2TileArena, nodes: CompNode[], docW: number, docH: number, bg?: Background): PooledFBO {
   const acc: Acc = comp.newAcc(docW, docH, bg);
-  applyNodes(comp, arrayTex, nodes, acc, docW, docH);
+  applyNodes(comp, arena, nodes, acc, docW, docH);
   return comp.finishAcc(acc);
 }
 
-function applyNodes(comp: GLCompositor, arrayTex: WebGLTexture, nodes: CompNode[], acc: Acc, docW: number, docH: number): void {
+function applyNodes(comp: GLCompositor, arena: Gl2TileArena, nodes: CompNode[], acc: Acc, docW: number, docH: number): void {
   const bases = resolveClipBases(nodes);
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
@@ -117,17 +117,17 @@ function applyNodes(comp: GLCompositor, arrayTex: WebGLTexture, nodes: CompNode[
     if (node.kind === "leaf") {
       if (!clipNoBase) {
         const srcKind = node.overlay ? "overlay" : "tiled";
-        comp.pass(arrayTex, srcKind, node.srcIndex, null, node.mode, node.opacity, clipIndex, acc, docW, docH, node.overlay ?? null);
+        comp.pass(arena, srcKind, node.srcIndex, null, node.mode, node.opacity, clipIndex, acc, docW, docH, node.overlay ?? null);
       }
       if (node.float) comp.floatPass(node.float, acc, docW, docH, (node.clip && base && base.kind === "leaf") ? base.float ?? null : null);
     } else if (clipNoBase) {
       continue;
     } else if (needsIsolation(node)) {
-      const sub = composeFresh(comp, arrayTex, node.children, docW, docH);
-      comp.pass(arrayTex, "group", null, sub.tex, groupUnitMode(node), node.opacity, clipIndex, acc, docW, docH);
+      const sub = composeFresh(comp, arena, node.children, docW, docH);
+      comp.pass(arena, "group", null, sub, groupUnitMode(node), node.opacity, clipIndex, acc, docW, docH);
       comp.returnFBO(sub);
     } else {
-      applyNodes(comp, arrayTex, node.children, acc, docW, docH);
+      applyNodes(comp, arena, node.children, acc, docW, docH);
     }
   }
 }

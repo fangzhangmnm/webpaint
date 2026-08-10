@@ -27,12 +27,8 @@ export class RasterService {
   ): Uint8ClampedArray | null {
     if (!stamps.length || bw <= 0 || bh <= 0) return null;
     const room = this._room;
-    const gl = room.glctx.gl;
     const fbo = room.rasterizer.rasterize(stamps, shape, bx, by, bw, bh, null);
-    const px = new Uint8Array(bw * bh * 4);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo.fbo);
-    gl.readPixels(0, 0, bw, bh, gl.RGBA, gl.UNSIGNED_BYTE, px);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const px = room.glctx.readPixels(fbo, 0, 0, bw, bh);
     room.glctx.returnFBO(fbo);
     return new Uint8ClampedArray(px.buffer);
   }
@@ -49,7 +45,6 @@ export class RasterService {
   ): boolean {
     if (overlayEmpty(ov)) return false;
     const room = this._room;
-    const gl = room.glctx.gl;
     // ready：base tiles 搭 render-tree 便车（身份命中零上传）。cpuVersion 不齐 = sync 降级（超 quota）→ 放弃。
     room.syncLeafSafe(leafId, pixels, docW, docH);
     const rec = room.leaves.get(leafId);
@@ -60,21 +55,19 @@ export class RasterService {
     if (!ovDesc) return false;
     room.comp.begin(docW, docH, false);
     const acc = room.comp.newAcc(docW, docH);   // 透明底：source-over/op=1 输出 = merged 层内容
-    room.comp.pass(room.backend.texture, "overlay", rec.index, null, "source-over", 1, null, acc, docW, docH, ovDesc);
+    room.comp.pass(room.arena, "overlay", rec.index, null, "source-over", 1, null, acc, docW, docH, ovDesc);
     const merged = room.comp.finishAcc(acc);
     room.releaseOverlayFBO();
     room.clearOverlay();
     // bbox 一次 readPixels（merged FBO texel 行 0 = doc 行 0，无翻转——与栅格器/present 同约定）。
-    const px = new Uint8Array(ov.bw * ov.bh * 4);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, merged.fbo);
-    gl.readPixels(ov.bx, ov.by, ov.bw, ov.bh, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    const px = room.glctx.readPixels(merged, ov.bx, ov.by, ov.bw, ov.bh);
     const changed = apply(new Uint8ClampedArray(px.buffer), ov.bx, ov.by, ov.bw, ov.bh);
     if (changed.length) {
       const across = tilesAcross(docW);
       const withHandle = changed.map(({ tx, ty }) => ({ tx, ty, h: pixels.getTileHandle(tx, ty) }));
       const toCopy = withHandle.filter((c) => c.h);   // 擦空回收的格不拷（byKey 直接删）
       try {
-        const gpuIds = room.pool.copyBatchFromFramebuffer(toCopy.map(({ tx, ty }) => {
+        const gpuIds = room.pool.copyBatchFrom(merged, toCopy.map(({ tx, ty }) => {
           const x = tx * TILE_SIZE, y = ty * TILE_SIZE;
           return { srcX: x, srcY: y, w: Math.min(TILE_SIZE, docW - x), h: Math.min(TILE_SIZE, docH - y) };
         }));
@@ -89,13 +82,11 @@ export class RasterService {
       } catch (e) {
         // 收养失败（池到顶）：不更新 rec 记账 → 下一帧 sync 走 bridge 慢路径重传，正确性无损。
         if (!(e instanceof Error) || !e.message.startsWith("GPU_POOL_EXHAUSTED")) {
-          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
           room.glctx.returnFBO(merged); room.comp.end();
           throw e;
         }
       }
     }
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     room.glctx.returnFBO(merged);
     room.comp.end();
     room.invalidateTree();   // 落了新像素 → RenderTree 重算树（spec:134）
@@ -145,12 +136,8 @@ export class RasterService {
   // S9 字节合成面（v0.6.39 去 canvas 化）：compositeOnce → 整幅 readPixels 直接返回 straight 字节
   //   （merge-down / collapse / stamp-all 等「字节进出」op 用——硬原则：字节进出不走 canvas）。
   compositeToBytes(nodes: DocNode[], docW: number, docH: number): { data: Uint8ClampedArray; w: number; h: number } {
-    const gl = this._room.glctx.gl;
     const fbo = this.compositeOnce(nodes, docW, docH);
-    const px = new Uint8Array(docW * docH * 4);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo.fbo);
-    gl.readPixels(0, 0, docW, docH, gl.RGBA, gl.UNSIGNED_BYTE, px);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const px = this._room.glctx.readPixels(fbo, 0, 0, docW, docH);
     this._room.glctx.returnFBO(fbo);
     return { data: new Uint8ClampedArray(px.buffer), w: docW, h: docH };
   }
@@ -158,12 +145,8 @@ export class RasterService {
   // S8 吸管（spec:243-244）：一次性合成 + 单像素 readPixels（合成组无 CPU tile → 必须走 GPU 读）。
   //   surrogate 非空 = 调整预览中取替身（WYSIWYG，拍板#8）。
   pickColor(nodes: DocNode[], docW: number, docH: number, bg: Background | undefined, x: number, y: number, surrogate: SurrogateInput | null = null, overlay: OverlayInput | null = null): [number, number, number, number] {
-    const gl = this._room.glctx.gl;
     const fbo = this.compositeOnce(nodes, docW, docH, bg, surrogate, overlay);
-    const px = new Uint8Array(4);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo.fbo);
-    gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const px = this._room.glctx.readPixels(fbo, x, y, 1, 1);
     this._room.glctx.returnFBO(fbo);
     return [px[0], px[1], px[2], px[3]];
   }

@@ -5,26 +5,28 @@
 // S9 起本类只剩 **pass 原语**（begin/newAcc/pass/floatPass/finishAcc/end/present/warp）——
 //   树递归执行器归档进 test/gl-smoke/reference-gl-compositor.ts（smoke 对拍参照），
 //   生产唯一执行器 = render-tree（render-plan 驱动；T6 起与 raster-service 共享 gl-room）。
+// C8 起全部 GL 状态经 Gl2Port 动词（draw spec 自带状态；sampler 单元/占位归实现体）——
+//   本类零 gl.* 调用，pass 原语 = 「组 spec + 计数」。
 
 import { COMPOSITE_VERT, compositeFragSource, compositeProgramKey } from "./blend-glsl.ts";
 import type { BlendMode, SourceKind } from "./blend-glsl.ts";
 import type { IndexTexture } from "./gpu-tile-pool.ts";
-import type { Gl2Port, PooledFBO, FBOPrec } from "../common/gl2-port.ts";
+import type { Gl2Port, Gl2Texture, Gl2TexSource, Gl2TileArena, PooledFBO, FBOPrec } from "../common/gl2-port.ts";
 
 // live 描边 overlay（活动叶层叠加）：直值纹理 + doc 坐标 bbox + 不透明度/擦除/锁α/选区蒙版。
 export interface OverlayDesc {
-  tex: WebGLTexture;
+  tex: Gl2TexSource;
   opacity: number;
   erase: boolean;
   blendMode: BlendMode;   // 笔刷混合模式（overlay 合到 base 用；erase 时忽略）
   ox: number; oy: number; ow: number; oh: number;   // doc 坐标 bbox（shader 按此映射，bbox 外透明）
   lockAlpha?: boolean;    // 锁α：overlay 裁到 base 现有 alpha
-  selMask?: { tex: WebGLTexture; ox: number; oy: number; ow: number; oh: number } | null;
+  selMask?: { tex: Gl2Texture; ox: number; oy: number; ow: number; oh: number } | null;
 }
 // 自由变换浮层 = GPU warp 输入：未 warp 源纹理 + 逆单应性 Hinv（doc→源单位方格）+ sampleMode。
 //   在源层 z 之上 source-over α=1，忽略源层 mode/opacity（与 overlay 不同——overlay 随层）。
 export interface FloatDesc {
-  tex: WebGLTexture;      // 源纹理（未 warp，直值，srcW×srcH，常驻——拖动中只换 hinv）
+  tex: Gl2Texture;        // 源纹理（未 warp，直值，srcW×srcH，常驻——拖动中只换 hinv）
   srcW: number; srcH: number;
   hinv: number[];         // 9，row-major，doc(x,y,1)→源 (u,v,w) 透视除
   mode: number;           // 0=nearest 1=bilinear 2=bicubic
@@ -35,8 +37,6 @@ export interface FloatDesc {
 export type Background = [number, number, number, number] | "checker";
 
 // 可变 ping-pong 对（pass-through 组要在同一累积器上续 pass，故按引用传递）。
-// S7 起导出：render-tree/raster-service 执行器直接驱动 pass 原语（begin/newAcc/pass/floatPass/finishAcc/end），
-//   本类自己的 composite() 树递归保留（smoke harness 的规范执行器 + 对拍参照）。
 export interface Acc { read: PooledFBO; write: PooledFBO; }
 
 // 棋盘背景（doc 空间，16px 格，#fff/#c8c8c8）——逐位匹配 board._drawCheckerboard。预乘不透明。
@@ -55,7 +55,7 @@ void main(){
 
 // GPU warp 共用 GLSL：逐 dst 像素逆单应性 gather + 手写采样器（nearest/bilinear/bicubic），**逐位复刻
 //   floating-transform 的 CPU 采样器**（golden 对拍）。WARP_FRAG（live 合成）与 WARP_BAKE_FRAG（commit 烤定，
-//   输出 straight）共用，零漂移。源纹理存**直值**（setFloats UNPACK_PREMULTIPLY=false），texelFetch 整数 texel。
+//   输出 straight）共用，零漂移。源纹理存**直值**（typed array verbatim 上传），texelFetch 整数 texel。
 const WARP_FUNCS = `
 float cubicK(float t){
   float a = -0.5;
@@ -180,7 +180,7 @@ uniform vec2 u_docSize;
 uniform sampler2D u_dst;        // 累积器（预乘）
 uniform sampler2D u_src;        // 源纹理（未 warp，直值），尺寸 u_srcSize
 uniform vec2 u_srcSize;
-uniform mat3 u_Hinv;            // doc(x,y,1) → 源单位方格（row-major，transpose 上传）
+uniform mat3 u_Hinv;            // doc(x,y,1) → 源单位方格（row-major，实现体自转置）
 uniform int u_mode;            // 0=nearest 1=bilinear 2=bicubic
 uniform int u_clip;            // 1=裁到基底浮层
 uniform sampler2D u_baseTex;   // 基底浮层源纹理（已驻留）
@@ -203,7 +203,7 @@ void main(){
   o = vec4((ao > 0.0) ? (Po / ao) : vec3(0.0), ao);
 }`;
 
-// commit 烤定：warp 源 → **straight** RGBA 进 bbox FBO（readback→canvas→editRegion）。FBO 像素 → doc 坐标
+// commit 烤定：warp 源 → **straight** RGBA 进 bbox FBO（readback→字节→editRegion）。FBO 像素 → doc 坐标
 //   = bakeOrigin + v_uv·bakeSize；无 clip（commit 烤回各层不裁，clip 在 commit 后正常合成里复活）。
 const WARP_BAKE_FRAG = `#version 300 es
 precision highp float;
@@ -239,7 +239,7 @@ void main(){
 const PRESENT_AFFINE_VERT = `#version 300 es
 layout(location=0) in vec2 a_pos;        // [0,1]²
 uniform vec2 u_docSize;
-uniform mat3 u_affine;                    // doc px → device px（列主序）
+uniform mat3 u_affine;                    // doc px → device px（row-major，实现体自转置）
 uniform vec2 u_canvas;                    // device px 画布尺寸
 out vec2 v_uv;
 void main(){
@@ -251,7 +251,7 @@ void main(){
 export class GLCompositor {
   private _glctx: Gl2Port;
   private _prec: FBOPrec;
-  // 性能计数（dev HUD 用，零成本——只在 _pass/_floatPass 自增整数）。composite() 入口清零，调用方读 stats。
+  // 性能计数（dev HUD 用，零成本——只在 pass/floatPass 自增整数）。composite() 入口清零，调用方读 stats。
   //   passes = blend pass 数（≈ 可见层/组单元数，§2 layer-count 假说的直读量）；floatPasses = 浮层 warp pass 数。
   readonly stats = { passes: 0, floatPasses: 0 };
   constructor(glctx: Gl2Port, accumPrec: FBOPrec = "u8") {
@@ -259,30 +259,28 @@ export class GLCompositor {
     this._prec = accumPrec;
   }
 
-  private _program(mode: BlendMode, src: SourceKind, overlayMode: BlendMode = "source-over"): WebGLProgram {
-    return this._glctx.program(compositeProgramKey(mode, src, overlayMode), COMPOSITE_VERT, compositeFragSource(mode, src, overlayMode));
+  private _ensureProgram(mode: BlendMode, src: SourceKind, overlayMode: BlendMode = "source-over"): string {
+    const key = compositeProgramKey(mode, src, overlayMode);
+    this._glctx.program(key, COMPOSITE_VERT, compositeFragSource(mode, src, overlayMode));
+    return key;
   }
 
   // ---- 执行器原语（render-tree / raster-service / 对拍 harness 驱动） ----
 
-  // 帧作用域：绑 VAO + viewport（doc 尺寸）一次。resetStats=false 时保留计数（执行器整帧统计）。
-  begin(docW: number, docH: number, resetStats = true): void {
-    const gl = this._glctx.gl;
+  // 帧作用域：C8 起 GL 状态归 draw spec（每 draw 自带），begin/end 只剩 stats 语义。
+  begin(_docW: number, _docH: number, resetStats = true): void {
     if (resetStats) { this.stats.passes = 0; this.stats.floatPasses = 0; }
-    gl.bindVertexArray(this._glctx.quadVAO());
-    gl.viewport(0, 0, docW, docH);
-    gl.disable(gl.BLEND);
   }
-  end(): void { this._glctx.gl.bindVertexArray(null); }
+  end(): void { /* 状态还原归 Gl2Port draw；保留成对调用点位 */ }
 
-  // 借一对累积器并铺底（bg 缺省=透明；"checker"=棋盘）。须在 begin() 作用域内。
+  // 借一对累积器并铺底（bg 缺省=透明；"checker"=棋盘）。
   newAcc(docW: number, docH: number, bg?: Background): Acc {
     const acc: Acc = {
       read: this._glctx.borrowFBO(docW, docH, this._prec),
       write: this._glctx.borrowFBO(docW, docH, this._prec),
     };
-    if (bg === "checker") { this._clear(acc.read, undefined); this._drawChecker(acc.read, docW, docH); }
-    else this._clear(acc.read, bg);
+    if (bg === "checker") this._drawChecker(acc.read, docW, docH);
+    else this._glctx.clearFBO(acc.read, bg ?? [0, 0, 0, 0]);
     return acc;
   }
   // 收口：还 write，交出 read（caller 负责 returnFBO(read)）。
@@ -294,66 +292,55 @@ export class GLCompositor {
   // FBO 归还公共透传（执行器/对拍 harness 归还 finishAcc / 隔离组结果用）。
   returnFBO(f: PooledFBO): void { this._glctx.returnFBO(f); }
 
-  // 棋盘背景 pass → 填进累积器（doc 空间）。VAO 已由 begin() 绑、viewport 已设。
+  // 棋盘背景 pass → 填进累积器（doc 空间）。
   private _drawChecker(f: PooledFBO, docW: number, docH: number): void {
-    const gl = this._glctx.gl;
-    const prog = this._glctx.program("checker", COMPOSITE_VERT, CHECKER_FRAG);
-    gl.useProgram(prog);
-    gl.uniform2f(gl.getUniformLocation(prog, "u_docSize"), docW, docH);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, f.fbo);
-    gl.disable(gl.BLEND);
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this._glctx.program("checker", COMPOSITE_VERT, CHECKER_FRAG);
+    this._glctx.draw({
+      program: "checker", target: f,
+      uniforms: { u_docSize: [docW, docH] },
+    });
   }
 
   // 一个 blend pass：src(tiled 叶或段 / group 直值纹理) 与 acc.read 合 → acc.write，交换。
   pass(
-    arrayTex: WebGLTexture, srcKind: SourceKind,
-    srcIndex: IndexTexture | null, groupTex: WebGLTexture | null,
+    arena: Gl2TileArena, srcKind: SourceKind,
+    srcIndex: IndexTexture | null, groupTex: Gl2TexSource | null,
     mode: BlendMode, opacity: number, clipIndex: IndexTexture | null,
     acc: Acc, docW: number, docH: number, overlay: OverlayDesc | null = null,
-    clipTex: WebGLTexture | null = null,   // 非空 = clip 蒙版改采这张 doc 尺寸 2D 纹理（live 中的 merged 基底）
+    clipTex: Gl2TexSource | null = null,   // 非空 = clip 蒙版改采这张 doc 尺寸 2D 纹理（live 中的 merged 基底）
   ): void {
-    const gl = this._glctx.gl;
     this.stats.passes++;
-    const prog = this._program(mode, srcKind, overlay && !overlay.erase ? overlay.blendMode : "source-over");
-    gl.useProgram(prog);
-    const u = (name: string) => gl.getUniformLocation(prog, name);
-    gl.uniform2f(u("u_docSize"), docW, docH);
-    gl.uniform1f(u("u_opacity"), opacity);
-    gl.uniform1i(u("u_hasClip"), (clipIndex || clipTex) ? 1 : 0);
-    gl.uniform1i(u("u_clipMode"), clipTex ? 1 : 0);
-    gl.uniform1f(u("u_overlayOpacity"), overlay ? overlay.opacity : 1);
-    gl.uniform1i(u("u_overlayErase"), overlay && overlay.erase ? 1 : 0);
-    gl.uniform2f(u("u_ovOrigin"), overlay ? overlay.ox : 0, overlay ? overlay.oy : 0);
-    gl.uniform2f(u("u_ovSize"), overlay ? overlay.ow : 1, overlay ? overlay.oh : 1);
-    gl.uniform1i(u("u_ovLockAlpha"), overlay && overlay.lockAlpha ? 1 : 0);
+    const key = this._ensureProgram(mode, srcKind, overlay && !overlay.erase ? overlay.blendMode : "source-over");
     const sel = overlay?.selMask ?? null;
-    gl.uniform1i(u("u_ovHasSel"), sel ? 1 : 0);
-    gl.uniform2f(u("u_ovSelOrigin"), sel ? sel.ox : 0, sel ? sel.oy : 0);
-    gl.uniform2f(u("u_ovSelSize"), sel ? sel.ow : 1, sel ? sel.oh : 1);
-    // **每个 sampler 固定单元 + 对未激活的也绑 2D 占位**：否则未被编译器消除的未用 sampler 默认落
-    //   单元 0（= u_arr 的 sampler2DArray）→ 类型冲突 INVALID_OPERATION(0x502)。占位用 acc.read（2D）。
-    const ph = acc.read.tex;   // 2D 占位纹理
-    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D_ARRAY, arrayTex);
-    this._setSampler(prog, "u_arr", 0);
-    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, acc.read.tex);
-    this._setSampler(prog, "u_dst", 1);
-    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, srcIndex?.tex ?? ph);
-    this._setSampler(prog, "u_srcIndex", 2);
-    gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, (clipIndex ?? srcIndex)?.tex ?? ph);
-    this._setSampler(prog, "u_clipIndex", 3);
-    gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, groupTex ?? ph);
-    this._setSampler(prog, "u_groupSrc", 4);
-    gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, overlay?.tex ?? ph);
-    this._setSampler(prog, "u_overlay", 5);
-    gl.activeTexture(gl.TEXTURE6); gl.bindTexture(gl.TEXTURE_2D, sel?.tex ?? ph);
-    this._setSampler(prog, "u_ovSel", 6);
-    gl.activeTexture(gl.TEXTURE7); gl.bindTexture(gl.TEXTURE_2D, clipTex ?? ph);
-    this._setSampler(prog, "u_clipTex", 7);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, acc.write.fbo);
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const textures: NonNullable<Parameters<Gl2Port["draw"]>[0]["textures"]> = {
+      u_arr: arena,
+      u_dst: acc.read,
+    };
+    if (srcIndex) textures.u_srcIndex = srcIndex.tex;
+    const ci = clipIndex ?? srcIndex;
+    if (ci) textures.u_clipIndex = ci.tex;
+    if (groupTex) textures.u_groupSrc = groupTex;
+    if (overlay) textures.u_overlay = overlay.tex;
+    if (sel) textures.u_ovSel = sel.tex;
+    if (clipTex) textures.u_clipTex = clipTex;
+    this._glctx.draw({
+      program: key, target: acc.write,
+      uniforms: {
+        u_docSize: [docW, docH],
+        u_opacity: opacity,
+        u_hasClip: (clipIndex || clipTex) ? 1 : 0,
+        u_clipMode: clipTex ? 1 : 0,
+        u_overlayOpacity: overlay ? overlay.opacity : 1,
+        u_overlayErase: overlay && overlay.erase ? 1 : 0,
+        u_ovOrigin: [overlay ? overlay.ox : 0, overlay ? overlay.oy : 0],
+        u_ovSize: [overlay ? overlay.ow : 1, overlay ? overlay.oh : 1],
+        u_ovLockAlpha: overlay && overlay.lockAlpha ? 1 : 0,
+        u_ovHasSel: sel ? 1 : 0,
+        u_ovSelOrigin: [sel ? sel.ox : 0, sel ? sel.oy : 0],
+        u_ovSelSize: [sel ? sel.ow : 1, sel ? sel.oh : 1],
+      },
+      textures,
+    });
     const tmp = acc.read; acc.read = acc.write; acc.write = tmp;   // 交换
   }
 
@@ -361,97 +348,63 @@ export class GLCompositor {
   //   全屏 quad（按 doc 像素 gather，剔除 quad 外）；blend 关、预乘 source-over 在 fragment 手算。
   //   clipBase 非空（组变换里 clip 浮层的基底浮层）→ shader 里 clipα ×= gather 基底 alpha（零额外内存）。
   floatPass(f: FloatDesc, acc: Acc, docW: number, docH: number, clipBase: FloatDesc | null = null): void {
-    const gl = this._glctx.gl;
     this.stats.floatPasses++;
-    const prog = this._glctx.program("warp", COMPOSITE_VERT, WARP_FRAG);
-    gl.useProgram(prog);
-    const u = (name: string) => gl.getUniformLocation(prog, name);
-    gl.uniform2f(u("u_docSize"), docW, docH);
-    gl.uniform2f(u("u_srcSize"), f.srcW, f.srcH);
-    gl.uniformMatrix3fv(u("u_Hinv"), true, f.hinv);   // row-major → transpose
-    gl.uniform1i(u("u_mode"), f.mode);
-    gl.uniform1i(u("u_clip"), clipBase ? 1 : 0);
+    this._glctx.program("warp", COMPOSITE_VERT, WARP_FRAG);
+    const uniforms: NonNullable<Parameters<Gl2Port["draw"]>[0]["uniforms"]> = {
+      u_docSize: [docW, docH],
+      u_srcSize: [f.srcW, f.srcH],
+      u_Hinv: f.hinv,
+      u_mode: f.mode,
+      u_clip: clipBase ? 1 : 0,
+    };
     if (clipBase) {
-      gl.uniform2f(u("u_baseSize"), clipBase.srcW, clipBase.srcH);
-      gl.uniformMatrix3fv(u("u_baseHinv"), true, clipBase.hinv);
-      gl.uniform1i(u("u_baseMode"), clipBase.mode);
+      uniforms.u_baseSize = [clipBase.srcW, clipBase.srcH];
+      uniforms.u_baseHinv = clipBase.hinv;
+      uniforms.u_baseMode = clipBase.mode;
     }
-    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, acc.read.tex);
-    this._setSampler(prog, "u_dst", 0);
-    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, f.tex);
-    this._setSampler(prog, "u_src", 1);
-    // u_baseTex 固定单元 2（无 clip 也绑占位 acc.read，防未用 sampler 落单元 0 与 array 冲突，同 _pass 注释）。
-    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, clipBase ? clipBase.tex : acc.read.tex);
-    this._setSampler(prog, "u_baseTex", 2);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, acc.write.fbo);
-    gl.disable(gl.BLEND);
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const textures: NonNullable<Parameters<Gl2Port["draw"]>[0]["textures"]> = {
+      u_dst: acc.read,
+      u_src: f.tex,
+    };
+    if (clipBase) textures.u_baseTex = clipBase.tex;
+    this._glctx.draw({ program: "warp", target: acc.write, uniforms, textures });
     const tmp = acc.read; acc.read = acc.write; acc.write = tmp;
-  }
-
-  // 仅当 uniform 未被编译器优化掉（location 非 null）才设——unused sampler 安全跳过。
-  private _setSampler(prog: WebGLProgram, name: string, unit: number): void {
-    const loc = this._glctx.gl.getUniformLocation(prog, name);
-    if (loc) this._glctx.gl.uniform1i(loc, unit);
   }
 
   // 任意纹理 → 直值 RGBA8 目标 FBO（不翻 Y）。unpremult=true 时源按预乘解（stamp 栅格器中间 FBO 用）；
   //   累积器（S7 起直值）传 false = 纯拷贝。
-  presentTo(srcTex: WebGLTexture, target: PooledFBO, w: number, h: number, unpremult = false): void {
-    this._present(srcTex, target.fbo, w, h, false, unpremult);
-  }
-
-  // 直值累积器 → 默认 framebuffer（可见画布），翻 Y、整文档铺满（1:1 fit，预览页用）。
-  presentToScreen(srcTex: WebGLTexture, canvasW: number, canvasH: number): void {
-    this._present(srcTex, null, canvasW, canvasH, true);
+  presentTo(srcTex: Gl2TexSource, target: PooledFBO, w: number, h: number, unpremult = false): void {
+    this._glctx.program("present", COMPOSITE_VERT, PRESENT_FRAG);
+    this._glctx.draw({
+      program: "present", target,
+      viewport: [0, 0, w, h],
+      uniforms: { u_flipY: 0, u_unpremult: unpremult ? 1 : 0 },
+      textures: { u_src: srcTex },
+    });
   }
 
   // 视口感知 present：用 board 的 device-px 仿射把 doc 纹理摆到屏幕（pan/zoom/rot/dpr 一致）。
   // affine = [a,b,c,d,e,f]（board _applyDocTransform 的 setTransform 参数）；canvasW/H = device px。
   // smooth = 缩小(scale<1)用 LINEAR 抗锯齿；放大(scale>1)用 NEAREST 看像素（对齐 2D board imageSmoothing 策略）。
-  // 不清屏（caller 先清 void 色）；doc 之外的画布区不被本 draw 覆盖。
-  presentToScreenAffine(srcTex: WebGLTexture, docW: number, docH: number, affine: number[], canvasW: number, canvasH: number, smooth = true): void {
-    const gl = this._glctx.gl;
-    const prog = this._glctx.program("present-affine", PRESENT_AFFINE_VERT, PRESENT_FRAG);
-    gl.bindVertexArray(this._glctx.quadVAO());
-    gl.viewport(0, 0, canvasW, canvasH);
-    gl.disable(gl.BLEND);
-    gl.useProgram(prog);
-    // 按 smooth 切源纹理过滤（FBO 默认 NEAREST；present 时按视口 scale 调）。
-    gl.bindTexture(gl.TEXTURE_2D, srcTex);
-    const filt = smooth ? gl.LINEAR : gl.NEAREST;
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filt);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filt);
-    gl.uniform1i(gl.getUniformLocation(prog, "u_flipY"), 0);   // 朝向由顶点 clip-y 处理
-    gl.uniform2f(gl.getUniformLocation(prog, "u_docSize"), docW, docH);
-    gl.uniform2f(gl.getUniformLocation(prog, "u_canvas"), canvasW, canvasH);
+  // clearColor 非空 = 先清整画布（render-tree 的 void 底色）；doc 之外的画布区不被本 draw 覆盖。
+  presentToScreenAffine(srcTex: Gl2TexSource, docW: number, docH: number, affine: number[], canvasW: number, canvasH: number, smooth = true, clearColor: [number, number, number, number] | null = null): void {
+    this._glctx.program("present-affine", PRESENT_AFFINE_VERT, PRESENT_FRAG);
     const [a, b, c, d, e, f] = affine;
-    gl.uniformMatrix3fv(gl.getUniformLocation(prog, "u_affine"), false, new Float32Array([a, b, 0, c, d, 0, e, f, 1]));
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, srcTex);
-    this._setSampler(prog, "u_src", 0);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
-    gl.bindVertexArray(null);
-  }
-
-  private _present(srcTex: WebGLTexture, fbo: WebGLFramebuffer | null, w: number, h: number, flipY: boolean, unpremult = false): void {
-    const gl = this._glctx.gl;
-    const prog = this._glctx.program("present", COMPOSITE_VERT, PRESENT_FRAG);
-    gl.bindVertexArray(this._glctx.quadVAO());
-    gl.viewport(0, 0, w, h);
-    gl.disable(gl.BLEND);
-    gl.useProgram(prog);
-    gl.uniform1i(gl.getUniformLocation(prog, "u_flipY"), flipY ? 1 : 0);
-    gl.uniform1i(gl.getUniformLocation(prog, "u_unpremult"), unpremult ? 1 : 0);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, srcTex);
-    this._setSampler(prog, "u_src", 0);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.bindVertexArray(null);
+    this._glctx.draw({
+      program: "present-affine",
+      target: "screen",
+      viewport: [0, 0, canvasW, canvasH],
+      clear: clearColor ?? undefined,
+      uniforms: {
+        u_flipY: 0,   // 朝向由顶点 clip-y 处理
+        u_unpremult: 0,
+        u_docSize: [docW, docH],
+        u_canvas: [canvasW, canvasH],
+        // setTransform 6 参 [[a,c,e],[b,d,f],[0,0,1]] 的 row-major 排布（契约：mat3 一律 row-major）。
+        u_affine: [a, c, e, b, d, f, 0, 0, 1],
+      },
+      textures: { u_src: { src: srcTex, filter: smooth ? "linear" : "nearest" } },
+    });
   }
 
   // commit 烤定（产品路径 v0.6.38）：warp 源 → **straight** RGBA bbox FBO → readback 直接返回**字节**
@@ -460,54 +413,31 @@ export class GLCompositor {
   //   mode 3（spline）源 = 系数平面（Float32Array，PAD 边距）→ RGBA16F；u8 平面（源字节/EPX 放大）→ u8。
   warpToBytes(srcCanvas: { data: Float32Array; w: number; h: number } | { data: Uint8ClampedArray; w: number; h: number }, srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number): { data: Uint8ClampedArray; w: number; h: number; dstX: number; dstY: number } | null {
     if (bw <= 0 || bh <= 0) return null;
-    const gl = this._glctx.gl;
-    const tex = gl.createTexture()!;
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const port = this._glctx;
+    const tex = port.createTexture();
     // 只收 typed-array 平面（v0.6.38 审计锁死：canvas 源 texImage2D 的 UNPACK_PREMULTIPLY 转换
     // 在 Safari 不可靠 = 柔边黑边根源，该分支已整树拔除，别加回来）。
     if (srcCanvas.data instanceof Float32Array) {
       const p = srcCanvas as { data: Float32Array; w: number; h: number };
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, p.w + 16, p.h + 16, 0, gl.RGBA, gl.FLOAT, p.data);
+      port.uploadTexture(tex, "rgba16f", p.w + 16, p.h + 16, p.data);
     } else {
       // u8 直值平面（源字节 / rotsprite EPX 放大；srcW/srcH 与平面尺寸一致由调用方保证）
       const p = srcCanvas as { data: Uint8ClampedArray; w: number; h: number };
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, p.w, p.h, 0, gl.RGBA, gl.UNSIGNED_BYTE,
-        new Uint8Array(p.data.buffer, p.data.byteOffset, p.data.byteLength));
+      port.uploadTexture(tex, "rgba8", p.w, p.h, p.data);
     }
-    const fbo = this._glctx.borrowFBO(bw, bh, "u8");
-    const prog = this._glctx.program("warpbake", COMPOSITE_VERT, WARP_BAKE_FRAG);
-    gl.bindVertexArray(this._glctx.quadVAO());
-    gl.viewport(0, 0, bw, bh);
-    gl.disable(gl.BLEND);
-    gl.useProgram(prog);
-    const u = (n: string) => gl.getUniformLocation(prog, n);
-    gl.uniform2f(u("u_bakeOrigin"), bx, by);
-    gl.uniform2f(u("u_bakeSize"), bw, bh);
-    gl.uniform2f(u("u_srcSize"), srcW, srcH);
-    gl.uniformMatrix3fv(u("u_Hinv"), true, hinv);   // row-major → transpose
-    gl.uniform1i(u("u_mode"), mode);
-    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex);
-    this._setSampler(prog, "u_src", 0);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo.fbo);
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
-    const px = new Uint8Array(bw * bh * 4);
-    gl.readPixels(0, 0, bw, bh, gl.RGBA, gl.UNSIGNED_BYTE, px);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.bindVertexArray(null);
-    this._glctx.returnFBO(fbo);
-    gl.deleteTexture(tex);
+    const fbo = port.borrowFBO(bw, bh, "u8");
+    port.program("warpbake", COMPOSITE_VERT, WARP_BAKE_FRAG);
+    port.draw({
+      program: "warpbake", target: fbo,
+      uniforms: {
+        u_bakeOrigin: [bx, by], u_bakeSize: [bw, bh],
+        u_srcSize: [srcW, srcH], u_Hinv: hinv, u_mode: mode,
+      },
+      textures: { u_src: tex },
+    });
+    const px = port.readPixels(fbo, 0, 0, bw, bh);
+    port.returnFBO(fbo);
+    port.deleteTexture(tex);
     return { data: new Uint8ClampedArray(px.buffer), w: bw, h: bh, dstX: bx, dstY: by };
-  }
-
-  private _clear(f: PooledFBO, bg?: [number, number, number, number]): void {
-    const gl = this._glctx.gl;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, f.fbo);
-    if (bg) gl.clearColor(bg[0], bg[1], bg[2], bg[3]); else gl.clearColor(0, 0, 0, 0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 }

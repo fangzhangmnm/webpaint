@@ -18,7 +18,7 @@ function fakeBackend(capacity = 8) {
     copies: [],              // [slice, srcX, srcY]
     recreate(n) { be.capacity = n; be.recreated.push(n); },
     uploadSlice(s, px) { be.uploads.push([s, px[0]]); },
-    copySliceFromFramebuffer(s, x, y, w, h) { be.copies.push([s, x, y, w, h]); },
+    copySlice(from, s, x, y, w, h) { be.copies.push([s, x, y, w, h]); },
   };
   return be;
 }

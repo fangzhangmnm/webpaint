@@ -1,10 +1,10 @@
-import type { Gl2Port } from "../common/gl2-port.ts";
+import type { Gl2Port, Gl2Texture, PooledFBO } from "../common/gl2-port.ts";
 export declare const GPU_TILE_BYTES: number;
 export interface GpuTileBackend {
     readonly capacity: number;
     recreate(newCapacity: number): void;
     uploadSlice(slice: number, pixels: Uint8Array): void;
-    copySliceFromFramebuffer(slice: number, srcX: number, srcY: number, w: number, h: number): void;
+    copySlice(from: PooledFBO, slice: number, srcX: number, srcY: number, w: number, h: number): void;
 }
 export interface PinSets {
     required: Set<number>;
@@ -45,7 +45,7 @@ export declare class GpuTilePool {
     uploadBatch(items: {
         bytes: Uint8Array;
     }[]): number[];
-    copyBatchFromFramebuffer(items: {
+    copyBatchFrom(src: PooledFBO, items: {
         srcX: number;
         srcY: number;
         w: number;
@@ -56,21 +56,9 @@ export declare class GpuTilePool {
     private _collectPins;
     private _evictForSpace;
 }
-export declare class GLGpuTileBackend implements GpuTileBackend {
-    private _glctx;
-    private _tex;
-    private _capacity;
-    constructor(glctx: Gl2Port, initialSlices: number);
-    get capacity(): number;
-    get texture(): WebGLTexture;
-    private _alloc;
-    recreate(newCapacity: number): void;
-    uploadSlice(slice: number, pixels: Uint8Array): void;
-    copySliceFromFramebuffer(slice: number, srcX: number, srcY: number, w: number, h: number): void;
-}
 export declare class IndexTexture {
-    private _gl;
-    readonly tex: WebGLTexture;
+    private _port;
+    readonly tex: Gl2Texture;
     readonly across: number;
     readonly down: number;
     private _data;
