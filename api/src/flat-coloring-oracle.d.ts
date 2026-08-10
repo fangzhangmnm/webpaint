@@ -1,4 +1,4 @@
-import type { LineartPartition } from "./flat-coloring/partition.ts";
+import type { LineartPartition } from "./backend/algorithms/flat-coloring/partition.ts";
 import { Selection } from "./selection.ts";
 /** 结构化最小依赖（≈ floodSelectFrom 的 mock 面）：node 直测不拖 doc.ts */
 export interface OracleSourceLayer {

@@ -111,3 +111,23 @@
   （实数 10/5+2，recon-e 7/3 过期）。③common 种子搬迁：tiles/tile-geometry.ts、color-dist.ts
   → src/common/（提案 §1 点名；backend/frontend 住户排 C3/C5）。验收：tsc 0、1233 绿、
   新 lint 绿+防退化验证、GL smoke PASSED。行为不变纯搬家，无新真机锚。
+- **C3 部分 ✅ v0.8.27（2026-08-10）——已交付**：①**algorithms/ 立户**：flat-coloring/、bspline、
+  rotsprite、resample-bytes、color-cluster 迁 `src/backend/algorithms/` + 注册清单
+  `backend/algorithms/README.md`（含待迁挂账：pixel-conic 被 perspective-frame/shape-geometry 拆分
+  拖住、rasterizePolygonGray8 被 Selection→common 拖住）。②**lasso 拆**：魔棒三内核（泛洪/容隙
+  EDT 闭/同色全图）析出 `magic-wand.ts`（零 Selection/UI 知识，WandSourceLayer 结构面）；lasso.ts
+  留同签名 Selection 包装出口——test/flood-select、similar-select 行为锚零改动全绿。③**债 a**：
+  resample.ts 物理不存在——smartResample/fitWithin 死；缩略图（ora 自适应+peek）/mergedimage/导出
+  PNG/blender 推图/参考图缩存全走 areaResampleBytes+encodePngFromBytes；解码读出/canvasToBlob 幸存
+  三函数落 `shell/image-io.ts`；RESAMPLE_MODES+fillResampleSelect 落 `frontend/resample-modes.ts`。
+  ④**债 c**：selection.toCanvas 早已零消费（本轮核实，判据已满足）。⑤**债 d**：
+  renderDocToImageBlob 全字节（PNG=UPNG 纯字节含 crop/JPG=字节铺底+canvas 仅当编码器）；
+  encodePngFromCanvas 后门从 ora/session 拔除（png-codec 里的导出函数还在，剩余消费者=0，下一棒
+  顺手删）。**真机锚（追加真机批）**：存档缩略图/图库 peek/mergedimage 观感如旧；导出 PNG 透明保持、
+  JPG 底色正确、含选区裁剪导出；blender 推图 POT 缩放；参考图 >2048 导入缩存。
+  **C3 剩余（下一棒接着做）**：⑥债 b——tile-layer canvas 三件套（materialize/editRegion(fn ctx)/
+  replaceFromCanvas）+ doc.ts/painting-view canvas·ctx getter 物化缓存：真写者 ≈ input.ts(7 处)/
+  selection-ops(2)/filters-adjust(2)/psd/ora/import-image 各 1，逐个迁 editRegionBytes/replaceFromBytes
+  后拆 facade（reference/board/palette 的自持屏显 canvas 是壳域合法，不在债内）；⑦死代码：doc.ts
+  PaintDoc 类（405–1152 生产零引用）、gallery-model merge 系列（仅测试引用）、survey §3 化石注释；
+  ⑧符号改名：LineartOracle→FlatColoringOracle 等（持久化 key "lineart"/desk.magicWand.lineart* 一律不动）。

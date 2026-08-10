@@ -1,9 +1,14 @@
 import type { PaintingView } from "./workpiece/painting-view.ts";
 export declare function getCurrentSessionName(): string;
 export declare function setCurrentSessionName(name: string): void;
-/** 合成图 canvas → 缩略图 blob（最长边 = maxSide）。PNG 保 alpha（容器 CSS 背景可独立调色）。
- *  S9：不再自己合成——merged 由调用方给（GL doc-render 渲出，与 display/存档同源同刻）。 */
-export declare function thumbBlobFromCanvas(merged: HTMLCanvasElement | OffscreenCanvas, maxSide?: number): Promise<Blob | null>;
+/** 合成字节 → 缩略图 blob（最长边 = maxSide）。PNG 保 alpha（容器 CSS 背景可独立调色）。
+ *  S9：不再自己合成——merged 由调用方给（GL doc-render 渲出，与 display/存档同源同刻）。
+ *  C3：全字节管线——areaResampleBytes（面积平均，α 加权）+ UPNG，零 canvas。 */
+export declare function thumbBlobFromBytes(merged: {
+    data: Uint8ClampedArray;
+    w: number;
+    h: number;
+}, maxSide?: number): Promise<Blob>;
 /** 渲染合成图 blob（分享 PNG/JPG 用）。全走 HTMLCanvasElement.toBlob，
  *  避开 Safari OffscreenCanvas.convertToBlob JPEG 返 null 的 bug。 */
 export declare function renderDocToImageBlob(doc: PaintingView, mime?: string, quality?: number, scope?: string, cropRect?: {
@@ -11,7 +16,7 @@ export declare function renderDocToImageBlob(doc: PaintingView, mime?: string, q
     y: number;
     w: number;
     h: number;
-} | null): Promise<Blob | null>;
+} | null): Promise<Blob>;
 export declare function prefersShare(): boolean;
 /**
  * 分享 / 保存合成图。移动端优先 navigator.share（→ 相册 / Files）；桌面直接下载到 Downloads。

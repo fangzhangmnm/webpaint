@@ -36,7 +36,11 @@ type EncodeDoc = {
  *  getImageData = 纯切片，无 canvas、无追写风险）。 */
 export declare function paintingDataToEncodeDoc(data: PaintingData): EncodeDoc;
 interface EncodeOpts {
-    mergedCanvas?: OffscreenCanvas | HTMLCanvasElement | null;
+    mergedBytes?: {
+        data: Uint8ClampedArray;
+        w: number;
+        h: number;
+    } | null;
     referenceImage?: Blob;
     desk?: object;
 }

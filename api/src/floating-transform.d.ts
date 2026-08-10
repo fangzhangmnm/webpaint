@@ -3,8 +3,8 @@ import type { FloatFrame, TransformClass, FloatLayerComponent } from "./workpiec
 import type { SelectionComponent } from "./workpiece/selection-component.ts";
 import type { RigidMap } from "./workpiece/float-ops.ts";
 import type { History } from "./workpiece/history.ts";
-import type { SplinePlane } from "./bspline.ts";
-import type { U8Plane } from "./rotsprite.ts";
+import type { SplinePlane } from "./backend/algorithms/bspline.ts";
+import type { U8Plane } from "./backend/algorithms/rotsprite.ts";
 type Node = ViewLeaf | ViewGroup;
 interface Point {
     x: number;

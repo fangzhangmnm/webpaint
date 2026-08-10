@@ -95,11 +95,11 @@ export declare class LassoEngine {
     lineartDebugInfo(sourceLayer: ViewLeaf | null): {
         w: number;
         h: number;
-        keypoints: import("./flat-coloring/partition.ts").LineartPartition["keypoints"];
-        bridges: import("./flat-coloring/partition.ts").LineartPartition["bridges"];
+        keypoints: import("./backend/algorithms/flat-coloring/partition.ts").LineartPartition["keypoints"];
+        bridges: import("./backend/algorithms/flat-coloring/partition.ts").LineartPartition["bridges"];
     } | null;
     setSampleMode(m: string): void;
-    getSampleMode(): "bicubic" | "rotsprite" | "spline" | "bilinear" | "nearest";
+    getSampleMode(): "bicubic" | "nearest" | "bilinear" | "spline" | "rotsprite";
     setConstrainSquare(on: unknown): void;
     getConstrainSquare(): boolean;
     beginPath(x: number, y: number): void;
@@ -178,20 +178,12 @@ export declare class LassoEngine {
     getFloatingScreenBbox(): number[] | null;
     visibleHandles(screenScale?: number): import("./floating-transform.ts").Hit[];
 }
-export interface FloodStopMask {
-    x: number;
-    y: number;
-    w: number;
-    h: number;
-    data: Uint8Array;
-}
+export type { FloodStopMask } from "./backend/algorithms/magic-wand.ts";
 export declare function floodSelectFrom(doc: {
     width: number;
     height: number;
-}, start: Point | null, sourceLayer: ViewLeaf | null, thresholdPct: number, metric?: ColorMetric, // v0.7.21：默认 rgb = v242 逐字语义（旧测试原样绿）；app 侧灌 desk 的度量
-stopMask?: FloodStopMask | null, gapPx?: number): Selection | null;
+}, start: Point | null, sourceLayer: ViewLeaf | null, thresholdPct: number, metric?: ColorMetric, stopMask?: import("./backend/algorithms/magic-wand.ts").FloodStopMask | null, gapPx?: number): Selection | null;
 export declare function similarSelectFrom(doc: {
     width: number;
     height: number;
 }, start: Point | null, sourceLayer: ViewLeaf | null, thresholdPct: number, metric?: ColorMetric): Selection | null;
-export {};
