@@ -108,6 +108,12 @@ function makeNode(tag = "div") {
     getAttribute(k) { return store.has(k) ? store.get(k) : null; },
     hasAttribute(k) { return store.has(k); },
     removeAttribute(k) { store.delete(k); },
+    // 标准 DOM（C9 组件宿主桥用；缺席曾让 boot smoke 子进程 TypeError→被收集器吞→整套件挂死）
+    toggleAttribute(k, force) {
+      const want = force !== undefined ? !!force : !store.has(k);
+      if (want) store.set(k, ""); else store.delete(k);
+      return want;
+    },
     setAttributeNS: NOOP,
     // 真链表树：Vue patch 依赖 parentNode / nextSibling / previousSibling 一致。
     insertBefore(c, ref) {

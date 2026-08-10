@@ -71,9 +71,12 @@ export interface RackHandle {
 // 浮窗（side-windows.ts）：参考窗 / 调色板窗——方法集不同，分两个句柄。
 export interface ReferenceWindowHandle {
   // 参考窗 open/位置/vp 已迁 desk.refPanel（2026-07-14）；不再 getSerializedState/applySerializedState。
-  clearBitmap(): void;
-  setBitmap(bitmap: ImageBitmap, opts?: { persistBlob?: Blob | null; skipFit?: boolean }): void;
-  getPersistBlob(): Blob | null;
+  // C9（v0.8.48）：句柄 = <wp-reference-window> 元素本身。**全员 optional**——custom element 在无
+  // customElements 的环境（node boot smoke 的 dom-shim）永不升级，方法就是不存在；这是 web component
+  // 的正统退化态（progressive enhancement）。调用点一律 ?.（tsc 强制）；真浏览器 define 即升级、恒在。
+  clearBitmap?(): void;
+  setBitmap?(bitmap: ImageBitmap, opts?: { persistBlob?: Blob | null; skipFit?: boolean }): void;
+  getPersistBlob?(): Blob | null;
   close?(): void;
 }
 export interface PaletteWindowHandle {

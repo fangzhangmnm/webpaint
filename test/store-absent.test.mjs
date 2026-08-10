@@ -82,8 +82,11 @@ describe("store-absent · 整段 boot smoke（子进程）", () => {
       });
       let err = "";
       p.stderr.on("data", (d) => { err += d; });
-      p.on("close", (code) => resolve({ code, err }));
+      // 超时墙（2026-08-10）：子进程若挂死（boot 泄漏句柄 + 主线抛错被收集器吞），
+      // 无超时 = 整个 npm test 无限等。60s 杀掉、响亮失败。
+      const wall = setTimeout(() => { p.kill("SIGKILL"); }, 60_000);
+      p.on("close", (code, signal) => { clearTimeout(wall); resolve({ code: signal ? `killed(${signal})` : code, err }); });
     });
     assert(r.code === 0, `nostore boot 子进程退出码 ${r.code}：\n${r.err.slice(0, 2000)}`);
-  });
+  }, { timeout: 60_000 });   // 延长：spawn 整段 boot（暖 ~6s，冷可超默认 10s；与上面 60s 杀墙对齐）
 });

@@ -62,12 +62,12 @@ export interface RackHandle {
     restoreBuiltins(): Promise<number>;
 }
 export interface ReferenceWindowHandle {
-    clearBitmap(): void;
-    setBitmap(bitmap: ImageBitmap, opts?: {
+    clearBitmap?(): void;
+    setBitmap?(bitmap: ImageBitmap, opts?: {
         persistBlob?: Blob | null;
         skipFit?: boolean;
     }): void;
-    getPersistBlob(): Blob | null;
+    getPersistBlob?(): Blob | null;
     close?(): void;
 }
 export interface PaletteWindowHandle {

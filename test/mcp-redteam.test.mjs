@@ -143,5 +143,5 @@ describe("mcp-redteam · 握手与全流程", () => {
     } finally {
       c.kill();
     }
-  });
+  }, { timeout: 30_000 });   // 延长：spawn 真 MCP server 子进程全流程（暖 ~2s，冷可超默认 10s）
 });

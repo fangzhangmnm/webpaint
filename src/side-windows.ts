@@ -108,8 +108,10 @@ export function initSideWindows(ctx: AppContext) {
 
   // ---- 宿主全局通道 → 组件（组件不监听 window；wp: 事件是宿主约定）----
   // doc 像素或图层结构变 → live 脏标（真合成组件内按脏标+节流做）
-  window.addEventListener("wp:docpixeldirty", () => ref.markLiveDirty());
-  window.addEventListener("wp:histchange", () => ref.markLiveDirty());
+  // ?.：元素在无 customElements 的环境（boot smoke dom-shim）不升级、方法不存在——这两条在 boot
+  // 期就会被派发，不 ?. 会把 dispatchEvent 炸穿（2026-08-10 挂死链的教训；见 ReferenceWindowHandle 注）
+  window.addEventListener("wp:docpixeldirty", () => ref.markLiveDirty?.());
+  window.addEventListener("wp:histchange", () => ref.markLiveDirty?.());
   // desk apply-on-load：程序性属性下灌**不发事件** → 不回写 desk、载入不标脏
   // （旧 _applying 两帧守卫退役：回声由上面 rectchange 的值比较吸收）
   window.addEventListener("wp:applyEditorState", () => {

@@ -14,9 +14,11 @@
   （user 2026-08-08：「现在只是 0.8 的前 1/3」）；bump minor 必须 user 显式说版本号。
 - **测试基线**：1232 node 绿 + tsc 0 + `bash scripts/build.sh` 全 lint + `npm run smoke` GL smoke
   PASSED。`test/run.mjs` 是显式清单，新测试必须注册。
-  **⚠ 2026-08-10 C9 期间 user 裁定覆盖上一行的「跑」义务：慢测试（npm test 全量/test:full/smoke）
-  退出一切 ritual——「慢test不要放任何ritual里面，人类说了再做，ai不要主动等」「交付也不要test」。
-  AI 自主验证面收缩为 tsc + build.sh lint + 静态检查；测试照写照注册，执行权归人类。**
+  **2026-08-10 插曲存档（供接棒者防重蹈）**：C9 交付时全量看似「跑不完」（34min），user 一度裁定
+  慢测试退出 ritual；随后计时诊断证明**套件从来不慢（全量 ~30s）**——真凶是 C9 引入的 boot smoke
+  挂死链（shim 缺 toggleAttribute → 子进程收集器吞主线抛错 → 父测试无超时），v0.8.48 修复后
+  user 撤回该裁定。留下的硬教训（已入 CLAUDE.md 长跑纪律）：每条测试实时 flush 耗时、长跑落
+  共享日志、重活不并行、测试异常变慢先 `ps` 查 CPU 时间分辨「慢 vs 挂死」。
 - **中间态纪律**（v2 同款，user 拍板沿用）：不推 dev 不等真机直接接力施工；「写完了才算数，一口气
   写不完可以接力。中间怕错可以模块化测试」；过渡态自己裁不上呈，上呈只有终态契约偏离/undo 白黑
   名单/数据安全。**测试分级从 C8 起生效前，先维持全量 npm test**；C8 落地后中间棒可只跑相关模块+tsc。
@@ -477,9 +479,26 @@
   vendor/测试/embedding 终态备忘）；提案 §5 C9 行已回写。⑥gl-smoke harness 补
   `referenceComponentCheck` 9 锚（define/挂载/位图读回/wheel 发事件 vs 程序性静默/colorpick/
   live provider/live 反射）——run() 转 async（rAF 等帧）。
-  验收（**按 2026-08-10 新裁定：慢测试不跑，见 §0**）：tsc 0、lint-dirs 绿、GL smoke PASSED
-  （含 9 组件锚；在裁定落地前已跑完）、gen-component 自包含验证；快层被叫停于中途（停前无红，
-  未完整跑——执行权归人类）。**真机锚（追加真机批）**：参考窗全功能回归——开窗/拖窗/双指
+  验收：tsc 0、lint-dirs 绿、GL smoke PASSED（含 9 组件锚）、gen-component 自包含验证；快层当日
+  一度「跑不完」→ 实为本片引入的挂死 bug，v0.8.48 修复后 **1258 绿 / 21.3s**（见下条）。
+  **真机锚（追加真机批）**：参考窗全功能回归——开窗/拖窗/双指
   pinch 旋转/wheel/双击适应/touch 右下角 resize、载图（>2048 缩存）、live 镜像跟笔、吸管+长按
   吸色（十字光标）、关窗重开位置 vp 记忆、换 doc 恢复、gallery 模式隐藏、i18n 四语 tooltip。
   **C0-C9 全清账，C 骑士收官。**B 剩余批/UX 抽象层/E 骑士见 §3 悬账。
+- **C9 补丁 ✅ v0.8.48（2026-08-10）——boot smoke 挂死修复 + 测试基建三护栏 + 句柄契约收紧**：
+  ①**挂死根因链**（诊断法=先 `ps` 拆「慢 vs 挂」：34min 墙钟 CPU 只走 0.3s → 挂死非慢；对照组
+  v0.8.46 exit=0 → C9 引入；探针进程立打 uncaught → 定位一行）：C9 syncPick 调
+  `ref.toggleAttribute()` → **dom-shim 假节点缺这个标准 DOM 方法** → TypeError → app.ts 模块拒绝
+  → 子进程 `await import` 抛出被自装的 uncaughtException **收集器拦下（只 push 不退出）** →
+  `process.exit` 永不达、boot 泄漏句柄吊住事件循环 → 父测试 `p.on("close")` **无超时** → 全套件
+  无限挂。真浏览器不受影响（真元素恒有 toggleAttribute），线上无 bug。②修三层：dom-shim 补
+  `toggleAttribute`；child 主线 import 包 try/catch 响亮 exit(1)；父测试 60s 超时墙 SIGKILL+报
+  信号。③**句柄契约收紧**：`ReferenceWindowHandle` 全员 optional——custom element 在无
+  customElements 环境永不升级是 web component 正统退化态，调用点一律 `?.`（tsc 强制）；
+  session-state 3 处、side-windows markLiveDirty 2 处改 `?.`。④runner 每测**实时 flush 耗时**
+  （≥1s 标黄）+ 总时 + **默认 10s/条超时墙**（user 点子：挂死→响亮红；延长在声明处
+  `it(name,fn,{timeout:ms})` 申请，已发 boot smoke 60s/组合根 30s/mcp-redteam 30s 三户；
+  JS 杀不掉泄逸 promise，超时=判负继续跑）；实测全量 **1258 绿 21.3s**（墙钟 30s；最慢 =
+  boot smoke 5.9s、组合根 smoke 2.9s、mcp-redteam 1.9s——SoftGl2 计算占比可忽略）。⑤当日「慢测试退出 ritual」裁定
+  经此诊断由 user 撤回（见 §0 插曲存档）；CLAUDE.md 换成长跑纪律（实时 flush/共享日志/不并行）。
+  无新真机锚（test 基建 + `?.` 防御，浏览器行为不变）。

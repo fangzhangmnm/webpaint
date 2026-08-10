@@ -96,7 +96,7 @@ async function _refreshEncrypted() {
 // 三组，存时 syncRuntimeForSave 捞进）；activeId 在 stack.xml webpaint:active 原生携带。
 // 读兼容：restoreEditorStateFromOra 仍吃存量 .ora 的 _webpaintState（desk 后手赢），拔除另议。
 function resetEditorState() {
-  referenceWindow.clearBitmap(); referenceWindow.close?.();
+  referenceWindow.clearBitmap?.(); referenceWindow.close?.();   // ?.=元素可能未升级（无 CE 环境），见 ReferenceWindowHandle 注
   paletteWindow.clear?.(); paletteWindow.close?.();
   setColor("#000000"); applyCheckerboard(false); state.filterBrush = null; applyBlenderSyncState();
   desk.reset();   // desk per-doc：开新文件/换画/卸载 → 重置 desk struct（stage4）
@@ -111,7 +111,7 @@ function restoreEditorStateFromOra(loaded: LoadedDoc) {
   if (loaded?._referenceBlob) {
     // skipFit：ref 面板 open/位置/vp 由 desk.refPanel 经 wp:applyEditorState 恢复；bitmap 异步载入不覆盖已载入 vp。
     createImageBitmap(loaded._referenceBlob).then((bitmap: ImageBitmap) => {
-      referenceWindow.setBitmap(bitmap, { persistBlob: loaded._referenceBlob, skipFit: true });
+      referenceWindow.setBitmap?.(bitmap, { persistBlob: loaded._referenceBlob, skipFit: true });
     }).catch(() => {});
   }
   if (ws?.color) setColor(ws.color);
@@ -158,7 +158,7 @@ function _buildOraMeta() {
     state.checkerboard,
     { toolDials: state.toolStates, palette: paletteWindow.getSerializedState(), blender: getBlenderSyncState() },
   );
-  return { referenceImage: referenceWindow.getPersistBlob() ?? undefined, desk: desk.Serialize() };
+  return { referenceImage: referenceWindow.getPersistBlob?.() ?? undefined, desk: desk.Serialize() };
 }
 // S8（spec:41 存档一致性）：encode 前**同步**冻结 {结构 + 每叶 tile 快照}（零拷贝），bytes 与 peek
 //   读同一冻结视图 → encode 的 await 间隙里任何编辑（描边 commit / 层结构操作）都不撕存档，

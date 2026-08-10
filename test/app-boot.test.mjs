@@ -81,5 +81,5 @@ describe("app.js 组合根 boot smoke", () => {
       const lines = errors.map(([k, e]) => `  [${k}] ${e && e.stack || e}`).join("\n");
       assert(false, `boot 期间有 ${errors.length} 个逃逸抛错：\n${lines}`);
     }
-  });
+  }, { timeout: 30_000 });   // 延长：整段组合根 import + Vue flush（暖 ~3s，冷可超默认 10s）
 });

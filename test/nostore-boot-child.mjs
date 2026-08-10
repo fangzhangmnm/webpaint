@@ -32,7 +32,15 @@ if (appStore.isAuthConfigured() !== false || appStore.isSignedIn() !== false) {
   process.exit(1);
 }
 
-await import("../src/app.ts");
+// 主线抛错必须自己接：不 try 的话 import 拒绝会被上面的 uncaughtException 收集器拦下
+// （收集器只 push 不退出），process.exit 永远走不到 → 子进程被 boot 泄漏句柄吊死、父测试
+// 无限等（2026-08-10 真实咬过：shim 缺 toggleAttribute → 整个 npm test 挂死 34min+）。
+try {
+  await import("../src/app.ts");
+} catch (e) {
+  console.error("[boot-import-reject]", (e && e.stack) || e);
+  process.exit(1);
+}
 await new Promise((r) => setTimeout(r, 500));   // settle：boot 收尾 async IIFE / Vue flush
 
 if (errors.length) {

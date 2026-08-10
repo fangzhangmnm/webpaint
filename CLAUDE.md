@@ -12,7 +12,7 @@ Procreate 级绘画 PWA + **家族 sync-store 引擎的开发面**（shared-lib-
 - `journal/cached feedback.md` = 人类专属反馈日志，AI 只读，永不写。
 - 人类钉死的区域：手感（streamline/taper/压感 gamma）、UI/UX 决策、store model。其余按 greenfield 标准大胆重构。
 - 测试纪律：mock + node test 先行（store 200+ 测试）；需要真机的积批，"我只测一次。就是交付"；每 commit bump vN + 版本水印（反煤气灯——不确定部署版本时先对水印）。
-- **【硬规则】慢测试不进任何 ritual（user 2026-08-10：「慢test不要放任何ritual里面，人类说了再做，ai不要主动等」「交付也不要test」）**：`npm test` 全量快层 / `test:full` / `npm run smoke` 一律**只在人类点名时跑**，AI 不主动跑、不挂后台等结果、交付点也不跑。AI 自主验证面 = `tsc --noEmit` + build.sh 内的 lint（快）+ 静态检查；新写的测试照写照注册，跑不跑归人类。
+- **长跑纪律（user 2026-08-10）**：测试/构建每条**实时 flush 耗时**（runner 已内建每测 ms + 总时；≥1s 标黄）；**每测默认 10s 超时墙**，确需更久在声明处 `it(name, fn, { timeout: ms })` 申请（挂死→响亮红，不再吊死全套件）；长跑输出落**共享日志文件**（`tmp/`，AI 和人类都能随时看），不许把结果攒到最后梭哈；重活（test/smoke/gen-api）**不并行**互相抢。测试异常变慢先怀疑挂死而非"测试就是慢"——2026-08-10 出过：34min"慢" 实为 boot smoke 挂死（全量真实耗时 ~30s），先 `ps` 看 CPU 时间再下结论。
 - 云同步已知弱点清单：`ai-docs/20260528-backlog.md` 的「云同步审计 2026-06-09」节 + `ai-docs/reports/20260609-store-cloud-sync-audit.md`（gitignored，只在本机）。
 - **worktree 落地**：在 worktree 里改完别只 push remote——改动也要带回 local 工作区（merge/ff 本地 main，或把文件落回主 checkout），否则 local 落后于 remote、下个 agent 在旧版上接着改（曾出现 remote=v256 而 local main=v242）。
 
@@ -32,4 +32,4 @@ Procreate 级绘画 PWA + **家族 sync-store 引擎的开发面**（shared-lib-
 3. **构建**：`bash scripts/build.sh`——前置 `tsc --noEmit` 门（不过不准发）；esbuild bundle → `dist/webpaint-<hash>.mjs`（content-hash 命名）；`sed` 改 `index.html` 指新 hash；清旧 hash bundle。**别手改 dist/ 或 index.html 的 hash**。
 4. **commit bundle + push**：`git add dist index.html && git commit -m "vN: dev bundle (webpaint-<hash>) — <一句话> smoke" && git push origin main`。
 
-跑测试：`npm test`（node test runner；store 200+ 测试）——**人类点名才跑**（见上硬规则；`TEST_FILTER=<子串> npm test` 可选小跑，同样只在人类要求时）。`bump.sh` 的 sed 目标是 `src/version.ts`（v315 起 .js→.ts，别再回 .js）。
+跑测试：`npm test`（node test runner；全量 ~30s，每条自带耗时）。`bump.sh` 的 sed 目标是 `src/version.ts`（v315 起 .js→.ts，别再回 .js）。
