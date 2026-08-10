@@ -14,7 +14,7 @@ import { describe, it, assert, eq, todo } from "./runner.mjs";
 const { Selection } = await import("../src/selection.ts");
 const { antsOutline } = await import("../src/marching-ants.ts");
 const { appTilePool } = await import("../src/tiles/app-tile-pool.ts");
-const { TILE_SIZE } = await import("../src/tiles/tile-geometry.ts");
+const { TILE_SIZE } = await import("../src/common/tile-geometry.ts");
 
 // gray8 矩形工厂：在 (x,y) 放 w×h 的实心 v 值块
 function solid(x, y, w, h, v = 255) {

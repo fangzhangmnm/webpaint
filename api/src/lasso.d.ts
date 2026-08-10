@@ -1,6 +1,6 @@
 import { Selection } from "./selection.ts";
 import { LineartOracle } from "./flat-coloring-oracle.ts";
-import type { ColorMetric } from "./color-dist.ts";
+import type { ColorMetric } from "./common/color-dist.ts";
 import { FloatingTransform } from "./floating-transform.ts";
 import type { WarpBakeFn } from "./floating-transform.ts";
 import type { ViewLeaf, ViewGroup, PaintingView } from "./workpiece/painting-view.ts";

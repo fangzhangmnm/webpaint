@@ -112,6 +112,28 @@ if [ -n "$LAYER_HITS$TILES_HITS$SEL_HITS$DEAD_HITS$RENDER_HITS$S9DEAD_HITS" ]; t
 fi
 echo "[build] ✓ v0.4 分层干净"
 
+# 0.7 C2 目录格律 lint（C 骑士提案 §1 五目录单向依赖 + 禁浏览器词；ADR-0009）。规则**只增不减**：
+#   · common/**  纯类型+纯数学：不得 import src 其他目录（禁一切 ../ 相对引用，vendor 也不许）。
+#   · backend/** 只准 import common/（+ backend 内部相对引用 + vendor 纯计算库）。
+#   · frontend/** 只准 import common/ + backend/（+ frontend 内部 + vendor）——不碰 shell/、gallery/、store。
+#   · shell/**   platform 胶水，可 import 全部（无约束）。
+#   · gallery/** 检疫堆场（提案 §1：只搬不斩）：暂无依赖约束；双向依赖记账在 src/gallery/gallery.ts 头。
+#   · 禁浏览器词（backend 域 DOM 零依赖）：common/** + backend/** 代码行不得出现
+#     document/window/navigator/localStorage/sessionStorage/getContext/createElement/addEventListener。
+#     注释行豁免；WebGL 句柄类型（WebGLTexture 等）= Gl2Port 契约 opaque 类型，不在禁词内。
+#   （C2 时 backend/、frontend/ 尚未有住户——存量随 C3/C5 切片搬入，规则先立防退化。）
+echo "[build] C2 目录格律 lint…"
+COMMON_DEP_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"]\.\./" src/common --include='*.ts' 2>/dev/null || true)
+BACKEND_DEP_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"](\.\./)" src/backend --include='*.ts' 2>/dev/null | grep -vE "['\"](\.\./)+(common|vendor)/" || true)
+FRONTEND_DEP_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"](\.\./)" src/frontend --include='*.ts' 2>/dev/null | grep -vE "['\"](\.\./)+(common|backend|vendor)/" || true)
+BROWSERWORD_HITS=$(grep -rnE "\b(document|window|navigator|localStorage|sessionStorage)\b|getContext\(|createElement\(|addEventListener\(" src/common src/backend --include='*.ts' 2>/dev/null | grep -vE ":[0-9]+:[[:space:]]*(//|\*|/\*)" || true)
+if [ -n "$COMMON_DEP_HITS$BACKEND_DEP_HITS$FRONTEND_DEP_HITS$BROWSERWORD_HITS" ]; then
+  echo "[build] ✗ C2 目录格律违规：" >&2
+  echo "$COMMON_DEP_HITS$BACKEND_DEP_HITS$FRONTEND_DEP_HITS$BROWSERWORD_HITS" >&2
+  exit 1
+fi
+echo "[build] ✓ C2 目录格律干净"
+
 # 1. esbuild bundle 到临时名
 "$ESBUILD" "$ENTRY" \
   --bundle --format=esm --target=es2020 \

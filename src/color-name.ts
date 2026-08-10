@@ -18,7 +18,7 @@
 
 import { lang } from "./i18n/index.ts";
 import { reportError } from "./error-badge.ts";
-import { srgbToOklab } from "./color-dist.ts";
+import { srgbToOklab } from "./common/color-dist.ts";
 
 // ---- 数据装载（brushes.ts 同款：成功恒定缓存；失败不留缓存 → 下次调用自动重试）----
 export interface ColorCategory {

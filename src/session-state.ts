@@ -21,7 +21,7 @@ import { tLatin } from "./i18n/index.ts";
 import { isSignedIn, store as _store } from "./app-store.ts";
 import type { EncryptedBlob } from "./store/index.ts";   // 密文 at-rest 字节（branded：明文流不进只收密文的 sink）
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
-import { pathFolder } from "./gallery-path.ts";
+import { pathFolder } from "./gallery/gallery-path.ts";
 import { sessionFileName, sessionBareName } from "./config.ts";
 import { serializedToolStatePatch, desk } from "./workbench-state.ts";
 import { getBlenderSyncState, applyBlenderSyncState } from "./blender-sync.ts";
@@ -31,7 +31,7 @@ import { shouldCapture, checkpointKey, type CheckpointTrigger } from "./checkpoi
 import { getCheckpoint, putCheckpoint, deleteCheckpoint } from "./storage.ts";
 import { els } from "./els.ts";
 import type { AppContext } from "./app-context.ts";
-import type { GalleryItem } from "./gallery-model.ts";
+import type { GalleryItem } from "./gallery/gallery-model.ts";
 import { t } from "./i18n/index.ts";
 import { createEditorSession, type EditorSession, type StoreLike } from "./editor-session/index.ts";
 
@@ -56,6 +56,8 @@ let pullSettingsAndState: AppContext["pullSettingsAndState"];
 let setColor: AppContext["setColor"], applyCheckerboard: AppContext["applyCheckerboard"], renderLayersPanel: AppContext["renderLayersPanel"];
 let setGalleryOpen: AppContext["setGalleryOpen"];
 let checkQuotaAndWarn: AppContext["checkQuotaAndWarn"];
+// C2 记账：gallery↔session 双向依赖的反向半边（refresh×5 + invalidateEncrypted×2 经此句柄）——
+//   E 骑士开工清单，详 src/gallery/gallery.ts 文件头。
 let gallery: AppContext["gallery"];
 
 // ---- session 拥有的 SSoT 状态 ----

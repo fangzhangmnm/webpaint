@@ -101,3 +101,13 @@
   本地自包字节→canvas）。④GPU tile arena 归 Port（多 tab 记账）**未动**——排 C7。验收：tsc 0、
   1233 绿、build lint 全过、GL smoke PASSED。无新真机锚（行为不变纯搬家；context-loss 自愈路径
   真机批已有旧锚覆盖）。
+- **C2 ✅ v0.8.26（2026-08-10）**：①五目录格律 lint 挂 build.sh「0.7 C2 目录格律」段（v0.4 同款
+  写法）：common 禁一切 ../、backend 只准 common+vendor、frontend 只准 common+backend+vendor、
+  shell 无约束、gallery 检疫无约束；禁浏览器词（common+backend 代码行禁 document/window/navigator/
+  localStorage/sessionStorage/getContext/createElement/addEventListener，注释豁免）；**负测试已验证
+  两类违规都咬人**。②gallery 8 文件搬入 `src/gallery/`（flat，不细分）：gallery-model/-path/-shell +
+  ui/gallery.ts→gallery.ts + ui/gallery-view-model.ts + cloud-auth-ui + cloud-thumbs +
+  cloud-thumb-cache；双向依赖记账落 gallery.ts 文件头 + session-state.ts `let gallery` 旁
+  （实数 10/5+2，recon-e 7/3 过期）。③common 种子搬迁：tiles/tile-geometry.ts、color-dist.ts
+  → src/common/（提案 §1 点名；backend/frontend 住户排 C3/C5）。验收：tsc 0、1233 绿、
+  新 lint 绿+防退化验证、GL smoke PASSED。行为不变纯搬家，无新真机锚。

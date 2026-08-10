@@ -82,7 +82,7 @@ export interface PaletteWindowHandle {
   close?(): void;
 }
 // 图库句柄 = ui/gallery.ts mountGallery 的真返回类型（单一真源，弃本地镜像 v319）。
-import type { GalleryHandle } from "./ui/gallery.ts";
+import type { GalleryHandle } from "./gallery/gallery.ts";
 export type { GalleryHandle };
 // 左栏 dial 组件句柄 = ui/left-dial.ts 的真返回类型（单一真源，弃本地占位 v319）。
 import type { LeftDialHandle } from "./ui/left-dial.ts";

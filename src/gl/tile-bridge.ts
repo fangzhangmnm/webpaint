@@ -14,7 +14,7 @@
 // bytes 惰性取（entry.bytes 是回调）：映射命中时**不物化** CPU 字节——压缩驻留的 tile
 //   在 GPU 副本还活着时零解压成本。
 
-import { TILE_SIZE, tileRangeForRect } from "../tiles/tile-geometry.ts";
+import { TILE_SIZE, tileRangeForRect } from "../common/tile-geometry.ts";
 import type { GpuTilePool } from "./gpu-tile-pool.ts";
 
 export interface UploadEntry { cpuId: number; bytes: () => Uint8Array }

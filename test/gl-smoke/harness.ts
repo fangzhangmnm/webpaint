@@ -8,7 +8,7 @@
 
 import { BrowserGl2Port } from "../../src/shell/browser-gl2-port.ts";
 import { GLGpuTileBackend, GpuTilePool, IndexTexture, GPU_TILE_BYTES } from "../../src/gl/gpu-tile-pool.ts";
-import { TILE_SIZE, tilesAcross } from "../../src/tiles/tile-geometry.ts";
+import { TILE_SIZE, tilesAcross } from "../../src/common/tile-geometry.ts";
 import { GLCompositor } from "../../src/gl/gl-compositor.ts";
 import { BLEND_MODES } from "../../src/gl/blend-glsl.ts";
 import { docTreeToComp, compositeTree } from "./reference-gl-compositor.ts";

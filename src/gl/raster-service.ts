@@ -3,7 +3,7 @@
 // 零上传），吸管/导出合成读同一份 pseudo 装置（surrogate/overlay WYSIWYG）。
 // 本类零缓存、零帧状态——每个方法自开自收（FBO 即借即还，overlay 用完即清）。
 
-import { TILE_SIZE, tilesAcross } from "../tiles/tile-geometry.ts";
+import { TILE_SIZE, tilesAcross } from "../common/tile-geometry.ts";
 import type { Background } from "./gl-compositor.ts";
 import type { DocNode, DocLeaf } from "./gl-doc-bridge.ts";
 import type { LayerPixels } from "../tiles/tile-layer.ts";

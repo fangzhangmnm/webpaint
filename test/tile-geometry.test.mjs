@@ -3,7 +3,7 @@ import { describe, it, assert } from "./runner.mjs";
 import {
   tilesAcross, tilesDown, tileCount,
   tileKey, tileCoord, tileDocOrigin, tileRangeForRect, forEachTileInRect,
-} from "../src/tiles/tile-geometry.ts";
+} from "../src/common/tile-geometry.ts";
 
 describe("tile-geometry · 网格换算", () => {
   it("tilesAcross/Down 向上取整，最小 1", () => {

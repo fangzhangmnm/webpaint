@@ -17,10 +17,10 @@
 //
 // 不在这处理：网络拉取本身 / IntersectionObserver / 并发限流（caller 负责）
 
-import { reportError } from "./error-badge.ts";
-import { getThumb, setThumb, deleteThumb, clearThumbs } from "./storage.ts";
+import { reportError } from "../error-badge.ts";
+import { getThumb, setThumb, deleteThumb, clearThumbs } from "../storage.ts";
 import { fetchOraThumbnail } from "./cloud-thumbs.ts";
-import { sessionFileName } from "./config.ts";
+import { sessionFileName } from "../config.ts";
 
 // cache key = store 文件身份（sessionFileName(裸名)=全名 X.ora）；专用 store 即命名空间，key 无需前缀。caller 仍传裸名。
 function _key(name: string): string { return sessionFileName(name); }

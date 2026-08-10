@@ -75,7 +75,7 @@ export interface PaletteWindowHandle {
     clear?(): void;
     close?(): void;
 }
-import type { GalleryHandle } from "./ui/gallery.ts";
+import type { GalleryHandle } from "./gallery/gallery.ts";
 export type { GalleryHandle };
 import type { LeftDialHandle } from "./ui/left-dial.ts";
 export type { LeftDialHandle };

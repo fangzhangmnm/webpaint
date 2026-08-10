@@ -22,8 +22,8 @@
 
 import { Selection, rasterizePolygonGray8 } from "./selection.ts";
 import { LineartOracle } from "./flat-coloring-oracle.ts";
-import { makeSeedDist } from "./color-dist.ts";
-import type { ColorMetric } from "./color-dist.ts";
+import { makeSeedDist } from "./common/color-dist.ts";
+import type { ColorMetric } from "./common/color-dist.ts";
 import { edtSquared } from "./flat-coloring/edt.ts";
 import { makeBitmap } from "./bitmap.ts";
 import { FloatingTransform } from "./floating-transform.ts";

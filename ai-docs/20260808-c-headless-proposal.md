@@ -49,6 +49,13 @@ src/gallery/   本轮检疫堆场：gallery 相关文件物理挪入（行为不
 
 搬家纪律：新代码即日按目录落；存量随切片搬（C0 改名表 = 搬家地图）；不搞一次性大爆炸。
 
+> **C2 落地回写（v0.8.26）**：五目录格律 lint 挂 build.sh（依赖单向 + 禁浏览器词，注释行豁免、
+> WebGL opaque 类型不在禁词内；负测试验证会咬人）。已就位住户：common/ = gl2-port + tile-geometry
+> + color-dist；shell/ = browser-gl2-port；gallery/ = 8 文件检疫搬家完成（gallery-model/-path/-shell、
+> gallery.ts、gallery-view-model、cloud-auth-ui、cloud-thumbs、cloud-thumb-cache），双向依赖实数
+> 记 gallery.ts 头（session.* 直调 10 处 / 反向 refresh×5+invalidateEncrypted×2——recon-e 的 7/3
+> 已过期）。backend/、frontend/ 住户随 C3/C5 搬入，规则先立防退化。
+
 ## 2. Gl2Port 契约（ADR-0009）
 
 ```ts

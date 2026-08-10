@@ -2,7 +2,7 @@
 //   IDB 占用/配额 + 加号·云·菜单 popup 按钮接线 + 名字唯一化。
 //
 // 从 app.js god-file 切出「图库这层壳怎么开关、壳上那几个 popup 按钮怎么接、新建作品走哪条
-//   sheet」那一轴。<Gallery> 深模块本身（src/ui/gallery.ts）仍由 app.js mountGallery 组装并经
+//   sheet」那一轴。<Gallery> 深模块本身（src/gallery/gallery.ts）仍由 app.js mountGallery 组装并经
 //   ctx.gallery 注入本壳；本壳只管「围着它的全屏外壳 + chrome + 入口按钮」。
 //
 // **红线（CRITICAL）**：setGalleryOpen / 新建确认 等编排里对 session.* / _store.* 的调用全部
@@ -17,25 +17,25 @@
 //   anchorPopupToBtn / setAddImportAsNewDoc / importImageAsNewDoc / readImageFromClipboard
 //   直接 import（leaf/singleton）。
 
-import { session } from "./session-state.ts";
-import { reportError } from "./error-badge.ts";
-import { els } from "./els.ts";
-import { readImageFromClipboard } from "./session.ts";
-import { sessionFileName, sessionBareName } from "./config.ts";   // 边界：裸 session 名 → 库全名（占用检查按库身份查）
-import { isSignedIn } from "./app-store.ts";
-import { anchorPopupToBtn } from "./anchored-popup.ts";
-import { wireInlineSelect } from "./inline-select.ts";
-import { applyTheme, themeLabel, THEMES, currentTheme } from "./theme.ts";
-import { lang, setLang, LANGS, langDisplayName } from "./i18n/index.ts";
-import { openInputSheet, openConfirmSheet } from "./sheets.ts";
+import { session } from "../session-state.ts";
+import { reportError } from "../error-badge.ts";
+import { els } from "../els.ts";
+import { readImageFromClipboard } from "../session.ts";
+import { sessionFileName, sessionBareName } from "../config.ts";   // 边界：裸 session 名 → 库全名（占用检查按库身份查）
+import { isSignedIn } from "../app-store.ts";
+import { anchorPopupToBtn } from "../anchored-popup.ts";
+import { wireInlineSelect } from "../inline-select.ts";
+import { applyTheme, themeLabel, THEMES, currentTheme } from "../theme.ts";
+import { lang, setLang, LANGS, langDisplayName } from "../i18n/index.ts";
+import { openInputSheet, openConfirmSheet } from "../sheets.ts";
 import { pathJoin } from "./gallery-path.ts";
-import { setAddImportAsNewDoc, importImageAsNewDoc } from "./import-image.ts";
-import { isUnlocked, lock, setPassword, promptPassword } from "./crypto-state.ts";
-import { hasVerifier, checkVerifier, clearVerifier } from "./password-verifier.ts";
-import { t } from "./i18n/index.ts";
-import { loadCanvasTemplates, fillTemplateSelect, templateById, templatePx } from "./canvas-templates.ts";
+import { setAddImportAsNewDoc, importImageAsNewDoc } from "../import-image.ts";
+import { isUnlocked, lock, setPassword, promptPassword } from "../crypto-state.ts";
+import { hasVerifier, checkVerifier, clearVerifier } from "../password-verifier.ts";
+import { t } from "../i18n/index.ts";
+import { loadCanvasTemplates, fillTemplateSelect, templateById, templatePx } from "../canvas-templates.ts";
 
-import type { AppContext } from "./app-context.ts";
+import type { AppContext } from "../app-context.ts";
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
 
 // ---- ctx-bound 协作件（app 拥有，boot 时 initGalleryShell(ctx) 注入）----

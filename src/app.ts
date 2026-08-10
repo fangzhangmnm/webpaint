@@ -26,7 +26,7 @@ import { PaintingView } from "./workpiece/painting-view.ts";
 import { EditMode } from "./edit-mode.ts";
 import { referenceWindow, paletteWindow, initSideWindows } from "./side-windows.ts";   // 参考/调色板浮窗（construct+wiring）
 import { initDevConsole } from "./dev-console.ts";   // window.WebPaint 调试接口
-import { mountGallery } from "./ui/gallery.ts";          // candidate 1 · 图库深模块
+import { mountGallery } from "./gallery/gallery.ts";          // candidate 1 · 图库深模块
 import { BrushRackController } from "./brush-rack-controller.ts";
 import { PwaShell } from "./pwa-shell.ts";
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";   // settleSyncGate→cloud-freshness
@@ -39,7 +39,7 @@ import { makeDialControls } from "./dial-controls.ts";   // dial 写入（setSiz
 import { initTheme, reconcileThemeFromPrefs } from "./theme.ts";
 import { initLayersPanel, renderLayersPanel, LAYER_MODE_LABEL } from "./layers-panel.ts";
 import { initDocOps } from "./doc-ops.ts";
-import { initCloudAuthUI, updateCloudAuthUI } from "./cloud-auth-ui.ts";
+import { initCloudAuthUI, updateCloudAuthUI } from "./gallery/cloud-auth-ui.ts";
 import { initSettingsMenu, applyCheckerboard, renderSettingsFromPrefs } from "./settings-menu.ts";   // setMenuOpen→各菜单模块
 import { initFiltersAdjust } from "./filters-adjust.ts";
 import { initToolbar, RACK_PANEL_BY_TOOL, closeTransientMenus } from "./toolbar.ts";
@@ -57,7 +57,7 @@ import { initErrorBadge, reportError } from "./error-badge.ts";
 import { initTransientPanels, _suppressTransientPanels, _restoreTransientPanels, _bringPanelTop, _commitTransform, _cancelTransform } from "./transient-panels.ts";
 import { initImportImage, importImageAsLayer } from "./import-image.ts";   // importImageAsNewDoc/setAddImportAsNewDoc 仅 gallery-shell/export-menu 用
 import { initExportImportMenu } from "./export-import-menu.ts";
-import { initGalleryShell, setGalleryOpen, checkQuotaAndWarn, uniqueNameFor } from "./gallery-shell.ts";
+import { initGalleryShell, setGalleryOpen, checkQuotaAndWarn, uniqueNameFor } from "./gallery/gallery-shell.ts";
 import { initTopbarMenu } from "./topbar-menu.ts";
 import { initBlenderSync, reconcileBlenderUrlFromPrefs } from "./blender-sync.ts";   // 推/拉贴图到 Blender（BlenderTextureProtocol，插件式隔离子功能）
 import { initPlatformGuards } from "./platform-guards.ts";
@@ -404,7 +404,7 @@ initDevConsole();
 // 等云端 push 完成（防 status race）= session.awaitCloudPushIdle()，定义在 session-state.ts。
 
 // 图库外壳（setGalleryOpen/chrome/新建sheet/占用/配额/popup接线/uniqueNameFor）= gallery-shell.ts。
-// ===== 图库 = <Gallery> 深模块（src/ui/gallery.ts）。app 只供画布耦合 host 回调 + 无系统弹窗 UI =====
+// ===== 图库 = <Gallery> 深模块（src/gallery/gallery.ts）。app 只供画布耦合 host 回调 + 无系统弹窗 UI =====
 const gallery = mountGallery(document.getElementById("galleryMount")!, {
   signedIn: () => isSignedIn(),
   online: () => navigator.onLine !== false,

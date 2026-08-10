@@ -7,9 +7,9 @@
 //
 // 复用形状：item 形状通用、徽章/面包屑无 ORA 依赖 → 整块可抬给 AtlasMaker/RealHome（WebPaint 专用 example）。
 
-import { pathBasename } from "../gallery-path.ts";
-import { itemTime } from "../gallery-model.ts";
-import type { GalleryItem, CloudFile, LocalSession } from "../gallery-model.ts";
+import { pathBasename } from "./gallery-path.ts";
+import { itemTime } from "./gallery-model.ts";
+import type { GalleryItem, CloudFile, LocalSession } from "./gallery-model.ts";
 
 // 本地项（watchFolder 单夹快照的元素 + 图库消费的运行态字段：缩略图 Blob / 字节大小 /
 // 加密标志 / 回收站 key）。store 本体仍是 .js，这里只声明图库读到的字段。

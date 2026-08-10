@@ -8,14 +8,14 @@
 // auth 是公共面：直接 import 自 app-store.js。setStatus / updateSaveStatus / gallery
 // 经 ctx 注册表晚绑（拆分期权宜）。
 
-import { t, tLatin } from "./i18n/index.ts";
-import type { AppContext } from "./app-context.ts";
-import { els } from "./els.ts";
-import { iconHtml } from "./ui/icon.ts";
+import { t, tLatin } from "../i18n/index.ts";
+import type { AppContext } from "../app-context.ts";
+import { els } from "../els.ts";
+import { iconHtml } from "../ui/icon.ts";
 import {
   isSignedIn, isAuthConfigured, signIn, signOut,
   getActiveAccount, retrySilentSignIn,
-} from "./app-store.ts";
+} from "../app-store.ts";
 
 let setStatus: AppContext["setStatus"];
 let updateSaveStatus: AppContext["updateSaveStatus"];

@@ -15,7 +15,7 @@
 //   overlay（烤进叶 pass）三个旧 ad-hoc 注入口 → planner 输入的三面旗。
 
 import { IndexTexture } from "./gpu-tile-pool.ts";
-import { TILE_SIZE, tilesAcross, tilesDown, tileCoord } from "../tiles/tile-geometry.ts";
+import { TILE_SIZE, tilesAcross, tilesDown, tileCoord } from "../common/tile-geometry.ts";
 import type { Background } from "./gl-compositor.ts";
 import type { DocNode, DocLeaf } from "./gl-doc-bridge.ts";
 import { buildPlan } from "../render/render-plan.ts";

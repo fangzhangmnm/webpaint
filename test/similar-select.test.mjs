@@ -4,7 +4,7 @@
 import { describe, it, assert, eq } from "./runner.mjs";
 
 const { floodSelectFrom, similarSelectFrom } = await import("../src/lasso.ts");
-const { makeSeedDist } = await import("../src/color-dist.ts");
+const { makeSeedDist } = await import("../src/common/color-dist.ts");
 
 function fakeLayer(w, h, fill) {
   const data = new Uint8ClampedArray(w * h * 4);

@@ -1,7 +1,7 @@
 import { type DecodedPainting } from "./ora.ts";
 import type { EncryptedBlob } from "./store/index.ts";
 import type { AppContext } from "./app-context.ts";
-import type { GalleryItem } from "./gallery-model.ts";
+import type { GalleryItem } from "./gallery/gallery-model.ts";
 type LoadedDoc = DecodedPainting;
 /** 外部导入：装入一个解好的 doc，作为**新身份**。首存 mode:"new"（撞名抛，不静默覆盖）。 */
 declare function adoptAsNew(loaded: LoadedDoc, name: string): void;

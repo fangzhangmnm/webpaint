@@ -23,7 +23,7 @@
 //   （S7 改走 cpu-gpu-tile-bridge）。
 // - 纯 in-process：除 fromAlphaCanvas/resampledTo/materializeMaskCanvas 外全部零 canvas 依赖，node 直测。
 
-import { TILE_SIZE } from "./tiles/tile-geometry.ts";
+import { TILE_SIZE } from "./common/tile-geometry.ts";
 import { appTilePool } from "./tiles/app-tile-pool.ts";
 import { computeBBox, type TileHandle } from "./tiles/cpu-tile-pool.ts";
 

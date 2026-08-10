@@ -4,7 +4,7 @@
 
 import { store } from "./app-store.ts";
 import { sessionFileName } from "./config.ts";   // 边界：裸 item.name → 库全名（薄库身份=X.ora）
-import { SUFFIX_BYTES, THUMB_PATH } from "./cloud-thumbs.ts";
+import { SUFFIX_BYTES, THUMB_PATH } from "./gallery/cloud-thumbs.ts";
 import { isUnlocked, getPassword, onPasswordVerified, promptPassword } from "./crypto-state.ts";
 import { hasVerifier, checkVerifier, createVerifier } from "./password-verifier.ts";
 

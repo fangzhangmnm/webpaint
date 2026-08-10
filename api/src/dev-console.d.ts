@@ -1,4 +1,4 @@
-import { fetchOraThumbnail } from "./cloud-thumbs.ts";
+import { fetchOraThumbnail } from "./gallery/cloud-thumbs.ts";
 import { registerFilter, listFilters } from "./filters.ts";
 import { registerExporter, listExporters } from "./exporters.ts";
 declare global {

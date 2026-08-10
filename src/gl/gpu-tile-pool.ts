@@ -17,7 +17,7 @@
 //   IndexTexture（tile 坐标→slice 的 R32F 小纹理，原 tile-index.ts 并入）是池的寻址伴侣——
 //   合成 shader 按 doc 坐标查它拿 slice（-1=透明），再进 array 池采像素。
 
-import { TILE_SIZE, tilesAcross, tilesDown } from "../tiles/tile-geometry.ts";
+import { TILE_SIZE, tilesAcross, tilesDown } from "../common/tile-geometry.ts";
 import type { Gl2Port } from "../common/gl2-port.ts";
 
 export const GPU_TILE_BYTES = TILE_SIZE * TILE_SIZE * 4;

@@ -8,7 +8,7 @@
 //   核弹按钮，留给 workpiece 生命周期统一调（S4），别在换文档半途按——adopt 期间新旧两棵树共存。
 
 import { CpuTilePool, type TileCodec } from "./cpu-tile-pool.ts";
-import { TILE_SIZE } from "./tile-geometry.ts";
+import { TILE_SIZE } from "../common/tile-geometry.ts";
 
 // raw tile 总配额（超了就阻塞压缩最古老；需 codec 就位才 enforcement）。
 // 2048² doc 满层 = 64 tile = 16MiB；384MiB ≈ 24 满层，超出走压缩。dev-console 可调。

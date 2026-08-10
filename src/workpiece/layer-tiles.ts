@@ -16,7 +16,7 @@
 
 import { LayerPixels, setTileSwapObserver } from "../tiles/tile-layer.ts";
 import type { TileHandle } from "../tiles/cpu-tile-pool.ts";
-import { tilesAcross, tileKey } from "../tiles/tile-geometry.ts";
+import { tilesAcross, tileKey } from "../common/tile-geometry.ts";
 import type { RecordData } from "./undo-stack.ts";
 import type { Workpiece, CollectorComponent } from "./workpiece.ts";
 

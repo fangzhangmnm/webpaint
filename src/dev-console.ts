@@ -1,7 +1,7 @@
 // 职责（单一）：window.WebPaint 调试/POC 控制台接口——云缩略图 POC + 插件注册暴露 + thumb 缓存统计。
 //   纯调试面：console 里手敲 WebPaint.* 验证云缩略图 byte-range 拉取、看缓存命中、给插件挂注册口。
 //   非业务逻辑，所有依赖直接 import（无 ctx），由 app 启动时调一次 initDevConsole()。
-import { fetchOraThumbnail } from "./cloud-thumbs.ts";
+import { fetchOraThumbnail } from "./gallery/cloud-thumbs.ts";
 import { store } from "./app-store.ts";
 import { registerFilter, listFilters } from "./filters.ts";
 import { registerExporter, listExporters } from "./exporters.ts";
@@ -10,7 +10,7 @@ import {
   stats as cloudThumbStats,
   config as cloudThumbConfig,
   resetStats as cloudThumbResetStats,
-} from "./cloud-thumb-cache.ts";
+} from "./gallery/cloud-thumb-cache.ts";
 
 // 调试控制台 = 一袋 console 手敲的函数（非业务）。诚实描述实际挂上的成员，index 兜底插件扩展。
 declare global {

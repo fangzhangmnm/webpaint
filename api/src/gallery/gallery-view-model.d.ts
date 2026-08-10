@@ -1,4 +1,4 @@
-import type { GalleryItem, CloudFile, LocalSession } from "../gallery-model.ts";
+import type { GalleryItem, CloudFile, LocalSession } from "./gallery-model.ts";
 export interface LocalSessionMeta extends LocalSession {
     size?: number;
     thumb?: Blob | null;

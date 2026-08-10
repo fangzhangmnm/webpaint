@@ -12,7 +12,7 @@
 //
 // 纯核心零 DOM 依赖 → node 全测。Canvas2D facade（materialize/editRegion）需浏览器。
 
-import { TILE_SIZE, tilesAcross, tileKey, tileCoord, forEachTileInRect } from "./tile-geometry.ts";
+import { TILE_SIZE, tilesAcross, tileKey, tileCoord, forEachTileInRect } from "../common/tile-geometry.ts";
 import { appTilePool } from "./app-tile-pool.ts";
 import { computeBBox, type TileHandle } from "./cpu-tile-pool.ts";
 

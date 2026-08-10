@@ -11,6 +11,13 @@
 // （signedIn/online/activeName/confirm/input/chooseFolder/status/busy）。其余全在本模块。
 // 旧 app.js 的 renderGallery/renderTrashView/_renderBreadcrumb/_renderFolderTile/_hydrateCloudThumb
 // （~900 行命令式闭包）= 噪音，整体删除，不保留。
+//
+// 【C2 检疫记账 · E 骑士开工清单（本轮只记不斩）】gallery↔session 双向依赖（as-of v0.8.26）：
+//   → 本文件直调 session.*（import session-state）共 10 处：open×2 / rename / setName / push /
+//     unload / dropCheckpoint / exit；
+//   ← session-state 经 ctx 注入的 gallery 句柄（AppContext["gallery"]，非 import）反向调
+//     gallery.refresh() 5 处 + gallery.invalidateEncrypted() 2 处。
+//   src/gallery/ = 检疫堆场（提案 §1）：目录内不细分、依赖不设 lint 约束；解耦归 E 骑士。
 
 import {
   createApp, defineComponent, reactive, ref, computed, watch, onMounted, onUnmounted, nextTick,
@@ -19,22 +26,22 @@ import {
   store as _store,
   watchFolder, listGalleryTrash,
 } from "../app-store.ts";
-import { getOrFetchCloudThumb, invalidateCachedThumb } from "../cloud-thumb-cache.ts";
+import { getOrFetchCloudThumb, invalidateCachedThumb } from "./cloud-thumb-cache.ts";
 import { reportError } from "../error-badge.ts";
 // 加密（ADR-0012）：tile 锁样式 + 解锁浏览；transform/密码循环全在 store（flow.encrypt/decrypt +
 // crypt seam）。图库只做 per-app 的部分：首次设密码双输 UX、活动项预检、明文残留清理、
 // 以及把 peek 字节解释成缩略图（enc-thumbs）。
 import { isUnlocked, onLockChange, setPassword } from "../crypto-state.ts";
 import { localPeekThumb, decryptCloudPeekThumb, ensureNewPassword, ensureUnlocked } from "../enc-thumbs.ts";
-import { copyTargetName } from "../gallery-model.ts";
-import { pathFolder, pathBasename, pathJoin } from "../gallery-path.ts";
+import { copyTargetName } from "./gallery-model.ts";
+import { pathFolder, pathBasename, pathJoin } from "./gallery-path.ts";
 import { stripSessionExt, sessionFileName } from "../config.ts";   // 边界：裸 item.name ↔ 库全名（X↔X.ora）
 import { tileFor, breadcrumb, trashTileFor, humanTime, humanSize } from "./gallery-view-model.ts";
 import type { GItem, TrashGItem, CloudFileMeta } from "./gallery-view-model.ts";
 import { session } from "../session-state.ts";
 import { appState } from "../app-state.ts";
 import { t } from "../i18n/index.ts";
-import { iconHtml } from "./icon.ts";
+import { iconHtml } from "../ui/icon.ts";
 
 // ---- 图标（徽章 4 态 + 文件夹/云）：全部指向内联 sprite，见 src/ui/icon.ts ----
 // 尺寸由 CSS 给（.gallery-tile-state-icon svg 12px / .enc 14px / 缩略图占位另有规则）。

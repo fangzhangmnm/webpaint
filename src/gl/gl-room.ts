@@ -11,7 +11,7 @@
 import { GpuTilePool, GLGpuTileBackend, IndexTexture, GPU_TILE_BYTES } from "./gpu-tile-pool.ts";
 import { CpuGpuTileBridge } from "./tile-bridge.ts";
 import { appTilePool } from "../tiles/app-tile-pool.ts";
-import { tilesAcross, tilesDown } from "../tiles/tile-geometry.ts";
+import { tilesAcross, tilesDown } from "../common/tile-geometry.ts";
 import { GLCompositor } from "./gl-compositor.ts";
 import type { Acc, OverlayDesc, FloatDesc } from "./gl-compositor.ts";
 import { safeMode } from "./gl-doc-bridge.ts";

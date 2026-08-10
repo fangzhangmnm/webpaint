@@ -1,4 +1,4 @@
-import type { AppContext } from "./app-context.ts";
+import type { AppContext } from "../app-context.ts";
 export declare function setGalleryOpen(open: boolean): Promise<void>;
 export declare function openNewDocSheet(): void;
 export declare function updateIdbUsage(): Promise<void>;

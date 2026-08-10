@@ -6,7 +6,7 @@
 //
 // 仍留 app.js 的协作件经 ctx 绑入：state / board / setStatus / store / updateSaveStatus（核心单例）。
 
-import { updateCloudAuthUI } from "./cloud-auth-ui.ts";
+import { updateCloudAuthUI } from "./gallery/cloud-auth-ui.ts";
 import { els } from "./els.ts";
 import { syncedUserPreference, localUserPreference, PREF_DEFAULTS } from "./app-prefs.ts";   // 手势/视图开关=跨设备；menu-tab=设备本地
 import { desk } from "./workbench-state.ts";   // checkboard = per-doc desk（载入时经 wp:applyEditorState 应用到 board）
