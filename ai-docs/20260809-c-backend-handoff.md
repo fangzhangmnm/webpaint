@@ -485,6 +485,16 @@
   pinch 旋转/wheel/双击适应/touch 右下角 resize、载图（>2048 缩存）、live 镜像跟笔、吸管+长按
   吸色（十字光标）、关窗重开位置 vp 记忆、换 doc 恢复、gallery 模式隐藏、i18n 四语 tooltip。
   **C0-C9 全清账，C 骑士收官。**B 剩余批/UX 抽象层/E 骑士见 §3 悬账。
+
+## 5. 验收口径修正（2026-08-10 user 验收，追记）
+
+**user 验收不合格**：「你自己看一下src的目录结构，还是散一地」。裁定两个 win condition 分开记账：
+① **闭包**（本 handoff 宣称的）= 「删 backend/common/vendor 之外能编译」——lint-dirs 绿已机器验证，
+**达成**；② **器官全入城**（user 深层标准）= 拆户里的 backend 器官（pixel-conic 光栅原语、doc-ops
+脊柱、color-name 数学、board commit 面残余、rasterizePolygonGray8）仍在城外——它们被 frontend/shell
+消费、backend 不 import，闭包 lint 结构上抓不到，**未达成也从未宣称**。典型 = C8 crop 对 doc-ops 的
+「headless 同构」是编排层 fork 债（substrate verbs 同一份、编排两份）。上文各片「✅/收官」指闭包口径。
+后续路线见 `20260810-v08-stabilize-v09-foundation-handoff.md`（0.8 维稳 → 0.9 地基纪元）。
 - **C9 补丁 ✅ v0.8.48（2026-08-10）——boot smoke 挂死修复 + 测试基建三护栏 + 句柄契约收紧**：
   ①**挂死根因链**（诊断法=先 `ps` 拆「慢 vs 挂」：34min 墙钟 CPU 只走 0.3s → 挂死非慢；对照组
   v0.8.46 exit=0 → C9 引入；探针进程立打 uncaught → 定位一行）：C9 syncPick 调
