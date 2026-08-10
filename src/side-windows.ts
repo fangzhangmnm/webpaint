@@ -1,11 +1,14 @@
-// 职责（单一）：浮动辅助窗——参考小窗 + 调色板小窗（构造 + 各自的按钮/resize/菜单接线）。
-// referenceWindow / paletteWindow 在 module-eval（import 时）构造，并作为 live binding 导出；
-//   app.js 的晚绑 Object.assign(ctx, { referenceWindow, paletteWindow }) 与 session-state 直接读它们。
-// 构造期的 config 回调只在 user 交互时被 CALL，故引用 module-level let（construct 时为 null，
-//   initSideWindows(ctx) 在任何交互前填好）是安全的。setColor 是稳定 import，无需经 ctx。
+// 职责（单一）：浮动辅助窗——参考小窗（<wp-reference-window> 组件的**宿主适配层**）+ 调色板小窗。
+// C9（家族组件试点）后参考窗分两半：
+//   组件（frontend/reference-window.ts）= chrome/手势/渲染，宿主 store 零知识；
+//   这里 = 全部宿主接线：desk.refPanel 持久化、wp: 事件通道、live 合成（backend 知识）、
+//   i18n labels、吸色 → 主 setColor + pin、文件载入（decode/resample = backend）。
+// referenceWindow 导出 = 组件元素本身（satisfies ReferenceWindowHandle）；
+//   app.ts 晚绑 Object.assign(ctx, { referenceWindow, paletteWindow }) 与 session-state 直接读。
 
 import { t } from "./i18n/index.ts";
-import { ReferenceWindow } from "./reference.ts";
+import { WpReferenceWindow } from "./frontend/reference-window.ts";
+import type { RefLiveSource, RefPanelRect } from "./frontend/reference-window.ts";
 import { PaletteWindow } from "./palette.ts";
 import { els } from "./els.ts";
 import { decodeImageFile, imageSourceToBytes } from "./shell/image-io.ts";
@@ -13,27 +16,42 @@ import { areaResampleBytes } from "./backend/algorithms/resample-bytes.ts";
 import { encodePngFromBytes } from "./backend/png-codec.ts";
 import { setColor } from "./color-panel.ts";
 import { setMenuOpen } from "./settings-menu.ts";
+import { raiseWindow } from "./surfaces.ts";
+import { desk } from "./workbench-state.ts";
+import { renderNodesToCanvas } from "./backend/doc-render.ts";
 import type { AppContext } from "./app-context.ts";
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
 
-// initSideWindows(ctx) 填入；construct 期 null，仅 config 回调（lazy）/ button 接线读取。
+// initSideWindows(ctx) 填入；construct 期 null，仅事件回调（lazy）读取。
 let setStatus: AppContext["setStatus"], editMode: AppContext["editMode"], state: AppContext["state"], doc: AppContext["doc"];
 
 // ---- 参考小窗 ----
-// 浮动 panel + 独立 viewport（pinch / zoom / rotate）。状态在 ReferenceWindow 内部维护。
-export const referenceWindow = new ReferenceWindow({
-  panel: els.referencePanel,
-  head: els.referencePanelHead,
-  body: els.referenceBody,
-  canvas: els.referenceCanvas,
-  closeBtn: els.referencePanelClose,
-  emptyHint: els.referenceEmpty,
-  status: (m: string, e?: boolean) => setStatus(m, e),
-  // v154 参考窗吸色：eyedropper / 长按 → 吸窗内显示色，复用主吸色 setColor + pin
-  getTool: () => editMode.current(),
-  getLongPressPickEnabled: () => state.longPressPick,
-  onColorSampled: (hex: string) => setColor(hex),
-});
+// 元素在 index.html（slot 文案吃宿主 i18n）；import 上面的组件模块已 define → 此处已升级。
+export const referenceWindow = document.getElementById("referencePanel") as WpReferenceWindow;
+
+// 开/关的**用户路径**（menu/快捷键/× 键）写 desk（per-doc 标脏）；程序性回灌不经这里。
+function refSetOpen(open: boolean) {
+  referenceWindow.open = open;
+  if (open) raiseWindow(referenceWindow);   // v232：开窗即置顶（surfaces window band）
+  desk.refPanel.enabled = open;
+}
+
+// live 镜像合成（S9：走 GL doc-render，respect clip/mode/组）。白纸显示常量（doc 无纸色，
+// 同 board docBg）。组件只吃这个 provider；返回 null = GL 不可用 → 组件保留上帧。
+let _liveCanvas: HTMLCanvasElement | null = null;
+function composeLiveFrame(): RefLiveSource | null {
+  const merged = renderNodesToCanvas(doc.layers, doc.width, doc.height);
+  if (!merged) return null;
+  const W = doc.width, H = doc.height;
+  if (!_liveCanvas) _liveCanvas = document.createElement("canvas");
+  if (_liveCanvas.width !== W || _liveCanvas.height !== H) { _liveCanvas.width = W; _liveCanvas.height = H; }
+  const cx = _liveCanvas.getContext("2d")!;
+  cx.clearRect(0, 0, W, H);
+  cx.fillStyle = "#ffffff";
+  cx.fillRect(0, 0, W, H);
+  cx.drawImage(merged, 0, 0);
+  return _liveCanvas;
+}
 
 // ---- 调色板小窗（v87）----
 // 256×256 mixer canvas + 刷 / 涂 / 吸 3 工具。吸色 → 主画 setColor。
@@ -45,53 +63,83 @@ export const paletteWindow = new PaletteWindow({
 });
 // 调色板小窗（v87 → v94 撤掉 menu 入口）：UI 已删，code 留 P2（backlog）
 
-// v134 (user：「参考窗口大小可以调整」) iPad/touch resize handle
-(function bindReferenceResize() {
-  const handle = document.getElementById("referenceResizeHandle");
-  const panel = els.referencePanel;
-  if (!handle || !panel) return;
-  let drag: { id: number; sx: number; sy: number; w0: number; h0: number } | null = null;
-  handle.addEventListener("pointerdown", (e: PointerEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    handle.setPointerCapture(e.pointerId);
-    const rect = panel.getBoundingClientRect();
-    drag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, w0: rect.width, h0: rect.height };
-  });
-  handle.addEventListener("pointermove", (e: PointerEvent) => {
-    if (!drag || e.pointerId !== drag.id) return;
-    const w = Math.max(160, Math.min(window.innerWidth - 40, drag.w0 + (e.clientX - drag.sx)));
-    const h = Math.max(160, Math.min(window.innerHeight - 80, drag.h0 + (e.clientY - drag.sy)));
-    panel.style.width = w + "px";
-    panel.style.height = h + "px";
-  });
-  const endDrag = (e: PointerEvent) => {
-    if (drag && e.pointerId === drag.id) {
-      try { handle.releasePointerCapture(e.pointerId); } catch {}
-      drag = null;
-      // 触发 reference 重新布局（如果需要）
-      window.dispatchEvent(new CustomEvent("wp:referenceResize"));
-    }
-  };
-  handle.addEventListener("pointerup", endDrag);
-  handle.addEventListener("pointercancel", endDrag);
-})();
-
 export function initSideWindows(ctx: AppContext) {
   setStatus = ctx.setStatus;
   editMode = ctx.editMode;
   state = ctx.state;
   doc = ctx.doc;
+  const ref = referenceWindow;
 
-  window.addEventListener("wp:toggleReference", () => referenceWindow.toggle());
+  // ---- 组件事件 → desk 持久化（宿主 store 解耦：组件不认识 desk）----
+  ref.addEventListener("viewportchange", (e) => {
+    desk.refPanel.viewport = { ...(e as CustomEvent).detail };
+  });
+  ref.addEventListener("rectchange", (e) => {
+    // 值没变就不写：RO 在程序性回灌/开窗后也 fire，回声不许误标脏（旧 _savePos 同款守卫）
+    const d = (e as CustomEvent).detail as RefPanelRect;
+    const cur = desk.refPanel.position;
+    if (cur && cur.left === d.left && cur.top === d.top && cur.width === d.width && cur.height === d.height) return;
+    desk.refPanel.position = { ...d };
+  });
+  ref.addEventListener("openchange", (e) => {
+    desk.refPanel.enabled = !!((e as CustomEvent).detail as { open: boolean }).open;
+  });
+
+  // ---- 按钮请求（组件只发意图；文件对话框/live 源都是宿主知识）----
+  ref.addEventListener("requestload", () => {
+    els.referenceFileInput.value = "";
+    els.referenceFileInput.click();
+  });
+  ref.addEventListener("requestlivetoggle", () => {
+    if (ref.live) ref.stopLive();
+    else ref.setLiveProvider(composeLiveFrame);
+    setStatus(ref.live ? t("mi.referenceLive") : t("mi.referenceLiveExit"));
+  });
+
+  // ---- 吸色桥：组件读自家像素发事件，宿主接主吸色（setColor + wp:pickerShow pin）----
+  ref.addEventListener("colorpickstart", () => setStatus(t("ref.picking")));
+  ref.addEventListener("colorpick", (e) => {
+    const { hex, screenX, screenY } = (e as CustomEvent).detail as { hex: string | null; screenX: number; screenY: number };
+    if (!hex) { window.dispatchEvent(new CustomEvent("wp:pickerHide")); return; }   // 透明 → 没东西吸
+    setColor(hex);
+    window.dispatchEvent(new CustomEvent("wp:pickerShow", { detail: { sx: screenX, sy: screenY, hex } }));
+  });
+  ref.addEventListener("colorpickend", () => window.dispatchEvent(new CustomEvent("wp:pickerHide")));
+
+  // ---- 宿主全局通道 → 组件（组件不监听 window；wp: 事件是宿主约定）----
+  // doc 像素或图层结构变 → live 脏标（真合成组件内按脏标+节流做）
+  window.addEventListener("wp:docpixeldirty", () => ref.markLiveDirty());
+  window.addEventListener("wp:histchange", () => ref.markLiveDirty());
+  // desk apply-on-load：程序性属性下灌**不发事件** → 不回写 desk、载入不标脏
+  // （旧 _applying 两帧守卫退役：回声由上面 rectchange 的值比较吸收）
+  window.addEventListener("wp:applyEditorState", () => {
+    ref.viewport = desk.refPanel.viewport;
+    ref.rect = desk.refPanel.position;
+    ref.open = desk.refPanel.enabled;
+    if (desk.refPanel.enabled) raiseWindow(ref);
+  });
+  window.addEventListener("wp:toggleReference", () => refSetOpen(!ref.open));
+
+  // 吸管工具态桥：editMode.current()（wp:modechange 通知）→ 组件 pick 属性（光标 + 点吸行为）。
+  // 注意不是 body[data-tool]：那个 transient（adjust/transform）期间保持旧持久工具，而吸色行为
+  // 要跟 current()（旧 getTool 语义）。shadow 里 host-context 选择器不可靠（Safari/FF 弃/缺），
+  // 属性同步是家族约定的标准桥。
+  const syncPick = () => ref.toggleAttribute("pick", editMode.current() === "picker");
+  window.addEventListener("wp:modechange", syncPick);
+  syncPick();
+  // 长按吸色开关：手势中查询宿主态的 pull 端口（约定「pull 例外」）
+  ref.queryLongPressPick = () => state.longPressPick;
+
+  // i18n：shadow 内按钮 tooltip 走 labels property（slot 够不到 title 属性）。
+  // 语言切换 = 整页 reload（i18n 约定），boot 一次即可。
+  ref.labels = {
+    load: t("ref.load"), live: t("ref.live"), fit: t("ref.fit"),
+    close: t("common.close.aria"), resize: t("ref.resize"), resizeAria: t("ref.resizeAria"),
+  };
 
   els.menuReference.addEventListener("click", () => {
     setMenuOpen(false);
-    referenceWindow.open();
-  });
-  els.referenceLoadBtn.addEventListener("click", () => {
-    els.referenceFileInput.value = "";
-    els.referenceFileInput.click();
+    refSetOpen(true);
   });
   els.referenceFileInput.addEventListener("change", async (e: Event) => {
     const file = (e.target as HTMLInputElement).files?.[0];
@@ -102,12 +150,6 @@ export function initSideWindows(ctx: AppContext) {
       setStatus(t("mi.referenceLoadFailed", { err: errMsg(err) }));
     }
   });
-  els.referenceLiveBtn.addEventListener("click", () => {
-    referenceWindow.toggleLive(doc);
-    els.referenceLiveBtn.setAttribute("aria-pressed", referenceWindow.isLive() ? "true" : "false");
-    setStatus(referenceWindow.isLive() ? t("mi.referenceLive") : t("mi.referenceLiveExit"));
-  });
-  els.referenceFitBtn.addEventListener("click", () => referenceWindow.fitToPanel());
 }
 
 // #19（v0.5）：把一张图片文件设为参考图——decode → 2048² 内缩放 → 开窗 + setBitmap + 标脏。
@@ -132,7 +174,7 @@ export async function setReferenceFromFile(file: File | Blob): Promise<void> {
     persistBlob = new Blob([png as unknown as BlobPart], { type: "image/png" });
     source = await createImageBitmap(new ImageData(small, fw, fh));
   }
-  referenceWindow.open();
+  refSetOpen(true);
   referenceWindow.setBitmap(source, { persistBlob });
   if (scaled) (decoded as ImageBitmap).close?.();       // 缩放后原 bitmap 没用了，释放
   // v0.8.5（S5·ADR-0007）：参考图 = sidecar（跟 ora 走 ∧ 不进 undo）——走正名的 wp:sidecarchange

@@ -40,6 +40,9 @@ dist/main-tmp.mjs.map
 test/gl-smoke/harness.js
 test/gl-smoke/preview.js
 
+# C9 家族组件 vendor 导出件（scripts/gen-component.sh 产物；兄弟项目拷走用，本仓不跑它）
+dist-components/
+
 # SVG 图标工作台（本地预览工具，不入库）
 workbench/
 node_modules

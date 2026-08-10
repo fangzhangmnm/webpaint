@@ -973,91 +973,11 @@ button.lasso-tool-select.lasso-slot { padding-right: 12px; }
 .brush-panel { width: 280px; }
 
 /* 参考小窗：浮动 panel + 可拖右下角缩放 + 内部 canvas */
-.reference-panel {
-  width: 280px;
-  height: 360px;
-  min-width: 160px;
-  min-height: 160px;
-  resize: both;             /* 桌面鼠标拖右下角 */
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-/* v134 iPad / touch resize handle —— CSS resize:both 不响应 touch */
-.reference-resize-handle {
-  position: absolute;
-  right: 2px;
-  bottom: 2px;
-  width: 22px;
-  height: 22px;
-  cursor: nwse-resize;
-  touch-action: none;
-  z-index: 2;
-  display: flex; align-items: center; justify-content: center;
-  color: var(--ink-soft);
-  opacity: 0.55;
-}
-.reference-resize-handle:hover { opacity: 1; }
-/* 抓手不是图标，是贴角纹理——纯 CSS 画，不进 sprite、也不留内联 <svg>。
-   （同 .board 的透明棋盘格：那个也是 repeating-linear-gradient 画的。）
-   斜纹整块铺满，再用 clip-path 裁成右下三角 → 经典的 resize grip。 */
-.reference-resize-handle::after {
-  content: "";
-  position: absolute; inset: 3px;
-  background: repeating-linear-gradient(-45deg,
-    currentColor 0 1.6px, transparent 1.6px 5px);
-  clip-path: polygon(100% 0, 100% 100%, 0 100%);
-}
-.reference-action-btn {
-  background: transparent;
-  border: none;
-  color: var(--ink-soft);
-  cursor: pointer;
-  padding: 4px;
-  border-radius: 4px;
-  display: inline-flex; align-items: center; justify-content: center;
-}
-.reference-action-btn svg { width: 18px; height: 18px; display: block; }
-.reference-action-btn:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); color: var(--ink); }
-.reference-action-btn[aria-pressed="true"] { background: color-mix(in srgb, var(--accent, #4c8bf5) 18%, transparent); color: var(--accent, #4c8bf5); }
-.reference-body {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-  background: #1a1a1a;
-  border-radius: 0 0 var(--radius) var(--radius);
-  overflow: hidden;
-  touch-action: none;       /* 不让 iPad 系统抢双指手势 */
-}
-.reference-canvas {
-  position: absolute;
-  inset: 0;
-  display: block;
-  width: 100%;
-  height: 100%;
-  touch-action: none;
-  cursor: grab;
-}
-.reference-canvas:active { cursor: grabbing; }
-/* v154 吸色：参考窗光标随工具变（手→十字）。入口统一——和主画布 .board 一样订阅
-   body[data-tool]（setTool 设的 SSoT）。eyedropper(=picker) 时十字，pan 时仍是手。 */
-body[data-tool="picker"] .reference-canvas,
-body[data-tool="picker"] .reference-canvas:active { cursor: crosshair; }
-.reference-empty {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  text-align: center;
-  color: var(--ink-soft);
-  pointer-events: none;     /* 让下面 canvas 接事件；但提示文字不能挡 */
-  padding: 12px;
-}
-.reference-empty.hidden { display: none; }
-.reference-empty p { margin: 0; }
+/* 参考窗（C9）：chrome/手势样式全在 <wp-reference-window> shadow 内（src/frontend/reference-window.ts）。
+   宿主侧只留三条：①define 前不闪 light DOM（FOUC 守卫，家族组件约定）；②slot 文案排版。
+   gallery 模式隐藏见下 body[data-mode="gallery"] 段。 */
+wp-reference-window:not(:defined) { display: none; }
+wp-reference-window [slot="empty"] p { margin: 0; }
 .brush-slider-row {
   display: grid;
   grid-template-columns: 100px 1fr 30px;
@@ -2086,6 +2006,7 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
 body[data-mode="gallery"] .top-bar,
 body[data-mode="gallery"] .hud,
 body[data-mode="gallery"] .float-panel,
+body[data-mode="gallery"] wp-reference-window,
 body[data-mode="gallery"] .menu-panel:not(#galleryAddPopup):not(#cloudAccountPopup):not(#galleryMenuPopup),
 body[data-mode="gallery"] .adjust-popup,
 body[data-mode="gallery"] .board { display: none !important; }

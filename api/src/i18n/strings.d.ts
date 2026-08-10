@@ -2496,6 +2496,12 @@ export declare const S: {
         readonly ja: "ドラッグでサイズ変更";
         readonly tok: "luka la suli li ante";
     };
+    readonly "ref.picking": {
+        readonly zh: "吸色（参考）";
+        readonly en: "Picking color (reference)";
+        readonly ja: "スポイト（参考）";
+        readonly tok: "kama jo e kule (sitelen lukin)";
+    };
     readonly "ref.pick": {
         readonly zh: "选个图当参考";
         readonly en: "Pick an image as reference";

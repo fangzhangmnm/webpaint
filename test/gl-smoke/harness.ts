@@ -34,6 +34,7 @@ import { prefilterToSplinePlane, sampleSplinePremult } from "../../src/backend/a
 import type { SplinePlane } from "../../src/backend/algorithms/bspline.ts";
 import { rotspriteUpscale } from "../../src/backend/algorithms/rotsprite.ts";
 import type { U8Plane } from "../../src/backend/algorithms/rotsprite.ts";
+import { WpReferenceWindow } from "../../src/frontend/reference-window.ts";
 
 // ---- CPU warp 参照（golden 基准）：v355 从 src/floating-transform 归档进 harness（运行时单一 GPU SSoT；
 //   这份 CPU 逐像素逆单应性 + 采样器只在测试里当 GPU warp 的对照基准，不在产品路径）。verbatim 复刻原实现，
@@ -1396,7 +1397,75 @@ function arenaAccounting(glctx: BrowserGl2Port, add: Add): void {
   add("arena:二次 dispose 幂等", glctx.arenaStats.count === st0.count, `count=${glctx.arenaStats.count}`);
 }
 
-function run(): { ok: boolean; checks: Check[]; error: string | null } {
+// ---- C9：<wp-reference-window> 组件冒烟（真浏览器才有 custom elements + shadow DOM，node 测不到）。
+//   锚：define/挂载、位图渲染读回、用户交互发事件 vs 程序性 set 静默（家族组件约定的核心语义）、
+//   吸色事件、live provider 路径、live 属性反射。----
+const nextFrames = (n: number) => new Promise<void>((res) => {
+  const step = (k: number) => (k <= 0 ? res() : requestAnimationFrame(() => step(k - 1)));
+  step(n);
+});
+async function referenceComponentCheck(add: Add): Promise<void> {
+  const el = document.createElement("wp-reference-window") as WpReferenceWindow;
+  document.body.appendChild(el);
+  try {
+    add("component:define+shadow", !!customElements.get("wp-reference-window") && !!el.shadowRoot);
+    el.open = true;   // 程序性开窗（宿主 apply-on-load 路径）
+    await nextFrames(2);   // RO 异步 → canvas 尺寸就位
+    const r0 = el.getBoundingClientRect();
+    add("component:open→可见有尺寸", r0.width >= 160 && r0.height >= 160, `${r0.width}×${r0.height}`);
+
+    let vpEvents = 0;
+    el.addEventListener("viewportchange", () => vpEvents++);
+
+    // 静态位图：红 32² → fit（发一次 viewportchange：状态真变，非回灌）→ 中心读回红
+    const src = document.createElement("canvas"); src.width = 32; src.height = 32;
+    const sctx = src.getContext("2d")!; sctx.fillStyle = "#ff0000"; sctx.fillRect(0, 0, 32, 32);
+    el.setBitmap(src, {});
+    const evAfterFit = vpEvents;
+    await nextFrames(2);
+    const cv = el.shadowRoot!.querySelector("canvas") as HTMLCanvasElement;
+    const cctx = cv.getContext("2d")!;
+    const mid = cctx.getImageData(cv.width >> 1, cv.height >> 1, 1, 1).data;
+    add("component:bitmap 渲染中心=红", mid[0] > 200 && mid[1] < 60 && mid[2] < 60, `[${mid[0]},${mid[1]},${mid[2]}]`);
+
+    // 用户交互（wheel zoom）→ viewportchange
+    const cr = cv.getBoundingClientRect();
+    const scale0 = el.viewport.scale;
+    cv.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, clientX: cr.left + cr.width / 2, clientY: cr.top + cr.height / 2, bubbles: true, cancelable: true }));
+    add("component:wheel→zoom+发事件", el.viewport.scale > scale0 && vpEvents === evAfterFit + 1,
+      `scale ${scale0.toFixed(3)}→${el.viewport.scale.toFixed(3)} ev=${vpEvents}`);
+
+    // 程序性属性下灌不发事件（约定核心）
+    const evBefore = vpEvents;
+    el.viewport = { tx: cr.width / 2, ty: cr.height / 2, scale: 4, rot: 0 };
+    add("component:程序性 viewport set 静默", vpEvents === evBefore && el.viewport.scale === 4);
+
+    // 吸色：pick 属性 + pointerdown → colorpick(hex=红)
+    let pickHex: string | null | undefined;
+    el.addEventListener("colorpick", (e) => { pickHex = (e as CustomEvent).detail.hex; });
+    el.setAttribute("pick", "");
+    await nextFrames(2);
+    cv.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 7, clientX: cr.left + cr.width / 2, clientY: cr.top + cr.height / 2, bubbles: true, cancelable: true }));
+    cv.dispatchEvent(new PointerEvent("pointerup", { pointerId: 7, clientX: cr.left + cr.width / 2, clientY: cr.top + cr.height / 2, bubbles: true, cancelable: true }));
+    add("component:pick→colorpick=红", pickHex === "#ff0000", String(pickHex));
+    el.removeAttribute("pick");
+
+    // live provider：宿主合成注入（绿 16²）→ 渲染=绿 + live 属性反射
+    const live = document.createElement("canvas"); live.width = 16; live.height = 16;
+    const lctx = live.getContext("2d")!; lctx.fillStyle = "#00ff00"; lctx.fillRect(0, 0, 16, 16);
+    el.setLiveProvider(() => live);
+    await nextFrames(2);
+    const mid2 = cctx.getImageData(cv.width >> 1, cv.height >> 1, 1, 1).data;
+    add("component:live provider 渲染=绿", mid2[1] > 200 && mid2[0] < 60, `[${mid2[0]},${mid2[1]},${mid2[2]}]`);
+    add("component:live 属性反射", el.hasAttribute("live") && el.live);
+    el.stopLive();
+    add("component:stopLive 摘反射", !el.hasAttribute("live") && !el.live);
+  } finally {
+    el.remove();
+  }
+}
+
+async function run(): Promise<{ ok: boolean; checks: Check[]; error: string | null }> {
   const checks: Check[] = [];
   const add: Add = (name, ok, detail = "") => checks.push({ name, ok, detail });
 
@@ -1489,11 +1558,15 @@ function run(): { ok: boolean; checks: Check[]; error: string | null } {
   try { mergeDownParity(glctx, add); } catch (e) { add("mergedown parity", false, String(e)); }
   try { softTripartite(glctx, add); } catch (e) { add("soft tripartite", false, String(e)); }
   try { arenaAccounting(glctx, add); } catch (e) { add("arena accounting", false, String(e)); }
+  try { await referenceComponentCheck(add); } catch (e) { add("reference component", false, String(e)); }
 
   const finalErr = gl.getError();   // 只读一次（getError 读后即清，二次读会误报 0）
   add("no GL error", finalErr === gl.NO_ERROR, `0x${finalErr.toString(16)}`);
   return { ok: checks.every((c) => c.ok), checks, error: null, newGoldens: _newGoldens };
 }
 
-try { (window as Window).__SMOKE__ = run(); }
-catch (e) { (window as Window).__SMOKE__ = { ok: false, checks: [], error: String(e) }; }
+// run 变 async（C9 组件 check 要等 rAF）：runner 等 window.__SMOKE__ 出现，async IIFE 语义不变。
+(async () => {
+  try { (window as Window).__SMOKE__ = await run(); }
+  catch (e) { (window as Window).__SMOKE__ = { ok: false, checks: [], error: String(e) }; }
+})();

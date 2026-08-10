@@ -464,7 +464,8 @@ export const S = {
   "ref.fit":         { zh: "适应窗口", en: "Fit to window", ja: "ウィンドウに合わせる", tok: "suli sama lupa" }, 
   "ref.resizeAria":  { zh: "拖动调整窗口大小", en: "Drag to resize window", ja: "ドラッグでウィンドウサイズ変更", tok: "luka la suli li ante" }, 
   "ref.resize":      { zh: "拖动调整大小", en: "Drag to resize", ja: "ドラッグでサイズ変更", tok: "luka la suli li ante" }, 
-  "ref.pick":        { zh: "选个图当参考", en: "Pick an image as reference", ja: "参考用の画像を選択", tok: "o wile e sitelen lukin" }, 
+  "ref.picking":     { zh: "吸色（参考）", en: "Picking color (reference)", ja: "スポイト（参考）", tok: "kama jo e kule (sitelen lukin)" }, // C9：原 reference.ts 硬编码中文 → 组件事件化后补 key
+  "ref.pick":        { zh: "选个图当参考", en: "Pick an image as reference", ja: "参考用の画像を選択", tok: "o wile e sitelen lukin" },
   "ref.hintFolder":  { zh: "文件夹图标 = 加载图片", en: "Folder icon = load image", ja: "フォルダアイコン = 画像を読み込む", tok: "sitelen poki: o kama jo e sitelen" }, 
   "ref.hintPip":     { zh: "画中画图标 = 实时镜像主画布", en: "PiP icon = live mirror of canvas", ja: "PiPアイコン = キャンバスをライブミラー", tok: "sitelen lupa: sama supa sitelen lon tenpo ale" }, 
   "ref.hintGesture": { zh: "单指拖移 / 双指 pinch + 旋转 / 双击适应", en: "One-finger drag / two-finger pinch + rotate / double-tap to fit", ja: "一本指ドラッグ / 二本指ピンチ+回転 / ダブルタップでフィット", tok: "luka wan: tawa · luka tu: suli / sike · luka pi tenpo tu: suli pona" }, // ── index.html 静态 chrome（切片 5b-2：lasso icon tooltips + rack/settings 头 + 各对话框）──

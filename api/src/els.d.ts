@@ -51,15 +51,6 @@ export declare const els: {
     menuResetBrushRack: HTMLElement;
     menuForcePwaReset: HTMLElement;
     menuSmoothDev: HTMLElement;
-    referencePanel: HTMLElement;
-    referencePanelHead: HTMLElement;
-    referencePanelClose: HTMLElement;
-    referenceBody: HTMLElement;
-    referenceCanvas: HTMLElement;
-    referenceEmpty: HTMLElement;
-    referenceLoadBtn: HTMLElement;
-    referenceLiveBtn: HTMLElement;
-    referenceFitBtn: HTMLElement;
     referenceFileInput: HTMLInputElement;
     galleryFull: HTMLElement;
     galleryAddBtn: HTMLElement;

@@ -194,7 +194,7 @@ export interface WebPaintBackendInterface {
 | **C6** | **预览违规户迁移试点**：液化 surrogate 化（第一户），魔棒拖选、形状笔 pixelMode 跟上 | 三户走 transaction 协议；「预览是引擎自持物」成立 |
 | **C7** | **WebPaintBackend 装配**：born-loaded 工厂/open() 路由/dispose/多 tab 租户/接口文件两份/sidecar 槽/**B2 store 窄接口一并裁** | node 无 GL：open→指令→undo→encode 逐字节 round-trip；多 backend 并发测试 |
 | **C8** | **SoftGl2Port + MCP server + 测试分级**：迂腐软模拟、shader 注册表对表、npm test/test:full 分层、Playwright 三方 golden ±ε、mock multiplayer 双 backend、MCP 红队全量画作 | MCP 里 create/draw/crop/undo/redo/export 跑通 |
-| **C9** | **reference window web component 试点**：家族组件约定模板（vendor .mjs/属性事件/宿主解耦） | 组件独立可挂；约定 doc 化 |
+| **C9** | **reference window web component 试点**：家族组件约定模板（vendor .mjs/属性事件/宿主解耦） | 组件独立可挂；约定 doc 化 ✅ v0.8.47：`<wp-reference-window>`（frontend/reference-window.ts，只 import common）+ 宿主适配层（side-windows.ts）+ `scripts/gen-component.sh` 单 .mjs 自包含验证；约定 = `20260810-family-web-component-convention.md` |
 | 尾挂 | B 剩余批（password/单 .html/wizard/三兄弟）另立 handoff；UX 抽象层 grill（UI 骑士侧）；gallery/editor 组件（E/embedding 骑士）；bodypaint 投影服务（远期） | — |
 
 ## 6. transaction 协议 + EditMode 归属（C4 普查定形，v0.8.28+；证据链 = `20260810-c4-transaction-census.md`）

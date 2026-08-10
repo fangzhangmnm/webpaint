@@ -14,6 +14,9 @@
   （user 2026-08-08：「现在只是 0.8 的前 1/3」）；bump minor 必须 user 显式说版本号。
 - **测试基线**：1232 node 绿 + tsc 0 + `bash scripts/build.sh` 全 lint + `npm run smoke` GL smoke
   PASSED。`test/run.mjs` 是显式清单，新测试必须注册。
+  **⚠ 2026-08-10 C9 期间 user 裁定覆盖上一行的「跑」义务：慢测试（npm test 全量/test:full/smoke）
+  退出一切 ritual——「慢test不要放任何ritual里面，人类说了再做，ai不要主动等」「交付也不要test」。
+  AI 自主验证面收缩为 tsc + build.sh lint + 静态检查；测试照写照注册，执行权归人类。**
 - **中间态纪律**（v2 同款，user 拍板沿用）：不推 dev 不等真机直接接力施工；「写完了才算数，一口气
   写不完可以接力。中间怕错可以模块化测试」；过渡态自己裁不上呈，上呈只有终态契约偏离/undo 白黑
   名单/数据安全。**测试分级从 C8 起生效前，先维持全量 npm test**；C8 落地后中间棒可只跑相关模块+tsc。
@@ -451,3 +454,32 @@
   验收：tsc 0、快层 **1258 绿**（+2）+ 全量层 3 绿、build 五 lint 全过、GL smoke PASSED（+21 锚：
   tri 18 + arena 3）。无新真机锚（软域/记账不进用户路径；真机批既有全流程条目覆盖）。
   **C8 清账完毕。下一片 = C9 reference window 组件**（家族 web component 约定试点；§1 C9 行）。
+- **C9 ✅ v0.8.47（2026-08-10）——reference window web component 试点 + 家族组件约定定形**：
+  ①**组件落 `src/frontend/reference-window.ts`**：`<wp-reference-window>`（shadow DOM 自带
+  chrome/样式/手势；图标烤入 shadow——`<use>` 不穿 shadow 边界，源 sprite id=folder/
+  picture-in-picture/maximize-viewport/x 注释即对账 key；主题=CSS 变量穿透带 fallback）。
+  **只 import common**（pointer-gesture.ts 纯数学随迁 `src/common/`——frontend 格律 + 共享
+  三角本就是 common 住户）；旧 `src/reference.ts`（578 行）物理删除，行为逐条搬入
+  （v154 吸色/v134 resize/v216 同步重画/v267-268b 位置钳制/S9 live 节流全保）。
+  ②**接口面 = 约定核心**：程序性属性 set（open/viewport/rect/labels）**不发事件**（apply-on-load
+  回灌不误标脏，旧 `_applying` 两帧 hack 退役）；用户交互才发 CustomEvent（viewportchange/
+  rectchange/openchange/colorpick 三连/requestload/requestlivetoggle）；live 合成（backend 知识）
+  留宿主经 `setLiveProvider(() => canvas)` 注入；`queryLongPressPick` = pull 例外。
+  ③**宿主适配层 = side-windows.ts 重写**：desk.refPanel 持久化（rectchange 值比较吸收 RO 回声）、
+  wp:docpixeldirty/histchange→markLiveDirty 转发、吸色桥（colorpick→setColor+wp:pickerShow）、
+  **pick 工具桥走 wp:modechange+editMode.current()**（不是 body[data-tool]——那个 transient 期间
+  保持旧持久工具，行为要跟 current()；shadow 内 :host-context 不可靠禁用）、i18n labels property
+  + slot 文案（light DOM 吃宿主 data-i18n）；els 参考窗 9 条目删除（只剩 referenceFileInput）；
+  i18n 补 `ref.picking` 四语（原硬编码中文）。元素本身 satisfies ReferenceWindowHandle——
+  app-context/session-state 零改动。④**vendor 证明**：`scripts/gen-component.sh`（esbuild 单
+  .mjs + 零裸 import 自检）→ 23KB 自包含；dist-components/ gitignored。⑤**约定 doc 化**：
+  `20260810-family-web-component-convention.md`（§1-8：命名/事件所有权/shadow/状态分域/适配层/
+  vendor/测试/embedding 终态备忘）；提案 §5 C9 行已回写。⑥gl-smoke harness 补
+  `referenceComponentCheck` 9 锚（define/挂载/位图读回/wheel 发事件 vs 程序性静默/colorpick/
+  live provider/live 反射）——run() 转 async（rAF 等帧）。
+  验收（**按 2026-08-10 新裁定：慢测试不跑，见 §0**）：tsc 0、lint-dirs 绿、GL smoke PASSED
+  （含 9 组件锚；在裁定落地前已跑完）、gen-component 自包含验证；快层被叫停于中途（停前无红，
+  未完整跑——执行权归人类）。**真机锚（追加真机批）**：参考窗全功能回归——开窗/拖窗/双指
+  pinch 旋转/wheel/双击适应/touch 右下角 resize、载图（>2048 缩存）、live 镜像跟笔、吸管+长按
+  吸色（十字光标）、关窗重开位置 vp 记忆、换 doc 恢复、gallery 模式隐藏、i18n 四语 tooltip。
+  **C0-C9 全清账，C 骑士收官。**B 剩余批/UX 抽象层/E 骑士见 §3 悬账。

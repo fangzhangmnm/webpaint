@@ -1024,33 +1024,18 @@
     <!-- v147 液化设置面板已删：液化 v132 migrate 进 filterBrush，模式=toolbar 下拉、
          大小/力度=左栏 slider。旧 #liquifyPanel 整套是死 UI（见 ai-docs/reports/stale-ui-review-20260601.html）。 -->
 
-    <!-- 参考小窗：浮动 panel 装一张参考图，独立 pinch / zoom / rotate -->
-    <div class="float-panel reference-panel hidden" id="referencePanel">
-      <div class="float-panel-head" id="referencePanelHead">
-        <span class="float-panel-title" data-i18n="fp.reference">参考</span>
-        <button class="reference-action-btn" id="referenceLoadBtn" type="button" data-i18n-title="ref.load">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#folder"/></svg>
-        </button>
-        <button class="reference-action-btn" id="referenceLiveBtn" type="button" data-i18n-title="ref.live" aria-pressed="false">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#picture-in-picture"/></svg>
-        </button>
-        <button class="reference-action-btn" id="referenceFitBtn" type="button" data-i18n-title="ref.fit">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#maximize-viewport"/></svg>
-        </button>
-        <button class="float-panel-close" id="referencePanelClose" type="button" data-i18n-aria="common.close.aria"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#x"/></svg></button>
+    <!-- 参考小窗：<wp-reference-window> 组件（C9 家族组件试点，src/frontend/reference-window.ts）。
+         chrome/手势/图标在组件 shadow 内；宿主只供 slot 文案（light DOM，i18n 扫得到）
+         + 适配层接线（side-windows.ts：desk 持久化 / live 合成 / 吸色桥 / labels）。 -->
+    <wp-reference-window id="referencePanel">
+      <span slot="title" data-i18n="fp.reference">参考</span>
+      <div slot="empty">
+        <p data-i18n="ref.pick">选个图当参考</p>
+        <p class="sheet-hint" data-i18n="ref.hintFolder">文件夹图标 = 加载图片</p>
+        <p class="sheet-hint" data-i18n="ref.hintPip">画中画图标 = 实时镜像主画布</p>
+        <p class="sheet-hint" data-i18n="ref.hintGesture">单指拖移 / 双指 pinch + 旋转 / 双击适应</p>
       </div>
-      <!-- v134 (user：「参考窗口大小可以调整」) iPad touch 拖手柄：CSS resize:both 只支持鼠标 -->
-      <div class="reference-resize-handle" id="referenceResizeHandle" data-i18n-aria="ref.resizeAria" data-i18n-title="ref.resize"></div>
-      <div class="reference-body" id="referenceBody">
-        <canvas id="referenceCanvas" class="reference-canvas"></canvas>
-        <div class="reference-empty" id="referenceEmpty">
-          <p data-i18n="ref.pick">选个图当参考</p>
-          <p class="sheet-hint" data-i18n="ref.hintFolder">文件夹图标 = 加载图片</p>
-          <p class="sheet-hint" data-i18n="ref.hintPip">画中画图标 = 实时镜像主画布</p>
-          <p class="sheet-hint" data-i18n="ref.hintGesture">单指拖移 / 双指 pinch + 旋转 / 双击适应</p>
-        </div>
-      </div>
-    </div>
+    </wp-reference-window>
     <!-- 参考图文件 input（只 image，不接 .ora） -->
     <input type="file" id="referenceFileInput" accept="image/*" style="display:none" />
 

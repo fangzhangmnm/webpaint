@@ -2,7 +2,7 @@ import { BrushEngine } from "./backend/brush.ts";
 import { LassoEngine } from "./lasso.ts";
 import { FilterBrushEngine } from "./filter-brush.ts";
 import { ShapeBrushEngine } from "./shape-brush.ts";
-import type { GestureViewport, TapRef } from "./pointer-gesture.ts";
+import type { GestureViewport, TapRef } from "./common/pointer-gesture.ts";
 import type { PaintingView, ViewLeaf } from "./backend/workpiece/painting-view.ts";
 import type { Board } from "./board.ts";
 import type { EditMode } from "./edit-mode.ts";
