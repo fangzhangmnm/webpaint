@@ -1,15 +1,4 @@
-import type { FilterParams } from "../filters.ts";
-interface ColorBalanceParams extends FilterParams {
-    shR: number;
-    shG: number;
-    shB: number;
-    mR: number;
-    mG: number;
-    mB: number;
-    hiR: number;
-    hiG: number;
-    hiB: number;
-}
+import { type ColorBalanceParams } from "../backend/filters/color-balance-kernel.ts";
 interface ColorBalanceState {
     params: ColorBalanceParams;
 }
@@ -18,19 +7,9 @@ export declare class ColorBalanceFilter {
     static title: string;
     static category: string;
     static modes: string[];
-    static bleedRadius(): number;
-    static defaults(): {
-        shR: number;
-        shG: number;
-        shB: number;
-        mR: number;
-        mG: number;
-        mB: number;
-        hiR: number;
-        hiG: number;
-        hiB: number;
-    };
+    static bleedRadius: (params: import("../filters.ts").FilterParams | null) => number;
+    static defaults: () => import("../filters.ts").FilterParams;
+    static bake: (src: Uint8ClampedArray, dst: Uint8ClampedArray, params: import("../filters.ts").FilterParams, mask: Uint8Array | null, w: number, h: number) => void;
     static buildBody(container: HTMLElement, state: ColorBalanceState, onChange: () => void): void;
-    static bake(srcData: Uint8ClampedArray, dstData: Uint8ClampedArray, p: ColorBalanceParams, mask: Uint8Array | null): void;
 }
 export {};

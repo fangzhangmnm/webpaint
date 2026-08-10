@@ -1,4 +1,6 @@
-export type FilterParams = Record<string, unknown>;
+export type { FilterParams } from "./backend/filters/kernel.ts";
+import type { FilterParams } from "./backend/filters/kernel.ts";
+export { clamp8 } from "./backend/filters/kernel.ts";
 export interface Filter {
     id: string;
     title: string;
@@ -49,7 +51,6 @@ export declare function registerFilter(FilterClass: Filter): void;
 export declare function getFilter(id: string): Filter | null;
 export declare function listFilters(): Filter[];
 export declare function onFilterRegistered(fn: (item: Filter) => void): () => void;
-export declare function clamp8(v: number): number;
 export interface SliderRowOpts {
     fmt?: (value: number) => string;
     gradient?: string;

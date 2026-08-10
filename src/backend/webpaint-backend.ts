@@ -14,6 +14,9 @@
 // per-tenant 合成注入 + GPU tile arena 归 Port 记账排 C7 后棒（handoff §1 C7 行）。
 
 import { History } from "./workpiece/history.ts";
+import type { WriteToken } from "./workpiece/workpiece.ts";
+import { getFilterKernel } from "./filters/index.ts";
+import type { FilterKernel, FilterParams } from "./filters/kernel.ts";
 import { PaintingWorkpiece, type PaintingData, type PaintingDataNode } from "./workpiece/painting-workpiece.ts";
 import { PaintingView, findViewNodeById, type ViewLeaf } from "./workpiece/painting-view.ts";
 import type { PerspHost } from "./workpiece/persp-component.ts";
@@ -120,7 +123,17 @@ export class WebPaintBackend implements WebPaintBackendInterface {
     begun: boolean;   // 引擎 beginStroke 迟到首点（strokeBegin 无坐标，首个 append 点才 begin）
   } | null = null;
   private _strokeSeq = 0;
-  private _histRev = 0;   // History onChange 计数（strokeEnd 判「真落了一步」用；no-op 不 push 不动它）
+  // ---- filter 档口状态（参数重算事务；与 stroke 同一面单令牌墙——同时最多一个 open transaction）----
+  private _filter: {
+    id: FilterSessionId; kernel: FilterKernel; leaf: ViewLeaf; token: WriteToken;
+    bx: number; by: number; bw: number; bh: number;
+    src: Uint8ClampedArray;          // begin 冻结源（bake 永远从它算——重算不累积）
+    out: Uint8ClampedArray;          // 当前预览字节（commit 落层的最终结果）
+    mask: Uint8Array | null;         // begin 时物化的选区 gray8（<128 = passthrough）
+    params: FilterParams;
+  } | null = null;
+  private _filterSeq = 0;
+  private _histRev = 0;   // History onChange 计数（strokeEnd/filterCommit 判「真落了一步」用；no-op 不 push 不动它）
 
   /** 进程内协作面（壳迁移期/测试直取引擎；embedding/MCP 只走接口方法——序列化墙那侧不存在这些）。 */
   get wp2(): PaintingWorkpiece { return this._wp2; }
@@ -192,8 +205,9 @@ export class WebPaintBackend implements WebPaintBackendInterface {
   dispose(): void {
     if (this._disposed) return;
     this._disposed = true;
-    // interrupt=cancel 家规：open stroke → 先取消（令牌收口、无痕）再释放。
+    // interrupt=cancel 家规：open stroke/filter → 先取消（令牌收口、无痕）再释放。
     if (this._stroke) { const st = this._stroke; this._stroke = null; st.session.cancel(); }
+    if (this._filter) { const fs = this._filter; this._filter = null; fs.token.cancel(); }
     // GPU/软 arena：SoftGl2Port 随 backend GC；注入共享 Port 的租户配额退租随 C8 arena 记账批
     //（接口形状与 mock multiplayer 第二真租户同批定，§6.3 不提前固化）。
     // 换 1×1 空根释放当前 doc 全部 tileset → 清栈释放 undo 持有 → 观察者退租。
@@ -286,6 +300,7 @@ export class WebPaintBackend implements WebPaintBackendInterface {
 
   private _txGuard(op: string): void {
     if (this._stroke) throw new Error(`${op}: open stroke 事务中（单令牌墙——先 strokeEnd/strokeCancel）`);
+    if (this._filter) throw new Error(`${op}: open filter 事务中（单令牌墙——先 filterCommit/filterCancel）`);
   }
 
   undo(): boolean { this._guard(); this._txGuard("undo"); return this._history.undo(); }
@@ -343,6 +358,7 @@ export class WebPaintBackend implements WebPaintBackendInterface {
   strokeBegin(leafId: number, brush: ResolvedBrushSnapshot): StrokeId {
     this._guard();
     if (this._stroke) throw new Error("strokeBegin: 已有 open stroke——先 End/Cancel（单令牌墙，响亮拒绝不排队）");
+    if (this._filter) throw new Error("strokeBegin: open filter 事务中——先 filterCommit/filterCancel（单令牌墙）");
     const node = findViewNodeById(this._view.layers, leafId);
     if (!node || node.isGroup) throw new Error(`strokeBegin: 叶不存在或是组（id=${leafId}）`);
     const layer = node as ViewLeaf;
@@ -400,12 +416,61 @@ export class WebPaintBackend implements WebPaintBackendInterface {
     this._stroke = null;
     st.session.cancel();   // 引擎丢状态 + 令牌 cancel（livesync 时 collector 倒序回滚），无痕
   }
-  filterBegin(_leafId: number, _filterId: string): FilterSessionId {
-    throw new Error("filterBegin: 进程内档口未接（C8）；浏览器壳期请走 filters-adjust surrogate 流");
+  // ── 多步事务档口 · filter 档（C8 接通：filters-adjust surrogate 的 headless 升格——
+  //    begin 冻结源 + 开令牌；setParams 纯函数从冻结源重 bake（不累积）；commit 落层一步；
+  //    cancel 无痕（真层零写，预览全在 out buffer）。kernel 清单 = backend/filters/index.ts）──
+
+  private _requireFilter(id: FilterSessionId) {
+    const fs = this._filter;
+    if (!fs || fs.id !== id) throw new Error(`filter 档口：无此 open filter session（id=${id}）`);
+    return fs;
   }
-  filterSetParams(_id: FilterSessionId, _params: Record<string, unknown>): void { throw new Error("filterSetParams: 档口未接（C8）"); }
-  filterCommit(_id: FilterSessionId): boolean { throw new Error("filterCommit: 档口未接（C8）"); }
-  filterCancel(_id: FilterSessionId): void { throw new Error("filterCancel: 档口未接（C8）"); }
+
+  filterBegin(leafId: number, filterId: string): FilterSessionId {
+    this._guard();
+    if (this._stroke) throw new Error("filterBegin: open stroke 事务中——先 strokeEnd/strokeCancel（单令牌墙）");
+    if (this._filter) throw new Error("filterBegin: 已有 open filter session——先 Commit/Cancel（单令牌墙，响亮拒绝不排队）");
+    const kernel = getFilterKernel(filterId);   // 未注册 id → 响亮 throw
+    const node = findViewNodeById(this._view.layers, leafId);
+    if (!node || node.isGroup) throw new Error(`filterBegin: 叶不存在或是组（id=${leafId}）`);
+    const leaf = node as ViewLeaf;
+    const bx = leaf.bboxX, by = leaf.bboxY, bw = leaf.bboxW, bh = leaf.bboxH;
+    if (bw <= 0 || bh <= 0) throw new Error(`filterBegin: 层无像素（id=${leafId}）——region filter 对空层无意义`);
+    // begin 即开令牌（adjust surrogate 同语义：预览期真层零写，collector 空 → cancel 无痕）。
+    const token = this._wp2.begin("adjust");
+    const src = leaf.pixels.getRegion(bx, by, bw, bh);
+    const sel = this._view.selection;
+    const mask = sel ? sel.materializeMaskRegion(bx, by, bw, bh) : null;
+    const id = ++this._filterSeq;
+    this._filter = { id, kernel, leaf, token, bx, by, bw, bh, src, out: src.slice(), mask, params: kernel.defaults() };
+    return id;
+  }
+
+  filterSetParams(id: FilterSessionId, params: Record<string, unknown>): void {
+    this._guard();
+    const fs = this._requireFilter(id);
+    // 部分参数合并到 defaults 底座（MCP 只传 {brightness:50} 也是完整参数集）；重算永远从冻结源起。
+    fs.params = { ...fs.params, ...params };
+    fs.kernel.bake(fs.src, fs.out, fs.params, fs.mask, fs.bw, fs.bh);
+  }
+
+  filterCommit(id: FilterSessionId): boolean {
+    this._guard();
+    const fs = this._requireFilter(id);
+    this._filter = null;
+    const before = this._histRev;
+    // 逐 tile memcmp 只封真变 tile（adjust C6 顺手账同款）——identity bake → 零扣押 → 不占步。
+    fs.leaf.applyRegionDiff(fs.bx, fs.by, fs.bw, fs.bh, fs.out);
+    fs.token.commit();
+    return this._histRev > before;
+  }
+
+  filterCancel(id: FilterSessionId): void {
+    this._guard();
+    const fs = this._requireFilter(id);
+    this._filter = null;
+    fs.token.cancel();   // 真层从未被写（预览全在 out）→ collector 空，无痕收口
+  }
 
   // ── 事件 ──
 

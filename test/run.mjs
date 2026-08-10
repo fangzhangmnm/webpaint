@@ -121,6 +121,7 @@ import "./gl-doc-bridge.test.mjs";       // WebGL2+tiling 接 board：doc 树→
 import "./ora-tree.test.mjs";               // batch 2 step3：ORA 嵌套组序列化（buildStackXml↔parseStackXml + id + active 往返）
 import "./webpaint-backend.test.mjs";       // C7：WebPaintBackend 装配（born-loaded 工厂/逐字节 round-trip/多 backend 并发/dispose/onChange）
 import "./backend-stroke.test.mjs";         // C8：stroke 档口（一笔一步/no-op/cancel 无痕/单令牌墙/决定论/pixelMode/erase——SoftGl2Port 全链）
+import "./filter-gate.test.mjs";            // C8：filter 档口（kernel 清单/参数重算一步落层/重算不累积/identity 不占步/cancel 无痕/单令牌墙/选区 mask）
 // app-boot 必须是套件里**第一个**触发 Vue 求值的测试：Vue（vue.esm-browser）在 module-eval 时把
 // document 缓存成 module 级 const（createText 等用它）。boot-smoke 装了 DOM shim 后才 import app.js，
 // 故 Vue 求值时 document 有效（=shim doc）；若让别的 import-Vue 的测试先跑（node 无 document），

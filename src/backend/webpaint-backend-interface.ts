@@ -10,8 +10,10 @@
 // dispose 时开着 → cancel 后释放（interrupt=cancel 家规）。
 //
 // C7 第一棒收编范围：生命周期 + 字节面 + 读面 + 层结构 verbs（LayersFace 穿接口衣）+ undo。
-// C8 档口接通：**stroke 档已接真实现**（StrokeSession 进程内升格；栅格域 = inject.gl 缺省
-// SoftGl2Port——headless/MCP 无参即画）；filter 档契约 pin、实现下一棒（响亮 throw，不静默）。
+// C8 档口接通：**stroke 档 + filter 档均已接真实现**——stroke = StrokeSession 进程内升格（栅格域
+// = inject.gl 缺省 SoftGl2Port，headless/MCP 无参即画）；filter = adjust surrogate 的 headless
+// 升格（kernel 清单 = backend/filters/index.ts，未注册 id 响亮 throw；begin 冻结源、setParams
+// 从冻结源纯函数重算、commit 逐 tile diff 落层一步、cancel 无痕）。
 // verbs 全清单（选区/浮层/fill/doc 几何）随后棒逐条过（§6.3 留白纪律：不提前固化）。
 
 // ---- 读面投影（JSON-able；引擎树的标量镜像）----

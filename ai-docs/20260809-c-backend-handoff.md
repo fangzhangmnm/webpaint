@@ -357,10 +357,29 @@
   无时钟无随机=ADR-0009 决定论构成部分）。验收：tsc 0、**1247 绿**（+8：一笔一步 undo/redo 逐位
   /no-op/cancel 无痕/单令牌墙三拒/决定论两 backend 逐字节同图/pixelMode livesync/erase）、
   build 五 lint 全过、GL smoke PASSED（搬家后全链重验）。无新真机锚（档口不进浏览器用户路径；
-  壳仍走 input.ts→StrokeSession 同一实现）。**C8 剩余（接力）**：③b filter 档接通（原型 =
-  filters-adjust surrogate 升格：begin 冻结源+挂 token、setParams 纯函数重 bake、commit 落层一步
-  ——注意 Filter 本体在 src/filters.ts 尚未迁 backend，接通前先勘它的纯度/依赖）+ ④MCP server
-  红队（create/crop/draw/circle/undo/redo/export，user：「你多红队一点」）+ ⑤测试分级（npm test
-  快层 / npm run test:full 全量层：全量画作 round-trip、真 GPU vs SwiftShader vs SoftGl2 三方
-  golden ±ε、mock multiplayer 双 backend）+ ⑥arena 租户配额记账（等 mock multiplayer 当第二真
-  租户；注入共享 Port 的 backend dispose 退租也挂这）。
+  壳仍走 input.ts→StrokeSession 同一实现）。~~**C8 剩余（接力）**：③b filter 档~~（↓ v0.8.42
+  已接；④MCP + ⑤测试分级 + ⑥arena 记账仍开放）。
+- **C8 第四棒 ✅ v0.8.42（2026-08-10）——filter 档口接通 + kernel 域析出**：
+  ①**纯度实勘**（handoff 点名的前置勘探）：六个 region filter（hsb/colorBalance/curves/mosaic/
+  halftone/stainedGlass）bake 全是纯 typed-array 函数、零 DOM 零随机（stainedGlass 抖动 =
+  确定性 hash，ADR-0009 天然满足）；DOM 只在 buildBody/注册面——filters.ts 本体（registry+
+  DOM helper+color-brush 行为）**不迁**，只析计算面。②**kernel 域落 `src/backend/filters/`**：
+  kernel.ts（FilterKernel 契约 + FilterParams/clamp8 SSoT）+ hsb-kernel/color-balance-kernel/
+  curves-kernel（buildCurveLut 导出——UI 画曲线与 bake 同一条 LUT）/stylize-kernels + index.ts
+  注册清单（静态封闭集 6 个，未注册 id 响亮 throw，同 shader 对表纪律）；plugins/ 四文件改
+  UI 面委托 kernel（`static bake = XKernel.bake`，行为字节不变）；液化/锐化模糊 brush-only
+  不入册（走 filter-brush/stroke 流）。③**档口真实现**（webpaint-backend.ts）：begin =
+  getFilterKernel + 叶解析（组/缺叶/空层响亮 throw）+ `wp2.begin("adjust")` 挂令牌 + 冻结源
+  `leaf.pixels.getRegion(bbox)` + 选区 materializeMaskRegion 物化；setParams = 参数合并到
+  defaults 底座（MCP 传部分参数即完整集）+ 从冻结源纯函数重 bake（**不累积**）；commit =
+  applyRegionDiff 逐 tile memcmp 落层一步（identity → 零扣押 → false 不占步）；cancel =
+  token.cancel 无痕（真层零写）。单令牌墙扩双档：stroke/filter 互斥 + 开着期间 undo/redo
+  门口 throw + dispose interrupt=cancel 两档都收。验收：tsc 0、**1255 绿**（+8：响亮拒绝/
+  参考 bake 逐位+undo/redo/重算不累积/identity 不占步+cancel 无痕/单令牌墙双向/选区 mask
+  逐位/kernel 清单+defaults JSON-able/dispose 收口）、build 五 lint 全过、GL smoke PASSED。
+  无新真机锚（档口不进浏览器用户路径；adjust 面板走原 surrogate 流未动，kernel 委托字节
+  逐位同旧）。**C8 剩余（接力）**：④MCP server 红队（create/crop/draw/circle/undo/redo/
+  export，user：「你多红队一点」）+ ⑤测试分级（npm test 快层 / npm run test:full 全量层：
+  全量画作 round-trip、真 GPU vs SwiftShader vs SoftGl2 三方 golden ±ε、mock multiplayer
+  双 backend）+ ⑥arena 租户配额记账（等 mock multiplayer 当第二真租户；注入共享 Port 的
+  backend dispose 退租也挂这）。

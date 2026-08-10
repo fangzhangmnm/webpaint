@@ -59,6 +59,8 @@ export declare class WebPaintBackend implements WebPaintBackendInterface {
     private _raster;
     private _stroke;
     private _strokeSeq;
+    private _filter;
+    private _filterSeq;
     private _histRev;
     /** 进程内协作面（壳迁移期/测试直取引擎；embedding/MCP 只走接口方法——序列化墙那侧不存在这些）。 */
     get wp2(): PaintingWorkpiece;
@@ -107,10 +109,11 @@ export declare class WebPaintBackend implements WebPaintBackendInterface {
     strokeAppend(id: StrokeId, points: Float32Array): void;
     strokeEnd(id: StrokeId): boolean;
     strokeCancel(id: StrokeId): void;
-    filterBegin(_leafId: number, _filterId: string): FilterSessionId;
-    filterSetParams(_id: FilterSessionId, _params: Record<string, unknown>): void;
-    filterCommit(_id: FilterSessionId): boolean;
-    filterCancel(_id: FilterSessionId): void;
+    private _requireFilter;
+    filterBegin(leafId: number, filterId: string): FilterSessionId;
+    filterSetParams(id: FilterSessionId, params: Record<string, unknown>): void;
+    filterCommit(id: FilterSessionId): boolean;
+    filterCancel(id: FilterSessionId): void;
     onChange(cb: (ev: BackendChangeEvent) => void): () => void;
     private _emit;
 }

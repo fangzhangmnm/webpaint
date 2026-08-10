@@ -39,8 +39,12 @@ import { makeRampSlider } from "./ui/ramp-slider.ts";
 // 一个 Filter = 一个全 static 的 ES class。下面是其类型契约——消费侧
 // （filters-adjust.ts、plugins/*）依赖此形状。runtime brush 方法
 // （attachColorBrushBehavior 注入）是可选的。
+// C8：region filter 的纯计算面（bake/defaults/bleedRadius）析出 backend/filters/（filter 档口
+// 的 kernel 域）——FilterParams/clamp8 的 SSoT 在那边，这里 re-export 保存量 import 路径。
 
-export type FilterParams = Record<string, unknown>;
+export type { FilterParams } from "./backend/filters/kernel.ts";
+import type { FilterParams } from "./backend/filters/kernel.ts";
+export { clamp8 } from "./backend/filters/kernel.ts";
 
 // region filter bake：纯函数 src→dst（同尺寸）。mask=null 全图。
 export interface Filter {
@@ -136,8 +140,6 @@ export function onFilterRegistered(fn: (item: Filter) => void): () => void {
 }
 
 // ============= 共享 helper =============
-
-export function clamp8(v: number): number { return v < 0 ? 0 : v > 255 ? 255 : v | 0; }
 
 // 一行 slider row：label + 滑块 + 数字
 //   onChange(key, value) 在 input 时触发
