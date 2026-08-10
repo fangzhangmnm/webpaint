@@ -49,7 +49,7 @@
 - **C6 违规户迁移**：液化第一户（liquify-engine putImageData 就地写→surrogate 化），魔棒拖选、
   形状笔 pixelMode 跟上。行为锚先迁后拆。
 - **C7 装配**：app-context 39 键的 backend 瘦版；B2 store 窄接口一并裁（20260801-v08-epoch-handoff
-  §9 挂点）；多 tab 租户+dispose；接口文件两份（backend api + frontend toolkit .h）；sidecar 槽
+  §9 挂点）；多 tab 租户+dispose；接口文件两份（backend interface + frontend toolkit .h）；sidecar 槽
   （editor-session 的 peek 已是雏形）。
 - **C8 SoftGl2Port+MCP**：迂腐语义模拟（GL 规范公式忠实，不复刻硬件数值/instancing）；现成种子
   = test/gl-smoke/reference-2d.ts（2D 规范合成器）+ ARCHIVE/old-brush-cpu-raster.ts（CPU 笔刷
@@ -65,7 +65,7 @@
 - **shader 注册表纪律**：新 shader 不配 CPU 版必须显式 GPU-only 登记——静默缺席=对表测试红。
 - **热路径栅格只准走 Gl2Port**；新独立 CPU 像素算法要 user consent + algorithms/ 落户。
 - 三面预览旗语义（overlay/surrogate/float，ADR-0008 §8）与 fill 的 ADR-0004 出入口语义一字不动。
-- workpiece v2 令牌墙别绕：backend api 化是给现有 verbs 穿接口衣，不是重造写路径。
+- workpiece v2 令牌墙别绕：backend interface 化是给现有 verbs 穿接口衣，不是重造写路径。
 - 搬目录时 import 路径大改——tsc 是审计器，一片一搬别攒大爆炸。
 - 提案 §6 留白**不许提前固化**（transaction 细节/EditMode 归属等 C4 普查产出）。
 
@@ -76,7 +76,8 @@
 - B 剩余批：password 契约、单 .html 发行（非 mhtml；资源 base64 内联，可出单文件+目录双产物）、
   pwa wizard、三兄弟对齐——排 C 之后另立 handoff（user：「这样更彻底」）。
 - UX 抽象层系统 grill（排 UI 骑士侧）；gallery/editor 组件化（E/embedding 骑士）；bodypaint
-  投影服务（远期）。
+  （远期；机制备忘 = grill 记录 §七.4：texture 空间 full-quad 反算 screen 采样 stroke buffer
+  + delta-z screening，对 backend 只是多一个映射函数）。
 
 ## 4. 施工进度（接棒者按片追记）
 

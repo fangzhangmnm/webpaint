@@ -15,14 +15,14 @@ frontend = UX 资产（交互模型、工具状态机、UI）；分域目标 = *
 
 1. backend DOM 零依赖：node（dom-shim）下 `WebPaintBackend.open(ora bytes)` → 指令 → undo/redo →
    `encodeOra()` 全链路测试通过，**栅格域由 SoftGl2Port 兜底也能跑**（MCP server 成立）。
-2. 前端壳能被替换：backend api 纯接口文件（全标量）是唯一契约——同一份接口 = 进程内调用面 =
+2. 前端壳能被替换：backend interface 纯接口文件（全标量）是唯一契约——同一份接口 = 进程内调用面 =
    postMessage 面（webcomponent+Worker embedding）= MCP 面 = multiplayer 序列化面。
 3. 边界防退化：目录依赖格律 + 禁浏览器词 lint 挂 build.sh，名单只增不减。
 4. B2 store 窄接口在 backend 装配片一并裁；B 剩余批排 C 之后另立。
 
 非目标：multiplayer transport（只留序列化+标记位）、用户 runtime 的 CPU 渲染（无 GL2 照旧响亮
-失败）、folder tree 全面重排（F 骑士）、UX 抽象层系统 grill（排 UI 骑士侧）、bodypaint 投影（远期，
-3D 侧算 UV stamps，backend 保持 2D 纹理画家）。
+失败）、folder tree 全面重排（F 骑士）、UX 抽象层系统 grill（排 UI 骑士侧）、bodypaint（远期，
+机制备忘见 grill 记录 §七.4——对 backend 只是多一个映射函数）。
 
 ## 1. 目录格律（五目录 + 单向依赖）
 
@@ -34,12 +34,13 @@ src/backend/   算法、合成、codec、workpiece、Gl2Port 消费侧。只准 
                   pixel-conic/EDT/magic-wand(泛洪+相似色)/color-cluster…+ 注册清单一张。
 src/frontend/  UX 资产。可 import common + backend（读面/指令）。
   └ toolkit/      DOM-free UX 数学深模块（gizmo、蚂蚁线、手势→终值编排、transform 交互
-                  状态机）——可移植器官，但不进 backend api。
+                  状态机）——可移植器官，但不进 backend interface。
 src/shell/     platform 胶水（store 接缝、editor-session、分享/剪贴板/PWA、Port 装配、
                decoder/encoder 注入）。可 import 全部。capability 契约：只有
                「unavailable / 承诺托底」两态，exception 壳内消化，app 只见 failure+reason。
-src/gallery/   本轮检疫堆场：gallery 相关文件物理挪入（行为不变），每文件 = 一个 component
-               或一个背景进程；双向依赖（gallery↔session 10 处）文件头记账不动刀（E 骑士开工清单）。
+src/gallery/   本轮检疫堆场：gallery 相关文件物理挪入（行为不变），**每个文件夹 = 一个 component
+               或一个背景进程**（user 2026-08-09 更正：粒度是文件夹不是文件）；双向依赖
+               （gallery↔session 10 处）文件头记账不动刀（E 骑士开工清单）。
 ```
 
 搬家纪律：新代码即日按目录落；存量随切片搬（C0 改名表 = 搬家地图）；不搞一次性大爆炸。
@@ -71,10 +72,10 @@ export interface Gl2Port {
 ## 3. WebPaintBackend 契约
 
 ```ts
-// src/backend/webpaint-backend-api.ts —— 纯接口文件（类 .h）：契约与实现分离。
+// src/backend/webpaint-backend-interface.ts —— 纯接口文件（类 .h）：契约与实现分离。
 // 【硬纪律】本文件全部方法只收/吐 标量 | JSON-able 对象 | TypedArray/bytes——
 //   它同时是进程内 api、postMessage 协议、MCP tool schema、multiplayer 序列化面（同一把刀）。
-export interface WebPaintBackendApi {
+export interface WebPaintBackendInterface {
   // —— 生命周期：born-loaded，无空态无 load 方法（liminal space 结构性不存在）——
   //   换画 = 弃旧建新；load/new 的舒服语义住壳层 tab 管理器（tabs.open/tabs.new）。
   dispose(): void;                          // 显式释放（GPU 驻留/内存配额退租）
@@ -143,7 +144,7 @@ export interface WebPaintBackendApi {
 - transaction 协议细节（filter/transform 档口签名、互斥拒绝语义）——等 C4 普查。
 - EditMode 归属（倾向：backend 令牌互斥 + frontend 交互仲裁）——等 C4。
 - Gl2Port 动词面精确签名——等 C1 落地回写。
-- backend api 的 verbs 全清单——等 C7 逐条过（workpiece v2 现有面 api 化）。
+- backend interface 的 verbs 全清单——等 C7 逐条过（workpiece v2 现有面 api 化）。
 
 ## 7. 测试与纪律
 

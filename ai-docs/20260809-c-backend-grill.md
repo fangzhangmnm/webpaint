@@ -27,7 +27,7 @@
 - 五目录：`src/common/`（纯类型+纯几何，零依赖）、`src/backend/`（算法/合成/codec/workpiece，
   含 `backend/algorithms/`）、`src/frontend/`（UX 资产，含 `frontend/toolkit/`）、`src/shell/`
   （platform 胶水）、`src/gallery/`（**本轮检疫堆场**——「所有的gallery屎本轮先堆过去，未来慢慢理」，
-  每文件=一个 component 或一个背景进程）。
+  **每个文件夹**=一个 component 或一个背景进程——user 2026-08-09 更正：粒度是文件夹不是文件）。
 - 依赖格律单向：common 不 import 任何人；backend 只 import common；frontend 可 import
   common+backend；shell 都可；lint 按目录钉死。紧耦合共享物（几何/类型/Selection 值对象）进 common
   ——「紧耦合的方便的代价可能就是后来不敢动->屎山」，反屎山靠单向格律不靠消灭共享。
@@ -87,8 +87,8 @@
    node里面可能就是一个几乎无参的ctor」）；注入清单：Gl2Port（可缺省）、图片解码器 fallback
    （「作为手写png解码的fallback，可不注入」）、时钟/uuid 等设备源。
 5. **纯接口文件**（user 提案：「写一个类似h文件的纯接口……契约和代码屎山分离，指令序列化的时候
-   只要机械过一遍接口就行」）：backend api 全标量/JSON-able/TypedArray——**这一份接口同时是
-   MCP 面、postMessage 面、multiplayer 序列化面（同一把刀）**。.h 两份：backend api（必需）
+   只要机械过一遍接口就行」）：backend interface 全标量/JSON-able/TypedArray——**这一份接口同时是
+   MCP 面、postMessage 面、multiplayer 序列化面（同一把刀）**。.h 两份：backend interface（必需）
    + frontend toolkit（可选器官）。
 6. **brush rack 全库失踪 backend 能跑**；strokeBegin 传 ResolvedBrush **快照并锁定一笔**
    （治「画一半动笔」；「反正就令牌的时候传」，带宽可忽略不做 diff）。点元组 **(x,y,p,t) 保持
@@ -130,8 +130,10 @@
    逼出家族组件约定模板；gallery 组件留 E 骑士（「语义上就是一个webcomponent……这个是抽卡骑士轮
    的事情」；gallery 家族定义=tree 模式+card 模式）；webpaint-editor 组件=终态但排 C+D 之后。
    gallery-iframe 独立项目幻想否决（耦合最重隔离收益最小）。
-4. bodypaint 前瞻：逆投影/raycast 归 3D 宿主（three），backend 保持 2D 纹理画家吃 UV 空间 stamps；
-   将来大概率加投影服务中间件，Gl2Port 面预计存活。
+4. bodypaint 前瞻（user 2026-08-09 更正记法，之后再说）：**texture 空间 full-quad blit，每 texel
+   反算 screen 坐标**（UV→3D→screen 映射），采样 screen 空间的 stroke buffer，**delta-z screening**
+   剔除遮挡——「这样永远 pixel accurate。所以其实反而就是多了一个映射函数，反而好算」。对 backend
+   = 多一个映射函数进管线（非 raycast/逆投影 stamps 方案）；Gl2Port 面预计存活。
 
 ## 八、随批 todo（user 点名）
 
