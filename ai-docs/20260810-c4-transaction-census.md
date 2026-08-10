@@ -152,4 +152,6 @@ transform 裁定**无档口**：变换会话 = frontend UX 括号（EditMode tra
 > 自「真层就地写」改为「**stroke 替身叶**」（StrokeShadow，src/stroke-session.ts；显示 = surrogate
 > 影子变体增量 sync；cancel = 丢替身零回滚）；§6.4 顺手账两笔已清（液化 cancel 化石注释、
 > adjust commit 整层 clear → applyRegionDiff 只封真变 tile）。§3.4 的宿②③中，真层就地写只剩
-> draw/erase pixelMode（stroke 档合法写）；魔棒（§6.3）仍待迁。
+> draw/erase pixelMode（stroke 档合法写）；魔棒（§6.3）v0.8.32 走路 a 收口——预览宿不动
+> （substrate 声明态 + 读面语义全保），托管结构化进 SelectionPreviewTx（手搓 custody 退役）。
+> **C6 三户清账完毕。**

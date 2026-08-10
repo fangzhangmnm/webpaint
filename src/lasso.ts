@@ -31,6 +31,7 @@ import type { ViewLeaf, ViewGroup, PaintingView } from "./workpiece/painting-vie
 import type { History } from "./workpiece/history.ts";
 import type { FloatLayerComponent } from "./workpiece/float-component.ts";
 import type { SelectionComponent } from "./workpiece/selection-component.ts";
+import { SelectionPreviewTx } from "./workpiece/selection-component.ts";
 
 // ---- 本文件用到的最小局部类型（selection/doc/layer 的真类型在各自模块；此处只描述本类消费面）----
 interface Point { x: number; y: number; }
@@ -427,18 +428,21 @@ export class LassoEngine {
   // （flood 内核本体在文件尾 floodSelectFrom——#22 提取为模块级纯函数）
 
   // ---- 魔棒 drag 连续选（v0.7 UX：按住拖动沿路径把扫过的区域逐个并进来，一笔=一条 undo）----
-  // 会话态：_magicOrig = 起笔时的 doc.selection（undo before；所有权归 doc 直到 end/cancel 处置）；
-  //   _magicAccum = 本笔各查询区域的 union（引擎持有）。预览 = compose(orig, accum, setOp)
-  //   直写 doc.selection（不进 undo），end 一次性产 entry，cancel 还原 orig。
+  // 会话态（C6 户3，census §6.3 路 a）：预览托管 = SelectionPreviewTx（origin 保管/换手 dispose/
+  //   commit·abort 收口全走 vetted 深模块，旧手搓托管退役）。预览仍住 selection substrate
+  //   （_rawWrite 声明态经 doc 端口适配）——stopMask「本笔已选也成墙」/蚂蚁线/fill 预览读面语义
+  //   不变。_magicAccum = 本笔各查询区域的 union（引擎自持物）。预览 = compose(origin, accum,
+  //   setOp) → tx.write；end = tx.commit 产 entry（记账在 input._pushSelEntry），cancel = tx.abort。
   //   省钱关键：采样点已被 accum 盖住 → 跳过查询（拖动大多数点落在刚选完的区域里）。
-  _magicOrig: SelectionLike | null = null;
+  _magicTx: SelectionPreviewTx | null = null;
   _magicAccum: SelectionLike | null = null;
   _magicDragLastX = -1;
   _magicDragLastY = -1;
 
   beginMagicDrag() {
     if (!this.doc) return;
-    this._magicOrig = this.doc.selection;
+    const doc = this.doc;
+    this._magicTx = new SelectionPreviewTx({ view: () => doc.selection, _rawWrite: (v) => { doc.selection = v; } });
     this._magicAccum = null;
     this._magicDragLastX = this._magicDragLastY = -1;
     this._state = "magic-drag";
@@ -456,37 +460,33 @@ export class LassoEngine {
     if (merged !== q) q.dispose();
     if (this._magicAccum && merged !== this._magicAccum) this._magicAccum.dispose();
     this._magicAccum = merged as SelectionLike;
-    // 预览直写 doc.selection：compose 不消费输入 → 喂 accum 的 clone，防 "new" 模式返回同
-    //   一对象造成双所有权（accum 归引擎、doc.selection 归 doc，各自 dispose 不打架）。
+    // compose 不消费输入 → 喂 accum 的 clone，防 "new" 模式返回同一对象造成双所有权
+    //   （accum 归引擎、substrate 侧归 tx 托管，各自 dispose 不打架）。
+    const tx = this._magicTx!;
     const accumView = this._magicAccum.clone();
-    const preview = Selection.compose(this._magicOrig, accumView, this._setOpMode);
+    const preview = Selection.compose(tx.origin(), accumView, this._setOpMode);
     if (preview !== accumView) accumView.dispose();
-    const prev = this.doc.selection;
-    if (prev && prev !== this._magicOrig && prev !== preview) prev.dispose();
-    this.doc.selection = preview;
+    tx.write(preview);   // 上一个预览产物由 tx 就地 dispose（origin 除外）
     this.onChange();
     return true;
   }
   /** 收笔：产单条 history entry（before 所有权随 entry 交给 SelectionComponent 记账，同 _applySelectionUpdate 契约）。 */
   magicDragEnd() {
     if (!this.doc || this._state !== "magic-drag") return null;
-    const orig = this._magicOrig;
-    const final = this.doc.selection;
-    this._magicOrig = null;
+    const tx = this._magicTx!;
+    this._magicTx = null;
     this._magicAccum?.dispose(); this._magicAccum = null;
     this._state = "idle";
+    const r = tx.commit();   // 净变化为零 → changed:false（不产 entry 不占步）
     this.onChange();
-    if (final === orig) return null;
-    return { type: "selectionChange", before: orig, after: final };
+    if (!r.changed) return null;
+    return { type: "selectionChange", before: r.before, after: this.doc.selection };
   }
-  /** 中断（双指手势/pointercancel/出错）：还原起笔时选区，无痕。 */
+  /** 中断（双指手势/pointercancel/出错）：tx.abort 无痕还原起笔选区，预览产物就地 dispose。 */
   magicDragCancel() {
     if (this._state !== "magic-drag") return;
-    if (this.doc) {
-      const prev = this.doc.selection;
-      if (prev !== this._magicOrig) { prev?.dispose(); this.doc.selection = this._magicOrig; }
-    }
-    this._magicOrig = null;
+    this._magicTx?.abort();
+    this._magicTx = null;
     this._magicAccum?.dispose(); this._magicAccum = null;
     this._state = "idle";
     this.onChange();

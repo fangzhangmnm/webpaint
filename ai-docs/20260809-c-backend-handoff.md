@@ -226,3 +226,16 @@
   抬笔跟上（与 adjust 面板预览同款既有语义——compositeOnce 导出路径不传 surrogate）。
   **C6 剩余 = 户3 魔棒拖选**（census §6.3 两候选路现场定）+ 液化 cancel UI 入口（UX 判断，
   留人类拍板）。
+- **C6 完 ✅ v0.8.32（2026-08-10）——户3 魔棒拖选**：现场定 **census §6.3 路 a**（PreviewTx 化）
+  ——路 b（预览全引擎自持）被否的理由：stopMask「本笔已选也成墙」（v0.7.23 语义，路径依赖是
+  真需求）+ 蚂蚁线/fill overlay 每帧读 doc.selection，重接三个读面换零用户可见收益。落地：
+  ①`SelectionPreviewTx` 构造参数放宽成 `SelectionPreviewPort` 最小口（view/_rawWrite——纯类型
+  放宽零行为变化），lasso 经 doc 端口适配 `{view:()=>doc.selection,_rawWrite:v=>doc.selection=v}`
+  ——node 假 doc 直测不必长组件；②magic drag 四函数（begin/step/end/cancel）的手搓 custody
+  （_magicOrig 保管/prev dispose 杂耍/cancel 还原）退役，全走 tx（write 换手 dispose、commit
+  净零变化不产 entry、abort 无痕）；entry 形状不变（input._pushSelEntry 零改动）。验收：tsc 0、
+  **1209 绿**（magic-drag 4 既有行为锚零改动全过 = 先迁后拆证明）、build 五 lint、GL smoke
+  PASSED。无新真机锚（行为不变；魔棒拖选真机锚在既有真机批）。**C6 三户清账完毕**；液化
+  cancel UI 入口留人类拍板（UX）。**下一片 = C7 装配**（app-context 39 键 backend 瘦版 + B2
+  store 窄接口 + 多 tab 租户 dispose + 接口文件两份 + sidecar 槽；census 普查新账「无令牌像素
+  写静默不记账」的 throw 硬化也排 C7，见 §7/新发现节）。

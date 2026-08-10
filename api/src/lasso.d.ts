@@ -7,6 +7,7 @@ import type { ViewLeaf, ViewGroup, PaintingView } from "./workpiece/painting-vie
 import type { History } from "./workpiece/history.ts";
 import type { FloatLayerComponent } from "./workpiece/float-component.ts";
 import type { SelectionComponent } from "./workpiece/selection-component.ts";
+import { SelectionPreviewTx } from "./workpiece/selection-component.ts";
 interface Point {
     x: number;
     y: number;
@@ -134,7 +135,7 @@ export declare class LassoEngine {
     _rasterizeRectToSelection(r: DraftRect | null): SelectionLike | null;
     _rasterizeEllipseToSelection(r: DraftRect | null): SelectionLike | null;
     _magicWandToSelection(start: Point | null, sourceLayer: ViewLeaf | null): SelectionLike | null;
-    _magicOrig: SelectionLike | null;
+    _magicTx: SelectionPreviewTx | null;
     _magicAccum: SelectionLike | null;
     _magicDragLastX: number;
     _magicDragLastY: number;
@@ -147,7 +148,7 @@ export declare class LassoEngine {
         before: Selection | null;
         after: Selection | null;
     } | null;
-    /** 中断（双指手势/pointercancel/出错）：还原起笔时选区，无痕。 */
+    /** 中断（双指手势/pointercancel/出错）：tx.abort 无痕还原起笔选区，预览产物就地 dispose。 */
     magicDragCancel(): void;
     _applySelectionUpdate(newSel: SelectionLike): {
         type: string;

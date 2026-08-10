@@ -92,15 +92,23 @@ export class SelectionComponent implements CollectorComponent {
   }
 }
 
+/** 预览 tx 的最小选区口：SelectionComponent 本体，或 doc 端口适配
+ *  （C6 户3：lasso 魔棒拖选经 `{view: () => doc.selection, _rawWrite: v => doc.selection = v}`
+ *  适配——同一套托管纪律，node 直测的假 doc 也不必长出组件）。 */
+export interface SelectionPreviewPort {
+  view(): Selection | null;
+  _rawWrite(v: Selection | null): void;
+}
+
 /** 预览 tx（值语义沿 selection-face 的 SelectionPreviewTx；T5 起记账在调用方）。
  *  origin = 进入时的选区。所有权：commit 后 before(=origin) 交调用方递给 commitPreApplied；
  *  abort 还原 origin、预览产物就地 dispose。 */
 export class SelectionPreviewTx {
-  private _sel: SelectionComponent;
+  private _sel: SelectionPreviewPort;
   private _origin: Selection | null;
   private _open = true;
 
-  constructor(sel: SelectionComponent) {
+  constructor(sel: SelectionPreviewPort) {
     this._sel = sel;
     this._origin = sel.view();
   }

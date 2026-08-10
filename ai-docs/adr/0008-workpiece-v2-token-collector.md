@@ -133,6 +133,9 @@ Tx=transaction 词义保留，三个 Tx 类溶解（PixelTx/SelectionPreviewTx/t
   > End 句柄 diff 在令牌内一次落账、Cancel 丢替身零回滚；显示走 surrogate 影子变体
   > （per-tile 增量 sync）。§8 三面旗语义不变（替身仍是 surrogate 旗，吸管/合成 WYSIWYG 同待遇）；
   > draw/erase pixelMode 是 stroke 档合法的令牌内真层写（提案 §6.1），维持 live-sync。
-  > 魔棒拖选迁移排 C6 后半（census §6.3）。
+  > 魔棒拖选（C6 户3 / v0.8.32）走 census §6.3 路 a：预览仍住 selection substrate（_rawWrite
+  > 声明态——stopMask「本笔已选成墙」/蚂蚁线/fill 预览读面语义不变），但托管结构化进
+  > SelectionPreviewTx（origin 保管/换手 dispose/commit·abort 收口；lasso 经 doc 端口适配，
+  > SelectionPreviewPort 最小口）。三户清账完毕。
 - .h ritual 见家族总 CLAUDE.md（`scripts/gen-api.sh` → `api/`）。
 - 目标 API 全签名：`ai-docs/20260807-workpiece-v2-proposal-h.md`；施工序：`ai-docs/20260807-workpiece-v2-handoff.md`。
