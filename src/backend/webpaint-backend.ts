@@ -295,6 +295,35 @@ export class WebPaintBackend implements WebPaintBackendInterface {
   layerClear(id: number): BackendOpResult { this._guard(); return this._layers.clearLayer(id); }
   setReferenceLayer(id: number | null): BackendOpResult { this._guard(); return this._layers.setReferenceLayer(id); }
 
+  // ── doc 几何 verbs（C8：MCP 验收点名 crop；doc-ops runDocTransform 的 headless 同构——
+  //    同一批 substrate verbs（resizeAllLeaves exchange/树 setTreeProp/选区 pre-applied/persp remap），
+  //    UI 随行（viewport shift/fitToScreen/尺寸标签）是壳的 step.hint，headless 不存在）──
+
+  crop(x: number, y: number, w: number, h: number): BackendOpResult {
+    this._guard();
+    this._txGuard("crop");
+    const cx = Math.round(x), cy = Math.round(y), cw = Math.round(w), ch = Math.round(h);
+    if (!Number.isFinite(cx) || !Number.isFinite(cy) || cw < 1 || ch < 1 || cw > 8192 || ch > 8192) {
+      return { ok: false, msg: `crop: 非法矩形（w/h 须在 1..8192，got ${w}×${h}）` };
+    }
+    const res = this._history.withPoint("docTransform", {}, () => {
+      this._wp2.layerTiles.resizeAllLeaves((_id, lp) => lp.cropped(cx, cy, cw, ch));
+      const tree = this._wp2.layerTree!;
+      if (cw !== this._view.width) tree.setTreeProp("width", cw);
+      if (ch !== this._view.height) tree.setTreeProp("height", ch);
+      const oldSel = this._view.selection;
+      if (oldSel) {
+        const mapped = oldSel.croppedTo(cx, cy, cw, ch);
+        if (mapped !== oldSel) {
+          this._view.selection = mapped;                // pre-applied：before 所有权交组件 record
+          this._wp2.selection.commitPreApplied(oldSel);
+        }
+      }
+      this._wp2.persp.remapForDocTransform((p) => ({ x: p.x - cx, y: p.y - cy }));   // ADR-0006：VP 随裁剪平移
+    });
+    return res.ok ? { ok: true } : { ok: false, msg: res.msg };
+  }
+
   // ── undo（open transaction 期间响亮拒绝——不能放行到 History：workpiece beforeApply 的 throw
   //    会被 History 当 swap 中途失败走不可恢复协议弃整栈，所以令牌墙必须在本门口挡）──
 

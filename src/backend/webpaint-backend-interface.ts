@@ -80,6 +80,10 @@ export interface WebPaintBackendInterface {
   layerClear(id: number): BackendOpResult;
   setReferenceLayer(id: number | null): BackendOpResult;
 
+  // ── doc 几何（C8 MCP 验收点名 crop；其余 doc 几何 verbs 随后棒逐条过——§6.3 留白纪律）──
+  // 允许负向扩张（x/y<0、w/h>doc——doc-ops v127 语义）；尺寸 1..8192；选区随裁剪映射、persp VP 平移。
+  crop(x: number, y: number, w: number, h: number): BackendOpResult;
+
   // ── undo（open transaction 期间 throw——令牌墙语义）──
   undo(): boolean;
   redo(): boolean;

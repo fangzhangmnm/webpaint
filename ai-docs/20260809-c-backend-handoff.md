@@ -378,8 +378,29 @@
   参考 bake 逐位+undo/redo/重算不累积/identity 不占步+cancel 无痕/单令牌墙双向/选区 mask
   逐位/kernel 清单+defaults JSON-able/dispose 收口）、build 五 lint 全过、GL smoke PASSED。
   无新真机锚（档口不进浏览器用户路径；adjust 面板走原 surrogate 流未动，kernel 委托字节
-  逐位同旧）。**C8 剩余（接力）**：④MCP server 红队（create/crop/draw/circle/undo/redo/
-  export，user：「你多红队一点」）+ ⑤测试分级（npm test 快层 / npm run test:full 全量层：
-  全量画作 round-trip、真 GPU vs SwiftShader vs SoftGl2 三方 golden ±ε、mock multiplayer
-  双 backend）+ ⑥arena 租户配额记账（等 mock multiplayer 当第二真租户；注入共享 Port 的
-  backend dispose 退租也挂这）。
+  逐位同旧）。~~**C8 剩余（接力）**：④MCP~~（↓ v0.8.43 已接；⑤测试分级 + ⑥arena 记账仍开放）。
+- **C8 第五棒 ✅ v0.8.43（2026-08-10）——MCP server + 红队 + crop verb**：
+  ①**crop 进接口**（C8 验收点名 create/draw/**crop**/undo/redo/export；§6.3 其余 doc 几何 verbs
+  仍留白）：`crop(x,y,w,h)` = doc-ops runDocTransform 的 headless 同构——同一批 substrate verbs
+  （resizeAllLeaves exchange / 树 setTreeProp / 选区 croppedTo pre-applied / persp remap VP 平移），
+  UI 随行（viewport/fitToScreen）是壳 step.hint headless 不存在；负向扩张 v127 语义、1..8192。
+  ②**MCP server 落 `scripts/mcp-server.mjs`**（`npm run mcp`）：手搓 stdio newline-delimited
+  JSON-RPC 2.0（家规 vendor 一切——MCP SDK 不进 repo），tool 清单 = 接口文件机械翻译（提案 §3
+  「同一把刀」）：生命周期 create/open_file/dispose + 读面 + 层结构 9 verbs + crop + undo/redo +
+  stroke 档四连调 + `draw` 便捷一笔 + filter 档四连调 + `filter_list` + export_image/encode_ora
+  （base64 或 path 落盘）。栅格/合成 = server 级 SoftGl2Port 注入（gl + compositorBytes 同一软域
+  ——「SoftGl2Port 兜底也能跑（MCP server 成立）」达成；C7 全局接缝缺省语义不动，「无 GL 响亮失败」
+  锚照旧）。node 侧两个补件：ImageData 最小 shim（ora encode 面拿它当字节容器——encode 面改纯
+  bytes 读口是 canvas 债余账）+ ensureZipLoaded（复用 test/zip-node.mjs 装载器）。后端 throw →
+  tool isError + 原文案（响亮拒绝穿墙而出，server 本体不死）。③**红队 `test/mcp-redteam.test.mjs`**
+  （spawn 真子进程走真 stdio，非进程内假打）：握手/验收动词在册；全流程 create→draw 斜线→圆
+  （stroke 三连调）→crop→undo/redo→filter→export png 魔数→ora PK 魔数；**决定论穿墙**（同指令
+  序列两次 → export base64 逐字符同，ADR-0009 过 MCP 面仍成立）；敌意输入 server 不死（未知
+  tool/坏 JSON 行/坏 stride/非法 crop/无文档就画/令牌墙 undo·第二 begin·错 id → 全 isError 后
+  继续服务）。验收：tsc 0、**1256 绿**（+1 红队全景锚）、build 五 lint、GL smoke PASSED。
+  无新真机锚（MCP 不进浏览器路径）。**观察记录**：套件里 tile-pool FR 泄漏警告 ~4 条（GC 时机
+  漂移、不计失败）在 v0.8.41 基线已存在，非本批引入——测试 rig 释放卫生的既有噪音，待清账。
+  **C8 剩余（接力）**：⑤测试分级（npm test 快层 / npm run test:full 全量层：全量画作
+  round-trip、真 GPU vs SwiftShader vs SoftGl2 三方 golden ±ε、mock multiplayer 双 backend）+
+  ⑥arena 租户配额记账（等 mock multiplayer 当第二真租户；注入共享 Port 的 backend dispose
+  退租也挂这）。

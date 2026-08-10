@@ -5,6 +5,7 @@
   "comment": "运行时无依赖、全 vendor（src/ ESM，node 直跑 test/ 与 bench/，构建走 scripts/build.sh + tools/esbuild）。devDependencies 仅供开发期（tsc --noEmit 类型检查 + playwright GL smoke `npm run smoke`），不进运行时 bundle、不影响部署。",
   "scripts": {
     "test": "node test/run.mjs",
+    "mcp": "node scripts/mcp-server.mjs",
     "smoke": "node test/gl-smoke/run.mjs",
     "preview:build": "tools/esbuild/esbuild test/gl-smoke/preview.ts --bundle --format=iife --outfile=test/gl-smoke/preview.js",
     "build": "bash scripts/build.sh",

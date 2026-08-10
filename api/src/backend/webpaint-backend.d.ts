@@ -96,6 +96,7 @@ export declare class WebPaintBackend implements WebPaintBackendInterface {
     layerSetActive(id: number): boolean;
     layerClear(id: number): BackendOpResult;
     setReferenceLayer(id: number | null): BackendOpResult;
+    crop(x: number, y: number, w: number, h: number): BackendOpResult;
     private _txGuard;
     undo(): boolean;
     redo(): boolean;

@@ -65,6 +65,7 @@ export interface WebPaintBackendInterface {
     layerSetActive(id: number): boolean;
     layerClear(id: number): BackendOpResult;
     setReferenceLayer(id: number | null): BackendOpResult;
+    crop(x: number, y: number, w: number, h: number): BackendOpResult;
     undo(): boolean;
     redo(): boolean;
     canUndo(): boolean;
