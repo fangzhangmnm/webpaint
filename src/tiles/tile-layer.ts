@@ -4,13 +4,13 @@
 //   - snapshot()/restore() = 句柄 acquire/release，**零拷贝**（undo 内存压力交给池的压缩管）。
 //   - 压缩驻留对读者透明（handle.bytes() 同步解压），tile-residency 的备份/驱逐机器失去存在理由（S3 删）。
 //   - **js 没析构**：LayerPixels 被替换/丢弃前必须显式 dispose()（释放句柄），漏了由池的
-//     FinalizationRegistry 泄漏 assert 兜底上报。持有点：Layer.setPixels/remapPixels、doc.adoptState、
-//     doc.removeLayer、gl-doc-renderer 的 tmp、undo 快照 disposePixelsSnapshot。
+//     FinalizationRegistry 泄漏 assert 兜底上报。持有点：LayerTiles 实例交换、gl-doc-renderer 的 tmp、
+//     undo 快照 disposePixelsSnapshot。
 //
-// 接口不变（putRegion/getRegion/sampleAt/contentBounds/editRegion facade…），写者读者照旧。
 // ⚠ getTile/forEachTile 返回的数组是句柄的零拷贝视图，**只读红线**——要改走 putRegion/putTile。
 //
-// 纯核心零 DOM 依赖 → node 全测。Canvas2D facade（materialize/editRegion）需浏览器。
+// 全文件零 DOM 依赖 → node 全测（C3 债 b：Canvas2D facade 拆除，2D 参照域的 canvas 桥
+// 在 test/gl-smoke/canvas2d-facade.ts）。
 
 import { TILE_SIZE, tilesAcross, tileKey, tileCoord, forEachTileInRect } from "../common/tile-geometry.ts";
 import { appTilePool } from "./app-tile-pool.ts";
@@ -336,51 +336,11 @@ function asBytes(buf: Uint8ClampedArray): Uint8Array {
   return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
 }
 
-// ---- Canvas2D facade（browser-only；给旧 layer.canvas/ctx 写者读者过渡）----
-type Bitmap2D = HTMLCanvasElement | OffscreenCanvas;
-function scratch2D(w: number, h: number): Bitmap2D {
-  if (typeof OffscreenCanvas !== "undefined") { try { return new OffscreenCanvas(w, h); } catch { /* fall */ } }
-  const c = document.createElement("canvas"); c.width = w; c.height = h; return c;
-}
-
-// 物化整个内容为一张 bbox 画布（+ doc 原点）。给 2D 读者（旧 layer.canvas）。空 → null。
-//   tight=true 用 per-tile bbox 聚合收紧（导出/crop）；默认 tile 粒度（够 2D 合成用）。
-export function materialize(lp: LayerPixels, tight = false): { canvas: Bitmap2D; ox: number; oy: number } | null {
-  const b = lp.contentBounds(tight);
-  if (!b) return null;
-  const c = scratch2D(b.w, b.h);
-  const ctx = c.getContext("2d") as CanvasRenderingContext2D;
-  ctx.putImageData(new ImageData(lp.getRegion(b.x, b.y, b.w, b.h), b.w, b.h), 0, 0);
-  return { canvas: c, ox: b.x, oy: b.y };
-}
-
-// 编辑事务（替代旧 ensureBbox + layer.ctx）：物化 doc 矩形 [rx0,ry0,rw,rh]（含已有像素）→ 给 ctx 让 fn 画
-//   → 结果切片回 tile。fn(ctx, ox, oy)：ctx 原点 = doc(ox,oy)，即在 doc 坐标 d 处画 = ctx 坐标 d-ox/d-oy。
-// 字节版 editRegion（v0.6.41 去 canvas 化）：fn 直接改 getRegion 缓冲（straight RGBA，rw×rh），
-// 写回 putRegion。旧 canvas facade 的 putImageData→getImageData 往返会把整块矩形过一遍 premult
-// 量化（哪怕 fn 没画到）——字节进出不走 canvas 硬原则。
+// 编辑事务（字节版，v0.6.41）：fn 直接改 getRegion 缓冲（straight RGBA，rw×rh），写回 putRegion。
+// fn(buf, ox, oy)：buf 原点 = doc(ox,oy)。零 canvas premult 往返——字节进出不走 canvas 硬原则。
 export function editRegionBytes(lp: LayerPixels, rx0: number, ry0: number, rw: number, rh: number, fn: (buf: Uint8ClampedArray, ox: number, oy: number) => void): void {
   if (rw <= 0 || rh <= 0) return;
   const buf = lp.getRegion(rx0, ry0, rw, rh);
   fn(buf, rx0, ry0);
   lp.putRegion(rx0, ry0, rw, rh, buf);
-}
-
-export function editRegion(lp: LayerPixels, rx0: number, ry0: number, rw: number, rh: number, fn: (ctx: CanvasRenderingContext2D, ox: number, oy: number) => void): void {
-  if (rw <= 0 || rh <= 0) return;
-  const c = scratch2D(rw, rh);
-  const ctx = c.getContext("2d", { willReadFrequently: true }) as CanvasRenderingContext2D;
-  ctx.putImageData(new ImageData(lp.getRegion(rx0, ry0, rw, rh), rw, rh), 0, 0);   // 预填已有
-  fn(ctx, rx0, ry0);
-  lp.putRegion(rx0, ry0, rw, rh, ctx.getImageData(0, 0, rw, rh).data);             // 切片回 tile
-}
-
-// 整体从一张 canvas 重建（变换/合并/导入/ora）：清空 + 切片。srcCanvas 内容在 doc (ox,oy) 起、w×h。
-export function replaceFromCanvas(lp: LayerPixels, srcCanvas: CanvasImageSource, ox: number, oy: number, w: number, h: number): void {
-  lp.clear();
-  if (w <= 0 || h <= 0) return;
-  const c = scratch2D(w, h);
-  const ctx = c.getContext("2d", { willReadFrequently: true }) as CanvasRenderingContext2D;
-  ctx.drawImage(srcCanvas, 0, 0);
-  lp.putRegion(ox, oy, w, h, ctx.getImageData(0, 0, w, h).data);
 }

@@ -1,14 +1,9 @@
 // ORA 嵌套组序列化（batch 2 step 3）：buildStackXml ↔ parseStackXml 树往返 + id + active。
 // 纯 XML 字符串往返（无 canvas / 无 PNG）。node 无 DOMParser → 本文件装一个极简 XML parser
 // polyfill（只够解析我们自己 emit 的 well-formed XML：元素 / 属性 / 自闭合 / 嵌套 stack）。
+// C3：fixture 从旧 PaintDoc 迁 OraDoc 鸭形直构（buildStackXml 的输入契约就是纯结构 duck——
+//   生产侧 ora.ts encode 喂的也是 exportData 冻结鸭形，不再有类依赖）。
 import { describe, it, assert, eq } from "./runner.mjs";
-
-// ---- OffscreenCanvas stub（doc 构造/快照需要；同 layer-tree.test）----
-function makeCtx() {
-  const ctx = { getImageData: (x, y, w, h) => ({ data: new Uint8ClampedArray(4), width: 1, height: 1 }), putImageData: () => {} };
-  return new Proxy(ctx, { get(t, p) { return p in t ? t[p] : (() => {}); }, set(t, p, v) { t[p] = v; return true; } });
-}
-class StubCanvas { constructor(w, h) { this.width = w; this.height = h; this._ctx = makeCtx(); } getContext() { return this._ctx; } }
 
 // ---- 极简 XML parser polyfill（recursive descent；只解析受控输出）----
 function decodeEntities(s) {
@@ -64,48 +59,34 @@ class FakeDOMParser {
   }
 }
 
-// ---- 装 stub，动态 import（同 layer-tree：避免静态 import 毒别的文件）----
-const _prevOSC = globalThis.OffscreenCanvas;
 const _prevDP = globalThis.DOMParser;
-globalThis.OffscreenCanvas = StubCanvas;
 globalThis.DOMParser = FakeDOMParser;
-// **单**一 top-level await（用 Promise.all 合并两个 import）：多一个 await 回合会扰动
-//   run.mjs 里一众 TLA 模块的微任务交错顺序，毒到 selection-morph 的 OSC-stub（实测）。
-//   ora-stack-xml.js 无 canvas 依赖，本就不该碰 OSC，但 await 回合数本身是雷 → 收成 1 个。
-const [_docMod, _oraXmlMod] = await Promise.all([
-  import("../src/doc.ts"),
-  import("../src/ora-stack-xml.ts"),
-]);
-const { PaintDoc } = _docMod;
-const { buildStackXml, parseStackXml } = _oraXmlMod;
-globalThis.OffscreenCanvas = _prevOSC;
+const { buildStackXml, parseStackXml } = await import("../src/ora-stack-xml.ts");
+globalThis.DOMParser = _prevDP;
 
-// 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
-const _docs = [];
-const mkDoc = () => { const d = new PaintDoc(); _docs.push(d); return d; };
-
-const useStub = () => { globalThis.OffscreenCanvas = StubCanvas; globalThis.DOMParser = FakeDOMParser; };
+const useStub = () => { globalThis.DOMParser = FakeDOMParser; };
 const T = (name, fn) => it(name, () => { useStub(); fn(); });
 
-// 构造：[L0, G{ L1, L1b }, L2]，active=L1，ref=L2。
-//   注：v281 起「active 是组 → 新层进组内」，故 L2 在「flat 阶段」先建好（active=叶），避免进 G。
+// ---- OraDoc 鸭形构造（纯结构，零像素零类）----
+let _nextId = 1;
+const mkLeaf = (over = {}) => ({
+  isGroup: false, id: _nextId++, name: `图层`, visible: true, opacity: 1, mode: "source-over",
+  clippingMask: false, lockAlpha: false, bboxX: 0, bboxY: 0, ...over,
+});
+const mkGroup = (children, over = {}) => ({
+  isGroup: true, id: _nextId++, name: "组", visible: true, opacity: 1, mode: "pass-through",
+  clippingMask: false, children, ...over,
+});
+const mkD = (layers, over = {}) => ({ width: 2048, height: 2048, activeId: null, referenceLayerId: null, layers, ...over });
+
+// 构造：[L0, G{ L1, L1b }, L2]，active=L1，ref=L2。L0 内容 bbox=(5,7)（驱动 ORA x/y 偏移）。
 function buildTreeDoc() {
-  const d = mkDoc();
-  const L0 = d.layers[0];
-  // tile-SoT：填 (5,7) 起 10×10 不透明内容 → contentBounds 紧框 = bbox(5,7,10,10)，驱动 ORA x/y 偏移
-  L0.putImageData(5, 7, { width: 10, height: 10, data: new Uint8ClampedArray(10 * 10 * 4).fill(255) });
-  const L2 = d.addLayer();               // [L0, L2]，active=L2（root 顶，最后留在顶）
-  d.setActiveById(L0.id);
-  const L1 = d.addLayer();               // [L0, L1, L2]，active=L1
-  d.groupSelection(L1.id);               // [L0, G{L1}, L2]，active=G
-  const G = d.layers[1];
-  G.opacity = 0.5; G.mode = "multiply"; G.name = "组A";
-  d.setActiveById(L1.id);
-  const L1b = d.addLayer();              // active=L1（组内叶）→ 进 G 同级之上 → G{L1, L1b}
-  L1.lockAlpha = true;
-  L1b.clippingMask = true;
-  d.referenceLayerId = L2.id;
-  d.setActiveById(L1.id);                // active = 组内叶
+  const L0 = mkLeaf({ bboxX: 5, bboxY: 7 });
+  const L1 = mkLeaf({ lockAlpha: true });
+  const L1b = mkLeaf({ clippingMask: true });
+  const L2 = mkLeaf();
+  const G = mkGroup([L1, L1b], { opacity: 0.5, mode: "multiply", name: "组A" });
+  const d = mkD([L0, G, L2], { activeId: L1.id, referenceLayerId: L2.id });
   return { d, L0, L1, L1b, L2, G };
 }
 
@@ -148,9 +129,7 @@ describe("ora-tree · 嵌套组 XML 往返", () => {
   });
 
   T("空组往返：<stack></stack> → children []", () => {
-    const d = mkDoc();
-    const G = d.groupSelection(d.layers[0].id).group;   // 包住唯一叶
-    G.children = [];                                     // 清空 → 空组（仅测序列化形状）
+    const d = mkD([mkGroup([])]);
     const xml = buildStackXml(d);
     const { nodes } = parseStackXml(xml);
     eq(nodes.length, 1, "根 1 节点");
@@ -183,11 +162,8 @@ describe("ora-tree · 向后兼容（旧扁平 .ora）", () => {
 
 describe("ora-tree · 组隔离 ↔ ORA 标准 isolation（v278 穿透）", () => {
   T("穿透→isolation=auto；正常(隔离)→isolation=isolate；混合模式→composite-op", () => {
-    const d = mkDoc();
-    const L1 = d.addLayer();
-    d.groupSelection(L1.id);                 // 新组默认 = pass-through
-    const G = d.layers[1];
-    eq(G.mode, "pass-through", "新组默认穿透");
+    const G = mkGroup([mkLeaf()]);            // 默认 pass-through（v2 组默认穿透，锚在 layer-tree-json）
+    const d = mkD([mkLeaf(), G]);
 
     let xml = buildStackXml(d);
     assert(/isolation="auto"/.test(xml), "穿透写 isolation=auto");
@@ -218,15 +194,5 @@ describe("ora-tree · 组隔离 ↔ ORA 标准 isolation（v278 穿透）", () =
     eq(nodes.length, 1, "1 组");
     eq(nodes[0].isGroup, true, "是组");
     eq(nodes[0].mode, "pass-through", "src-over + 无 isolation → 穿透（baseline 缺省 auto）");
-  });
-});
-
-// 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
-describe("ora-tree 收尾", () => {
-  it("释放本文件的 doc tiles", async () => {
-    const { eachLeaf } = await import("../src/doc.ts");
-    for (const d of _docs) { eachLeaf(d.layers, (l) => l.pixels?.dispose?.()); d.selection?.dispose?.(); }
-    _docs.length = 0;
-    assert(true, "disposed");
   });
 });

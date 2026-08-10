@@ -7,8 +7,8 @@ import { store } from "./app-store.ts";
 import { sessionFileName } from "./config.ts";
 
 // 名字占用预检（rename / saveAs 共用）——**统一走 store.files.nameOccupied**（唯一 local+remote 占用检查）。
-//   返回 **boolean**（在线云端+本地都看，离线只看本地）。opts.cloud 形参保留仅为调用点签名稳定（store 自己按在线态决定查不查云）。
+//   返回 **boolean**（在线云端+本地都看，离线只看本地；store 自己按在线态决定查不查云）。
 //   边界：**session 名**（非文件夹）→ sessionFileName 转全名（库身份=X.ora）。文件夹占用检查另有其路（gallery-shell 传裸文件夹路径，不经此）。
-export async function sessionNameConflict(name: string, _opts: { cloud?: boolean } = {}): Promise<boolean> {
+export async function sessionNameConflict(name: string): Promise<boolean> {
   return store.files.nameOccupied(sessionFileName(name));
 }

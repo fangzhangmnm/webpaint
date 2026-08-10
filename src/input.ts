@@ -1,8 +1,8 @@
 // Pointer / pen / touch + 手势 + undo stack。
 // 沿用 ScratchPad 的 pointer 模式（防误触、coalesced、平滑、屏幕双击切工具）。
 // 差异：
-//   - 画笔不走"矢量 stroke 存数据"路线 —— 直接通过 BrushEngine 把 stamp 落到 layer.ctx
-//   - undo = 笔前对 active layer 做 ImageData 快照，撤销时 putImageData
+//   - 画笔不走"矢量 stroke 存数据"路线 —— BrushEngine 把 stamp 直落 layer 像素（tile 字节面）
+//   - undo = workpiece v2 令牌记账（写时扣押零拷贝 tile 快照，ADR-0008）
 //   - 坐标走 doc 坐标（screenToDoc）
 //
 // 行为矩阵（沿用 ScratchPad，做了 picker 增项）：

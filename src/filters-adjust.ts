@@ -16,7 +16,7 @@ import { anchorPopupBelowToolbars, positionPopup } from "./anchored-popup.ts";
 import { setTool } from "./toolbar.ts";   // 命令 = toolbar 的接口（显式 import）
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { fillResampleSelect } from "./frontend/resample-modes.ts";
-import type { LayerSnap } from "./doc.ts";
+import type { ViewLeafSnap as LayerSnap } from "./workpiece/painting-view.ts";
 import type { WriteToken } from "./workpiece/workpiece.ts";
 import type { AppContext } from "./app-context.ts";
 import { iconHtml } from "./ui/icon.ts";

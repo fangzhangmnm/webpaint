@@ -1,8 +1,7 @@
 // 锐化 / 模糊
 // 双极 slider：负值 = 模糊（3×3 box N 次迭代）；正值 = 锐化（unsharp mask）
 //
-// v132: modes = ["region","brush"]，region 是大图全烤（卡），brush 是局部小 stamp（不卡）
-//   brush 模式 bakeBrush 由 FilterBrushEngine 调，待 Phase B 实装
+// brush 模式（bakeBrush 由 FilterBrushEngine 调）：局部小 stamp 不卡（旧 region 大图全烤模式已删）。
 // 论证：模糊本质 non-local 卷积，大图慢；brush 模式天然限定 bbox 不卡
 
 import { registerFilter, clamp8, makeSliderRow, attachColorBrushBehavior } from "../filters.ts";

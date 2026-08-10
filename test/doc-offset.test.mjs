@@ -1,150 +1,80 @@
-// 偏移接缝（环绕）验收 —— doc.offsetWrap / Selection.offsetWrapped。
+// 偏移接缝（环绕）验收 —— LayerPixels.offsetWrapped / Selection.offsetWrapped。
 // 问题陈述：
 //   - 输入：doc W×H + layer 像素（+ 可选 selection）；偏移 (dx,dy)，向右/下为正。
 //   - 输出：doc 尺寸不变；像素 new(x,y) = old((x-dx) mod W, (y-dy) mod H)（环绕）；
 //           偏移整幅 (W,H) = 恒等；偏移 a 再偏移 (W-a) = 恒等。
-// 纯像素层用 stub canvas 验环绕映射（角点）+ 恒等性；selection 验 bbox=整幅。
+// C3：旧 PaintDoc.offsetWrap 死壳拆除——生产路径 = doc-ops → LayerTiles.offsetWrapAll →
+//   LayerPixels.offsetWrapped（本文件直测该内核，字节原生零 stub canvas）+ Selection.offsetWrapped。
 import { describe, it, assert, eq } from "./runner.mjs";
-
-// ---- stub canvas：drawImage(src, dx, dy) 整数平移 + getImageData（同 doc-rotate 的子集）----
-class StubCtx {
-  constructor(cv) {
-    this.cv = cv;
-    this.fillStyle = "#fff";
-    this.globalAlpha = 1;
-    this.imageSmoothingEnabled = true;
-    this.imageSmoothingQuality = "low";
-    this._t = [1, 0, 0, 1, 0, 0];
-  }
-  setTransform(a, b, c, d, e, f) { this._t = [a, b, c, d, e, f]; }
-  fillRect(x, y, w, h) {
-    // Selection.full 用纯白全填 mask（alpha=255 内）。测试只需 alpha 正确。
-    const { data, width } = this.cv;
-    for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) {
-      const i = (yy * width + xx) * 4;
-      data[i] = data[i + 1] = data[i + 2] = 255; data[i + 3] = 255;
-    }
-  }
-  clearRect(x, y, w, h) {
-    const { data, width } = this.cv;
-    for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) {
-      const i = (yy * width + xx) * 4;
-      data[i] = data[i + 1] = data[i + 2] = data[i + 3] = 0;
-    }
-  }
-  drawImage(src, dx, dy) {
-    const [a, b, c, d, e, f] = this._t;
-    const sw = src.width, sh = src.height;
-    const sd = src.getContext("2d").cv.data;
-    const { data, width, height } = this.cv;
-    for (let sy = 0; sy < sh; sy++) for (let sx = 0; sx < sw; sx++) {
-      const ux = sx + 0.5 + (dx || 0), uy = sy + 0.5 + (dy || 0);
-      const tx = a * ux + c * uy + e, ty = b * ux + d * uy + f;
-      const px = Math.floor(tx), py = Math.floor(ty);
-      if (px < 0 || px >= width || py < 0 || py >= height) continue;
-      const si = (sy * sw + sx) * 4, di = (py * width + px) * 4;
-      data[di] = sd[si]; data[di + 1] = sd[si + 1]; data[di + 2] = sd[si + 2]; data[di + 3] = sd[si + 3];
-    }
-  }
-  getImageData(x, y, w, h) {
-    const { data, width } = this.cv;
-    const out = new Uint8ClampedArray(w * h * 4);
-    for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) {
-      const si = ((y + yy) * width + (x + xx)) * 4, di = (yy * w + xx) * 4;
-      out[di] = data[si]; out[di + 1] = data[si + 1]; out[di + 2] = data[si + 2]; out[di + 3] = data[si + 3];
-    }
-    return { data: out, width: w, height: h };
-  }
-  createImageData(w, h) { return { data: new Uint8ClampedArray(w * h * 4), width: w, height: h }; }
-  putImageData(img, dx, dy) {
-    const { data, width } = this.cv;
-    for (let yy = 0; yy < img.height; yy++) for (let xx = 0; xx < img.width; xx++) {
-      const si = (yy * img.width + xx) * 4, di = ((dy + yy) * width + (dx + xx)) * 4;
-      data[di] = img.data[si]; data[di + 1] = img.data[si + 1]; data[di + 2] = img.data[si + 2]; data[di + 3] = img.data[si + 3];
-    }
-  }
-}
-class StubCanvas {
-  constructor(w, h) { this.width = w; this.height = h; this.data = new Uint8ClampedArray(w * h * 4); this._ctx = new StubCtx(this); }
-  getContext() { return this._ctx; }
-}
-const _prevOSC = globalThis.OffscreenCanvas;
-function useStub() { globalThis.OffscreenCanvas = StubCanvas; }
-useStub();
-
-const { PaintDoc } = await import("../src/doc.ts");
+const { LayerPixels } = await import("../src/tiles/tile-layer.ts");
 const { Selection } = await import("../src/selection.ts");
-globalThis.OffscreenCanvas = _prevOSC;
 
-// 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
-const _docs = [];
-const mkDoc = (o) => { const d = new PaintDoc(o); _docs.push(d); return d; };
-
-// tile-SoT：putImageData/sampleAt 纯路径（无 canvas）。markPixel 在 doc (x,y) 放标记色。
-function markPixel(L, x, y, val) {
-  L.putImageData(x, y, { width: 1, height: 1, data: new Uint8ClampedArray([val, val, val, 255]) });
+// 生产同款归一化（layer-tiles._applyComputed）：偏移进 [0,W)/[0,H) 再交内核。
+function offsetWrap(lp, dx, dy) {
+  return lp.offsetWrapped(((dx % lp.docW) + lp.docW) % lp.docW, ((dy % lp.docH) + lp.docH) % lp.docH);
 }
-function alphaAt(L, x, y) { return L.sampleAt(x, y)[3]; }
-function redAt(L, x, y) { return L.sampleAt(x, y)[0]; }
+const _lps = [];
+const mkLp = (w, h) => { const lp = new LayerPixels(w, h); _lps.push(lp); return lp; };
+const swap = (i, np) => { _lps[i].dispose(); _lps[i] = np; return np; };
 
-describe("doc.offsetWrap · 尺寸不变 + 像素环绕映射", () => {
+function markPixel(lp, x, y, val) {
+  lp.putRegion(x, y, 1, 1, new Uint8ClampedArray([val, val, val, 255]));
+}
+const redAt = (lp, x, y) => lp.sampleAt(x, y)[0];
+
+describe("LayerPixels.offsetWrapped · 尺寸不变 + 像素环绕映射", () => {
   it("doc 尺寸偏移后不变", () => {
-    const doc = mkDoc({ width: 10, height: 6 });
-    markPixel(doc.layers[0], 2, 2, 50);
-    doc.offsetWrap(3, 2);
-    eq(doc.width, 10, "宽不变");
-    eq(doc.height, 6, "高不变");
-    eq(redAt(doc.layers[0], 5, 4), 50, "(2,2) → (5,4)");
+    let lp = mkLp(10, 6);
+    markPixel(lp, 2, 2, 50);
+    lp = swap(_lps.length - 1, offsetWrap(lp, 3, 2));
+    eq(lp.docW, 10, "宽不变");
+    eq(lp.docH, 6, "高不变");
+    eq(redAt(lp, 5, 4), 50, "(2,2) → (5,4)");
   });
 
   it("偏移 (1,1)：每个角点按 (x+1)%W,(y+1)%H 环绕", () => {
     // W=4,H=2。四角放不同灰度 r，验证落点。
-    const doc = mkDoc({ width: 4, height: 2 });
-    const L = doc.layers[0];
-    markPixel(L, 0, 0, 10);   // 左上 → (1,1)
-    markPixel(L, 3, 0, 20);   // 右上 → (0,1)
-    markPixel(L, 0, 1, 30);   // 左下 → (1,0)
-    markPixel(L, 3, 1, 40);   // 右下 → (0,0)
-    doc.offsetWrap(1, 1);
-    eq(redAt(L, 1, 1), 10, "左上(0,0)→(1,1)");
-    eq(redAt(L, 0, 1), 20, "右上(3,0)→(0,1) 水平环绕");
-    eq(redAt(L, 1, 0), 30, "左下(0,1)→(1,0) 垂直环绕");
-    eq(redAt(L, 0, 0), 40, "右下(3,1)→(0,0) 双向环绕");
+    let lp = mkLp(4, 2);
+    markPixel(lp, 0, 0, 10);   // 左上 → (1,1)
+    markPixel(lp, 3, 0, 20);   // 右上 → (0,1)
+    markPixel(lp, 0, 1, 30);   // 左下 → (1,0)
+    markPixel(lp, 3, 1, 40);   // 右下 → (0,0)
+    lp = swap(_lps.length - 1, offsetWrap(lp, 1, 1));
+    eq(redAt(lp, 1, 1), 10, "左上(0,0)→(1,1)");
+    eq(redAt(lp, 0, 1), 20, "右上(3,0)→(0,1) 水平环绕");
+    eq(redAt(lp, 1, 0), 30, "左下(0,1)→(1,0) 垂直环绕");
+    eq(redAt(lp, 0, 0), 40, "右下(3,1)→(0,0) 双向环绕");
   });
 
   it("负偏移也环绕：(-1,0) 把左列移到右边", () => {
-    const doc = mkDoc({ width: 4, height: 1 });
-    const L = doc.layers[0];
-    markPixel(L, 0, 0, 99);   // 左列 → (-1)%4 = 3
-    doc.offsetWrap(-1, 0);
-    eq(redAt(L, 3, 0), 99, "(0,0) 在 dx=-1 下环绕到 (3,0)");
+    let lp = mkLp(4, 1);
+    markPixel(lp, 0, 0, 99);   // 左列 → (-1)%4 = 3
+    lp = swap(_lps.length - 1, offsetWrap(lp, -1, 0));
+    eq(redAt(lp, 3, 0), 99, "(0,0) 在 dx=-1 下环绕到 (3,0)");
   });
 });
 
-describe("doc.offsetWrap · 恒等性", () => {
+describe("LayerPixels.offsetWrapped · 恒等性", () => {
   it("偏移整幅 (W,H) = 无变化", () => {
-    const doc = mkDoc({ width: 4, height: 2 });
-    const L = doc.layers[0];
-    markPixel(L, 2, 1, 77);
-    doc.offsetWrap(4, 2);
-    eq(redAt(L, 2, 1), 77, "整幅偏移 = 像素不动");
+    let lp = mkLp(4, 2);
+    markPixel(lp, 2, 1, 77);
+    lp = swap(_lps.length - 1, offsetWrap(lp, 4, 2));
+    eq(redAt(lp, 2, 1), 77, "整幅偏移 = 像素不动");
   });
 
   it("偏移 a 再偏移 (W-a, H-b) 回到原图", () => {
-    const doc = mkDoc({ width: 4, height: 2 });
-    const L = doc.layers[0];
-    markPixel(L, 0, 0, 12);
-    markPixel(L, 2, 1, 34);
-    doc.offsetWrap(1, 1);
-    doc.offsetWrap(3, 1);   // 总位移 (4,2) ≡ (0,0)
-    eq(redAt(L, 0, 0), 12, "(0,0) 回原");
-    eq(redAt(L, 2, 1), 34, "(2,1) 回原");
+    let lp = mkLp(4, 2);
+    markPixel(lp, 0, 0, 12);
+    markPixel(lp, 2, 1, 34);
+    lp = swap(_lps.length - 1, offsetWrap(lp, 1, 1));
+    lp = swap(_lps.length - 1, offsetWrap(lp, 3, 1));   // 总位移 (4,2) ≡ (0,0)
+    eq(redAt(lp, 0, 0), 12, "(0,0) 回原");
+    eq(redAt(lp, 2, 1), 34, "(2,1) 回原");
   });
 });
 
 describe("Selection.offsetWrapped · 环绕映射（v0.4.6 紧 bbox）", () => {
   it("内容随偏移平移；bbox = 紧内容框（旧 canvas 版的整幅 bbox 是实现副产品）", () => {
-    useStub();
     const s0 = Selection.full(3, 2, 1, 1);   // bbox (1,1) 3×2
     const s1 = s0.offsetWrapped(1, 1, 8, 6);
     eq(s1.bboxX, 2, "selX=2（平移后紧框）");
@@ -156,7 +86,6 @@ describe("Selection.offsetWrapped · 环绕映射（v0.4.6 紧 bbox）", () => {
     s0.dispose(); s1.dispose();
   });
   it("越边环绕：贴右下的选区偏移后绕回左上", () => {
-    useStub();
     const s0 = Selection.full(2, 2, 6, 4);   // 贴 8×6 doc 右下角
     const s1 = s0.offsetWrapped(1, 1, 8, 6);
     eq(s1.sampleAt(7, 5), 255, "(6,4)→(7,5) 仍在幅内");
@@ -169,10 +98,9 @@ describe("Selection.offsetWrapped · 环绕映射（v0.4.6 紧 bbox）", () => {
 
 // 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
 describe("doc-offset 收尾", () => {
-  it("释放本文件的 doc tiles", async () => {
-    const { eachLeaf } = await import("../src/doc.ts");
-    for (const d of _docs) { eachLeaf(d.layers, (l) => l.pixels?.dispose?.()); d.selection?.dispose?.(); }
-    _docs.length = 0;
+  it("释放本文件的 LayerPixels", () => {
+    for (const lp of _lps) lp.dispose();
+    _lps.length = 0;
     assert(true, "disposed");
   });
 });

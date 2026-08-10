@@ -1,7 +1,6 @@
 // Gallery 展示派生测试（UI 深化 candidate 1 · gallery）。
 import { describe, it, eq, assert } from "./runner.mjs";
 import { tileFor, breadcrumb, trashTileFor } from "../src/gallery/gallery-view-model.ts";
-import { mergeTrash } from "../src/gallery/gallery-model.ts";
 
 describe("gallery-view-model · tileFor 徽章 4 态", () => {
   const local = { name: "a", updatedAt: 100, size: 10, thumb: {} };
@@ -78,23 +77,11 @@ describe("gallery-view-model · breadcrumb", () => {
   });
 });
 
-describe("gallery-view-model · trashTileFor / mergeTrash", () => {
+describe("gallery-view-model · trashTileFor", () => {
   it("来源标签", () => {
     eq(trashTileFor({ name: "a", local: {}, cloud: {} }).source, "本地+云端");
     eq(trashTileFor({ name: "a", local: {}, cloud: null }).source, "本地");
     eq(trashTileFor({ name: "a", local: null, cloud: {} }).source, "云端");
   });
-  it("mergeTrash 配对 + 剥 .ora/[N] + 新→旧", () => {
-    const local = [{ trashKey: "t1", originalName: "a", deletedAt: 200, thumb: {} }];
-    const cloud = [
-      { name: "a [2].ora", lastModifiedDateTime: "2026-01-01T00:00:00Z" },   // 撞名尾标 → 配 a
-      { name: "b.ora", lastModifiedDateTime: "2026-02-01T00:00:00Z" },
-    ];
-    const m = mergeTrash(local, cloud);
-    const a = m.find((x) => x.name === "a");
-    eq(!!a.local && !!a.cloud, true, "a 本地云端配对");
-    eq(m.some((x) => x.name === "b"), true, "b 仅云端");
-    // 新→旧：deletedAt 降序
-    for (let i = 1; i < m.length; i++) assert(m[i - 1].deletedAt >= m[i].deletedAt, "降序");
-  });
+  // （旧 mergeTrash 锚已随函数被 store 库收编 → 真测试在 test/trash-merge.test.ts）
 });

@@ -80,25 +80,24 @@ describe("crop-geometry · 模板锁比", () => {
   });
 });
 
-describe("doc.cropResampleTo · 裁剪+重采样原子 op", () => {
+describe("裁剪+重采样组合（C3：旧 PaintDoc.cropResampleTo 死壳拆除，直测 doc-ops 同款内核组合）", () => {
   it("frame=目标 px 整数 → 纯裁剪逐字节；÷2 → 面积平均", async () => {
-    const { PaintDoc, eachLeaf } = await import("../src/doc.ts");
-    const doc = new PaintDoc({ width: 64, height: 64 });
-    const L = doc.layers[0];
+    const { LayerPixels } = await import("../src/tiles/tile-layer.ts");
+    const { resampleBytes } = await import("../src/backend/algorithms/resample-bytes.ts");
+    const lp = new LayerPixels(64, 64);
     const buf = new Uint8ClampedArray(16 * 16 * 4);
     for (let i = 0; i < 256; i++) { buf[i * 4] = i % 256; buf[i * 4 + 1] = 77; buf[i * 4 + 2] = 200; buf[i * 4 + 3] = 255; }
-    L.putImageData(8, 8, { width: 16, height: 16, data: buf });
-    // 纯裁剪：frame (8,8,16,16) → 16×16
-    doc.cropResampleTo({ x: 8, y: 8, w: 16, h: 16 }, 16, 16);
-    eq(doc.width, 16); eq(doc.height, 16);
-    const back = doc.layers[0].pixels.getRegion(0, 0, 16, 16);
+    lp.putRegion(8, 8, 16, 16, buf);
+    // 纯裁剪：frame (8,8,16,16) → 16×16（doc-ops 普通裁切路径 = lp.cropped）
+    const c = lp.cropped(8, 8, 16, 16);
+    eq(c.docW, 16); eq(c.docH, 16);
+    const back = c.getRegion(0, 0, 16, 16);
     assert(buf.every((v, i) => v === back[i]), "恒等路径逐字节");
-    // ÷2：16×16 → 8×8 面积平均（纯色区仍纯色）
-    doc.cropResampleTo({ x: 0, y: 0, w: 16, h: 16 }, 8, 8);
-    eq(doc.width, 8);
-    const px = doc.layers[0].sampleAt(4, 4);
-    eq(px[1], 77, "G 通道纯色不变"); eq(px[3], 255);
-    eachLeaf(doc.layers, (l) => l.pixels?.dispose?.());
+    // ÷2：16×16 → 8×8 面积平均（doc-ops resample 路径 = getRegion + resampleBytes；纯色区仍纯色）
+    const half = resampleBytes(c.getRegion(0, 0, 16, 16), 16, 16, 8, 8, "auto");
+    eq(half[(4 * 8 + 4) * 4 + 1], 77, "G 通道纯色不变");
+    eq(half[(4 * 8 + 4) * 4 + 3], 255);
+    lp.dispose(); c.dispose();
   });
 });
 

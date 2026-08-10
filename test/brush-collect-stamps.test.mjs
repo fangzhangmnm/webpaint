@@ -4,15 +4,20 @@
 //   - 列表非空、在画布内、size/alpha 合理；shape 字段（buildup/color/椭圆 aspect/rotation）正确透传。
 //   - pixelMode → null（caller 回退 CPU 直绘路径）。
 import { describe, it, assert, eq } from "./runner.mjs";
+import { UndoStack } from "../src/workpiece/undo-stack.ts";
+import { PaintingWorkpiece } from "../src/workpiece/painting-workpiece.ts";
+import { PaintingView } from "../src/workpiece/painting-view.ts";
 const { BrushEngine } = await import("../src/brush.ts");
 const { resolveBrush } = await import("../src/resolved-brush.ts");
-const { PaintDoc } = await import("../src/doc.ts");
 
-// v0.6.14 测试卫生：doc 收集起来文件末尾统一 dispose（防 tile-pool FR 泄漏 assert 刷屏；非产品泄漏）
-const _docs = [];
+// 测试卫生：工件收集起来文件末尾统一释放（防 tile-pool FR 泄漏 assert 刷屏；非产品泄漏）。
+// C3：fixture 从旧 PaintDoc 迁 v2 基座。
+const _ctxs = [];
 function drive(settings) {
-  const doc = new PaintDoc({ width: 512, height: 512 });
-  _docs.push(doc);
+  const undo = new UndoStack({ maxQuotaBytes: 1 << 30 });
+  const wp2 = new PaintingWorkpiece({ undo, tree: { width: 512, height: 512 }, onTokenLeak: () => {} });
+  const doc = new PaintingView(wp2);
+  _ctxs.push({ undo, wp2 });
   const eng = new BrushEngine();
   eng.beginStroke(doc.layers[0], settings, 50, 50, 1.0, "brush");
   eng.extendStroke(150, 60, 0.9);
@@ -53,10 +58,12 @@ describe("brush.collectStamps · GPU stamp-list 出栈", () => {
     eq(drive(s).collectStamps(), null, "pixelMode → null");
   });
 
-  it("收尾：释放本文件的 doc tiles（防 tile-pool FR 泄漏误报刷屏）", async () => {
-    const { eachLeaf } = await import("../src/doc.ts");
-    for (const d of _docs) { eachLeaf(d.layers, (l) => l.pixels?.dispose?.()); d.selection?.dispose?.(); }
-    _docs.length = 0;
+  it("收尾：释放本文件的工件资源（防 tile-pool FR 泄漏误报刷屏）", () => {
+    for (const { undo, wp2 } of _ctxs) {
+      undo.clear();
+      wp2.load({ width: 4, height: 4, nodes: [{ name: "空", visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false, pixels: null }] });
+    }
+    _ctxs.length = 0;
     assert(true, "disposed");
   });
 });

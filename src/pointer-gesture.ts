@@ -1,11 +1,11 @@
 // 纯手势数学（K3 安全切片，见 ai-docs/reports/20260606-fresh-geological-survey.html）。
 //
-// input.js 把「指针态机」（pointers Map / 事件绑定 / role 路由 / 防误触）和「手势文法」
+// input.ts 把「指针态机」（pointers Map / 事件绑定 / role 路由 / 防误触）和「手势文法」
 // （双指变换、旋转吸附、tap 判定）糊在一起。后者是最 fiddly、最易**静默回归**、却**零测**
 // 的部分——双指 anchor-preserving 变换错一个符号，画面就跟手跑偏，桌面难复现、只能 iPad 抓。
 //
 // 这里把手势文法收成**纯函数**（给数字 → 出数字，无 DOM / 无 board / 无 canvas）→ 可单测。
-// **不**动 live 派发（那是设备态机，需真机验，留 input.js）。input 只在 _updateGesture /
+// **不**动 live 派发（那是设备态机，需真机验，留 input.ts）。input 只在 _updateGesture /
 // _endGesture / _up 的 tap 分支调这些函数，行为逐字保持。
 
 export interface Vec2 { x: number; y: number; }

@@ -23,7 +23,7 @@ import { anchorPopupToBtn } from "./anchored-popup.ts";
 import { configFromModeState, planesForMode, defaultVpsForMode } from "./perspective-frame.ts";
 import type { PerspMode } from "./perspective-frame.ts";
 import type { AppContext } from "./app-context.ts";
-import type { LayerSnap } from "./doc.ts";
+import type { ViewLeafSnap as LayerSnap } from "./workpiece/painting-view.ts";
 import type { SelectionPreviewTx } from "./workpiece/selection-component.ts";
 
 // 静态存在的工具栏元素查表 helper（initToolbar 在 DOM 就绪后调）。

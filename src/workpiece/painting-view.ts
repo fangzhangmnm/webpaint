@@ -22,8 +22,22 @@ import { LayerPixels, editRegionBytes as editPixelsBytes, disposePixelsSnapshot,
 import type { PaintingWorkpiece } from "./painting-workpiece.ts";
 import type { LayerTiles } from "./layer-tiles.ts";
 import { isGroupNode, type TreeNode, type TreeLeaf } from "./layer-tree.ts";
-import { computeMaxLayers, layerByteBudget } from "../doc.ts";
 import type { Selection } from "../selection.ts";
+
+// ---- 层数上限策略（C3：随 doc.ts 拆除迁入；board/_configureDocMemory 同款消费）----
+export const LAYER_HARD_CEIL = 64;
+
+export function layerByteBudget(): number {
+  const deviceMemoryGB = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4;
+  const budgetMB = Math.max(256, Math.min(768, deviceMemoryGB * 1024 * 0.15));
+  return budgetMB * 1e6;
+}
+
+// currentLeafCount = 当前叶层数；residentBytes = 所有叶 residentBytes() 之和；budgetBytes = 预算。
+export function computeMaxLayers(currentLeafCount: number, residentBytes: number, budgetBytes = layerByteBudget()): number {
+  if (residentBytes >= budgetBytes) return Math.max(2, currentLeafCount);   // 已达字节预算：冻结
+  return LAYER_HARD_CEIL;                                                    // 预算内：放到硬顶
+}
 
 // 旧 LayerSnap 同形（undo 包/引擎 pre-snap；用完 disposeViewSnap）。
 export interface ViewLeafSnap { pixels: PixelsSnapshot }

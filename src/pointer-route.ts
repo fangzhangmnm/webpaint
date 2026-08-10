@@ -1,7 +1,7 @@
-// 指针路由决策（K3：把「这个 pointer 是什么意思」从 input.js 的 live 事件流里劈出来）。
+// 指针路由决策（K3：把「这个 pointer 是什么意思」从 input.ts 的 live 事件流里劈出来）。
 // 纯函数（无 DOM / 无 this / 无副作用）：给输入位 → role。过去这段决策树内联在 _down，
 // 且 effectiveTool→role 的映射在 mouse/pen/touch 三处**各抄一份**。抽出 = 决策可单测、改一处。
-// 行为矩阵沿用 ScratchPad（见 input.js 顶部注释）；live 事件流 / pointers Map / 手势仍在 input.js。
+// 行为矩阵沿用 ScratchPad（见 input.ts 顶部注释）；live 事件流 / pointers Map / 手势仍在 input.ts。
 
 // 当前工具 → 有效工具：transform 抢画布路由走 gizmo（机械上 role=lasso）；alt+brush/fill 临时取色。
 export function effectiveTool(tool: string, altDown: boolean): string {

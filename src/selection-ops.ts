@@ -1,14 +1,13 @@
 // 职责（单一）：选区 → 剪贴板 / 复制为浮层 / 提取选区像素。
 //   - _extractSelectionRegionBytes：当前层 ∩ 选区 → 裁好形状的 straight RGBA 字节（纯函数）。
 //   - selectionToNewLayer({move})：选区像素抽成新层（复制 / 移动），含 undo 记账。导出供 toolbar 等模块用。
-//   - _makeFullLayerSelection：给整层做全白 mask 当 selection（导入图片后自动全选用）。导出供 app.js import 流程用。
 //   - v156 剪贴板 / 复制为浮层 快捷键：wp:copy / wp:paste / wp:duplicateFloat 三个 window 事件的逻辑。
-//     入口在 input.js KEYBOARD_SHORTCUTS（hub）；run 派发 window 事件，逻辑搬到这（要 doc/import/setColor）。
+//     入口在 input.ts KEYBOARD_SHORTCUTS（hub）；run 派发 window 事件，逻辑搬到这（要 doc/import/setColor）。
 //     Ctrl+T 直接复用 lassoTransformBtn.click()，不在此。Ctrl+C/V 仅走系统剪贴板，无内部 buffer / token。
 import { readImageFromClipboard, writeImageBlobToClipboard } from "./session.ts";
 import { encodePngFromBytes } from "./png-codec.ts";
 import { Selection } from "./selection.ts";
-import { disposeLayerSnap, type LayerSnap } from "./doc.ts";
+import { disposeViewSnap as disposeLayerSnap, type ViewLeafSnap as LayerSnap } from "./workpiece/painting-view.ts";
 import { countViewLeaves } from "./workpiece/painting-view.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { reportError } from "./error-badge.ts";
@@ -19,9 +18,8 @@ import type { AppContext } from "./app-context.ts";
 // 错误信息提取（catch 子句 e 在 strict 下是 unknown）。
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
 
-// doc 活层 / Selection 的最小结构（doc/selection.js 未类型化 → 只描述本文件用到的几何字段）。
+// doc 活层的最小结构（只描述本文件用到的读面；像素全走字节口）。
 interface LayerLike { bboxX: number; bboxY: number; bboxW: number; bboxH: number; getImageData(x: number, y: number, w: number, h: number): ImageData; }
-// （v0.4.6：Selection.maskCanvas 死 → 本文件 Canvas2D 合成走 materializeMaskCanvas() 物化缓存）
 interface TransientOpts { apply?: () => void; abort?: () => void; }
 
 // app 单例 / 跨模块函数（initSelectionOps 注入）

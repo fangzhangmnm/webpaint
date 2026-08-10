@@ -20,9 +20,28 @@
 //   再按 group.opacity/mode（+clip）整体混；否则 pass-through（子层直接落 ctx，能与组下方层混）。
 
 import { makeBitmap } from "../../src/bitmap.ts";
-import type { Layer, LayerGroup } from "../../src/doc.ts";
 
-// 合成树节点 = 叶(Layer) | 组(LayerGroup)（doc.ts 的 Node 未 export，本地等价重建）。
+// 合成树节点结构类型（C3：doc.ts Layer/LayerGroup 类拆除后本地重建——本模块只吃鸭形，
+// 调用方喂 harness 自建的 canvas 叶 / 组对象）。
+interface Layer {
+  isGroup: false;
+  id: number;
+  visible: boolean;
+  opacity: number;
+  mode: string;
+  clippingMask: boolean;
+  canvas: CanvasImageSource;
+  bboxX: number; bboxY: number; bboxW: number; bboxH: number;
+}
+interface LayerGroup {
+  isGroup: true;
+  id: number;
+  visible: boolean;
+  opacity: number;
+  mode: string;
+  clippingMask: boolean;
+  children: CompositeNode[];
+}
 type CompositeNode = Layer | LayerGroup;
 // makeBitmap / canvas 离屏位图。
 type Bitmap = OffscreenCanvas | HTMLCanvasElement;

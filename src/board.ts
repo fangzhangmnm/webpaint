@@ -13,7 +13,7 @@ import type { Stamp, StrokeShape } from "./gl/gl-stamp.ts";
 type StampCollect = { stamps: Stamp[]; shape: StrokeShape; layer: ViewLeaf; mode: string; opacity: number; blendMode: string; bx: number; by: number; bw: number; bh: number } | null;
 import type { GLDoc, GLLeaf } from "./gl/gl-board.ts";
 import type { PaintingView, ViewLeaf } from "./workpiece/painting-view.ts";
-import { layerByteBudget } from "./doc.ts";
+import { layerByteBudget } from "./workpiece/painting-view.ts";
 import { eachViewLeaf } from "./workpiece/painting-view.ts";
 
 // ---- 本文件用到的结构类型（局部定义，只覆盖 board 实际访问的成员）----

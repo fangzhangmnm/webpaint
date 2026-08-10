@@ -43,7 +43,6 @@ import "./store-absent.test.mjs";           // v0.8.7 B 骑士：null-store/内�
 import "./sw-strategy.test.mjs";
 import "./liquify-bbox.test.mjs";
 import "./liquify-docspace-mask.test.mjs";
-import "./freeze-encode.test.mjs";
 import "./resample-bytes.test.mjs"; // 字节重采样：面积平均严格box/alpha加权/限幅
 import "./png-codec.test.mjs"; // PNG 接缝（UPNG 内脏）：低α无损roundtrip/pHYs
 import "./password-verifier.test.mjs";
@@ -116,7 +115,6 @@ import "./tile-pixels.test.mjs";
 import "./blend-glsl.test.mjs";             // WebGL2+tiling Stage 2：12 blend GLSL 生成（像素 parity 在 npm run smoke）
 import "./gl-compose-plan.test.mjs";        // WebGL2+tiling Stage 2：clip 基底解析 + 组隔离判定（与 layer-composite 对齐）
 import "./gl-doc-bridge.test.mjs";       // WebGL2+tiling 接 board：doc 树→CompNode 翻译 + safeMode
-import "./layer-tree.test.mjs";             // batch 2：图层树模型（嵌套树 op + activeId + 组 op + snapshotAll 往返）
 import "./ora-tree.test.mjs";               // batch 2 step3：ORA 嵌套组序列化（buildStackXml↔parseStackXml + id + active 往返）
 // app-boot 必须是套件里**第一个**触发 Vue 求值的测试：Vue（vue.esm-browser）在 module-eval 时把
 // document 缓存成 module 级 const（createText 等用它）。boot-smoke 装了 DOM shim 后才 import app.js，

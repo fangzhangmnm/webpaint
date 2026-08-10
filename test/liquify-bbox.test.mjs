@@ -6,13 +6,25 @@
 // 修：footprint 夹到 **doc 边界**（非 layer.bbox），dispField 用 _growDispField 跟 footprint 长（tile
 //   putImageData 按需分配 tile，写哪都行）。
 // node dom-shim 的 canvas 是 no-op（无真像素）→ 不能做像素断言；改测「工作区是否长到 footprint」这一根因。
+// C3：fixture 从旧 PaintDoc 迁 v2 基座（PaintingWorkpiece + PaintingView；layer = ViewLeaf）。
 import { describe, it, assert, eq } from "./runner.mjs";
-const { PaintDoc } = await import("../src/doc.ts");
+import { UndoStack } from "../src/workpiece/undo-stack.ts";
+import { PaintingWorkpiece } from "../src/workpiece/painting-workpiece.ts";
+import { PaintingView } from "../src/workpiece/painting-view.ts";
 const { LiquifyEngine } = await import("../src/plugins/liquify-engine.ts");
+
+const _ctxs = [];
+function mkDoc(width, height) {
+  const undo = new UndoStack({ maxQuotaBytes: 1 << 30 });
+  const wp2 = new PaintingWorkpiece({ undo, tree: { width, height }, onTokenLeak: () => {} });
+  const doc = new PaintingView(wp2);
+  _ctxs.push({ undo, wp2 });
+  return doc;
+}
 
 describe("liquify · 写区不再被 content bbox 截断 (tile-era 修)", () => {
   it("空层 push：dispField 长到 footprint（旧码 content bbox=0 会早退、什么都不长）", () => {
-    const doc = new PaintDoc({ width: 64, height: 64 });
+    const doc = mkDoc(64, 64);
     const eng = new LiquifyEngine();
     // size=R(液化 R=size)。footprint = cx±30。空层 content bbox=0 → 旧码在此早退。
     eng.beginStroke(doc.layers[0], { size: 30, strength: 1, mode: "push", bleed: "edge" }, 10, 10, null);
@@ -47,5 +59,17 @@ describe("liquify · 写区不再被 content bbox 截断 (tile-era 修)", () => 
     const before = eng._stroke.dispField;
     eng._growDispField(5, 5, 10, 10);            // 完全在内 → no-op
     assert(eng._stroke.dispField === before, "包含矩形不应重建 dispField");
+  });
+});
+
+// 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏）
+describe("liquify-bbox 收尾", () => {
+  it("清栈并释放本文件的工件资源", () => {
+    for (const { undo, wp2 } of _ctxs) {
+      undo.clear();
+      wp2.load({ width: 4, height: 4, nodes: [{ name: "空", visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false, pixels: null }] });
+    }
+    _ctxs.length = 0;
+    assert(true, "disposed");
   });
 });

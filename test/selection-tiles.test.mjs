@@ -267,14 +267,21 @@ describe("marching-ants · outline golden + 缓存", () => {
 // v0.7.38 · fromLayerAlpha（「从当前图层建选区」工厂）：α≥128 二值化 + bbox 直读 + 空层 null
 describe("Selection · fromLayerAlpha（v0.7.38 从图层 alpha 建选区）", () => {
   it("半透明边缘二值化（α≥128 入选）、位置随 layer bbox、恒二值不变量", async () => {
-    const { PaintDoc, flattenLeaves } = await import("../src/doc.ts");
-    const doc = new PaintDoc({ width: 512, height: 512 });
-    const L = doc.activeLayer;
+    // C3：fixture 从旧 PaintDoc 迁 LayerPixels 直构（fromLayerAlpha 只吃 bbox+getImageData 鸭形）。
+    const { LayerPixels } = await import("../src/tiles/tile-layer.ts");
+    const leafOf = (lp) => {
+      const b = lp.contentBounds(true);
+      return {
+        bboxX: b?.x ?? 0, bboxY: b?.y ?? 0, bboxW: b?.w ?? 0, bboxH: b?.h ?? 0,
+        getImageData: (x, y, w, h) => new ImageData(lp.getRegion(x, y, w, h), w, h),
+      };
+    };
+    const lp = new LayerPixels(512, 512);
     // (100,100) 起 3 像素排：α=255 / α=200 / α=100（后者应被阈出）
     const buf = new Uint8ClampedArray(3 * 1 * 4);
     buf.set([9, 9, 9, 255,  9, 9, 9, 200,  9, 9, 9, 100]);
-    L.pixels.putRegion(100, 100, 3, 1, buf);
-    const sel = Selection.fromLayerAlpha(L);
+    lp.putRegion(100, 100, 3, 1, buf);
+    const sel = Selection.fromLayerAlpha(leafOf(lp));
     assert(sel, "非空层出选区");
     eq(sel.sampleAt(100, 100), 255, "α255 → 入选（值恒 255，二值不变量）");
     eq(sel.sampleAt(101, 100), 255, "α200 ≥128 → 入选");
@@ -282,8 +289,8 @@ describe("Selection · fromLayerAlpha（v0.7.38 从图层 alpha 建选区）", (
     eq(sel.sampleAt(99, 100), 0, "bbox 外为空");
     sel.dispose();
     // 空层 → null（= 没选区语义）
-    const doc2 = new PaintDoc({ width: 64, height: 64 });
-    eq(Selection.fromLayerAlpha(doc2.activeLayer), null, "空层 → null");
-    for (const d of [doc, doc2]) { for (const leaf of flattenLeaves(d.layers)) leaf.pixels?.dispose?.(); }
+    const lp2 = new LayerPixels(64, 64);
+    eq(Selection.fromLayerAlpha(leafOf(lp2)), null, "空层 → null");
+    lp.dispose(); lp2.dispose();
   });
 });

@@ -15,13 +15,17 @@ import { docTreeToComp, compositeTree } from "./reference-gl-compositor.ts";
 import { GlRoom } from "../../src/gl/gl-room.ts";
 import { RenderTree } from "../../src/gl/render-tree.ts";
 import { RasterService } from "../../src/gl/raster-service.ts";
-import { LayerPixels, materialize, editRegion, replaceFromCanvas } from "../../src/tiles/tile-layer.ts";
+import { LayerPixels } from "../../src/tiles/tile-layer.ts";
+import { materialize, editRegion, replaceFromCanvas } from "./canvas2d-facade.ts";
 import { GLStampRasterizer } from "../../src/gl/gl-stamp.ts";
 import type { Stamp } from "../../src/gl/gl-stamp.ts";
 import { compositeLayers } from "./reference-2d.ts";
 import { BrushEngine } from "../../src/brush.ts";
 import { resolveBrush } from "../../src/resolved-brush.ts";
-import { PaintDoc } from "../../src/doc.ts";
+import { PaintingWorkpiece } from "../../src/workpiece/painting-workpiece.ts";
+import { PaintingView } from "../../src/workpiece/painting-view.ts";
+import { History } from "../../src/workpiece/history.ts";
+import { LayersFace } from "../../src/layers-face.ts";
 import { setDocCompositorBytes } from "../../src/doc-render.ts";
 import { quadWarp } from "../../src/floating-transform.ts";
 import { prefilterToSplinePlane, sampleSplinePremult } from "../../src/backend/algorithms/bspline.ts";
@@ -1165,29 +1169,45 @@ function warpParity(glctx: BrowserGl2Port, add: Add): void {
 // ---- E5d) merge-down E2E（v0.6.39 GL 字节合成面）：合并前后整图 composite 逐位不变 ----
 //   覆盖：multiply 混合 + opacity + 剪裁 dst-in——merge-down 现在走 renderNodesToBytes（同一 GL 引擎），
 //   「合并不改观感」是它的定义性质。
+// v2 工件 rig（C3：PaintDoc 拆除后的 fixture；用完 disposeWp2 归还 tile）。
+function mkWp2(width: number, height: number) {
+  const h = new History({ maxQuotaBytes: 1 << 30, onUnrecoverable: () => {} });
+  const wp2 = new PaintingWorkpiece({ undo: h.stack, tree: { width, height } });
+  const view = new PaintingView(wp2);
+  h.attach(wp2);
+  const face = new LayersFace({ history: h, tree: wp2.layerTree, tiles: wp2.layerTiles, port: view, status: () => {} });
+  return { h, wp2, view, face };
+}
+function disposeWp2(rig: { h: History; wp2: PaintingWorkpiece }): void {
+  rig.h.stack.clear();
+  rig.wp2.load({ width: 4, height: 4, nodes: [{ name: "空", visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false, pixels: null }] });
+}
+
 function mergeDownParity(glctx: BrowserGl2Port, add: Add): void {
   const N = 128;
   const { raster } = makeStage(glctx, 512);
   setDocCompositorBytes((nodes, w, h) => raster.compositeToBytes(nodes as never, w, h));
-  const doc = new PaintDoc({ width: N, height: N });
-  const base = doc.layers[0];
+  const rig = mkWp2(N, N);
+  const base = rig.view.layers[0];
   const fill = (L: { putImageData: (x: number, y: number, img: unknown) => void }, fn: (x: number, y: number) => number[]) => {
     const d = new Uint8ClampedArray(N * N * 4);
     for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) d.set(fn(x, y), (y * N + x) * 4);
     L.putImageData(0, 0, { width: N, height: N, data: d });
   };
   fill(base as never, (x, y) => [200, 150, (x * 3) % 256, x < N / 2 ? 255 : ((y * 2) % 200)]);   // 左实右渐变 alpha
-  const top = doc.addLayer("上");
+  const a = rig.face.addLayer("上");
+  const top = (a as { layer: { id: number } }).layer;
   fill(top as never, (x, y) => [(y * 5) % 256, 80, 220, 60 + ((x + y) % 180)]);
-  top.mode = "multiply"; top.opacity = 0.7; top.clippingMask = true;
-  doc.activeIndex = doc.layers.indexOf(top);
-  const before = raster.compositeToBytes(doc.layers as never, N, N).data;
-  const r = doc.mergeDownLayer(top as never) as { ok: boolean; reason?: string };
-  add("mergedown:GL 字节面合并成功", r.ok, r.ok ? "" : String(r.reason));
-  const after = raster.compositeToBytes(doc.layers as never, N, N).data;
+  rig.face.setLayerProp(top.id, "mode", "multiply");
+  rig.face.setLayerProp(top.id, "opacity", 0.7);
+  rig.face.setLayerProp(top.id, "clippingMask", true);
+  const before = raster.compositeToBytes(rig.view.layers as never, N, N).data;
+  const r = rig.face.mergeDown(top.id) as { ok: boolean; msg?: string };
+  add("mergedown:GL 字节面合并成功", r.ok, r.ok ? "" : String(r.msg));
+  const after = raster.compositeToBytes(rig.view.layers as never, N, N).data;
   const { md, at } = maxPremulDiff(before, new Uint8Array(after.buffer, after.byteOffset, after.byteLength), N);
   add("mergedown:multiply+opacity+clip 合并前后 composite 不变", md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
-  for (const l of doc.layers) (l as { pixels?: { dispose?: () => void } }).pixels?.dispose?.();
+  disposeWp2(rig);
 }
 
 function warpClipParity(glctx: BrowserGl2Port, add: Add): void {
@@ -1240,13 +1260,13 @@ function warpClipParity(glctx: BrowserGl2Port, add: Add): void {
 //   v351：旧 CPU overlay/buffer 路径已归档（→ ARCHIVE），参照改由解析公式重算同一 stamp 列表（doc 坐标偏移），
 //   不再读 getLiveOverlay。wash + buildup 两侧现都解析 → 都是真 gate（旧 buildup 缓存重采样发散已随 CPU 路径消失）。
 function brushPipeDiff(glctx: BrowserGl2Port, ras: GLStampRasterizer, mode: string): { md: number; bw: number; ai: number } | null {
-  const doc = new PaintDoc({ width: 512, height: 512 });
+  const rig = mkWp2(512, 512);
   const eng = new BrushEngine();
   const s = resolveBrush({ size: 36, color: "#cc4488", preset: { shape: { kind: "round", hardness: 0.35 }, compositeMode: mode, spacing: 0.08 } });
-  eng.beginStroke(doc.layers[0], s, 80, 90, 1.0, "brush");
+  eng.beginStroke(rig.view.layers[0], s, 80, 90, 1.0, "brush");
   eng.extendStroke(160, 110, 0.95); eng.extendStroke(240, 180, 0.8); eng.extendStroke(320, 150, 0.6);
   const cs = eng.collectStamps();
-  if (!cs || !cs.stamps.length) return null;
+  if (!cs || !cs.stamps.length) { disposeWp2(rig); return null; }
   const bw = cs.bw, bh = cs.bh, buildup = cs.shape.buildup;
   const color = cs.shape.color, hardness = cs.shape.hardness;
   const aspect = cs.shape.aspect ?? 1, rotation = cs.shape.rotation ?? 0;
@@ -1275,6 +1295,7 @@ function brushPipeDiff(glctx: BrowserGl2Port, ras: GLStampRasterizer, mode: stri
   glctx.returnFBO(fbo);
   let md = 0, ai = 0;
   for (let i = 0; i < bw * bh * 4; i++) { const d = Math.abs(cpu[i] - gpu[i]); if (d > md) { md = d; ai = i - (i % 4); } }
+  disposeWp2(rig);
   return { md, bw, ai };
 }
 function brushPipelineParity(glctx: BrowserGl2Port, add: Add): void {

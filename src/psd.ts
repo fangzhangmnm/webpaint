@@ -27,7 +27,6 @@ import type { PaintingView } from "./workpiece/painting-view.ts";
 
 // doc.layers / compositeLayers 的节点联合（ViewLeaf | LayerGroup）；这两个类型在 doc.ts 未导出，
 // compositeLayers 接受 doc.layers 原样传入即可，这里给本地用到的画布上下文类型。
-type Ctx = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
 
 // 单通道 PackBits 编码结果
 interface EncodedChannel {
@@ -379,9 +378,6 @@ function writeLayerChannelData(w: BinaryWriter, layer: ViewLeaf, encChannels: En
 
 // ---- Merged image：所有可见 layer 合成到 docW×docH 平面后写入 ----
 function writeMergedImage(w: BinaryWriter, doc: PaintingView, docW: number, docH: number) {
-  const c = (typeof OffscreenCanvas !== "undefined")
-    ? new OffscreenCanvas(docW, docH)
-    : (() => { const x = document.createElement("canvas"); x.width = docW; x.height = docH; return x; })();
   // S9：合成走 GL（doc-render，与 display 同源；respect clip + mode + 组隔离）。
   //   v0.6.39 去 canvas 化：readPixels 字节直接分通道（旧 drawImage+getImageData 又一轮 premult 往返）。
   //   GL 不可用 → merged 透明占位（层数据仍完整；导出场景 GL 必在——无 GL app 无画布）。

@@ -69,10 +69,9 @@ export async function invalidateCachedThumb(name: string): Promise<void> {
  *
  * @param {string} name       库的裸 session 名（item.name，无后缀 = store.file 的 key）
  * @param {string} token      新鲜度戳（cloud.lastModifiedDateTime 优先，退 size）；变 = 重拉
- * @param {number} fileSize   文件总字节（cloud.size）——供 ZIP fallback 判偏移；缺省 0 = 未知
  * @returns {Promise<{ blob: Blob, fromCache: boolean }>}
  */
-export async function getOrFetchCloudThumb(name: string, token: string, fileSize = 0): Promise<{ blob: Blob; fromCache: boolean }> {
+export async function getOrFetchCloudThumb(name: string, token: string): Promise<{ blob: Blob; fromCache: boolean }> {
   if (!config.skipCache) {
     const cached = await readCachedThumb(name);
     if (cached && cached.token === token) {
@@ -82,7 +81,6 @@ export async function getOrFetchCloudThumb(name: string, token: string, fileSize
   }
   stats.misses++;
   try {
-    void fileSize;   // 遗留参数：尾窗口偏移判定已下沉进库 getPeek（库自算 size）；签名保留不破坏 gallery 调用
     const blob = await fetchOraThumbnail(name);
     if (!config.skipCache) writeCachedThumb(name, token, blob);
     return { blob, fromCache: false };

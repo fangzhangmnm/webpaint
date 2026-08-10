@@ -6,16 +6,25 @@
 //   - 恒吃 raw + 约束吸附在引擎内（45° snap 下 stamps 落在吸附轴上）。
 //   - cancel 无痕（buffered 清态；pixelMode 像素还原）；pixelMode 每帧 restore（中间几何不残留）。
 import { describe, it, assert, eq } from "./runner.mjs";
+import { UndoStack } from "../src/workpiece/undo-stack.ts";
+import { PaintingWorkpiece } from "../src/workpiece/painting-workpiece.ts";
+import { PaintingView } from "../src/workpiece/painting-view.ts";
 const { ShapeBrushEngine } = await import("../src/shape-brush.ts");
 const { resolveBrush } = await import("../src/resolved-brush.ts");
-const { PaintDoc } = await import("../src/doc.ts");
 const { bresenhamEllipseRect } = await import("../src/shape-geometry.ts");
 const { BrushEngine } = await import("../src/brush.ts");
 
-// v0.6.14 测试卫生：本文件建的 doc 收集起来，文件末尾统一 dispose——否则 tile 句柄随 doc 被 GC，
+// v0.6.14 测试卫生：本文件建的工件收集起来，文件末尾统一释放——否则 tile 句柄随 doc 被 GC，
 //   触发池的 FR 泄漏 assert（[tile-pool] GC'd without release），糊满 npm test 尾部。非产品泄漏。
-const _docs = [];
-const mkDoc = () => { const d = new PaintDoc({ width: 512, height: 512 }); _docs.push(d); return d; };
+//   C3：fixture 从旧 PaintDoc 迁 v2 基座（PaintingWorkpiece + PaintingView）。
+const _ctxs = [];
+const mkDoc = () => {
+  const undo = new UndoStack({ maxQuotaBytes: 1 << 30 });
+  const wp2 = new PaintingWorkpiece({ undo, tree: { width: 512, height: 512 }, onTokenLeak: () => {} });
+  const d = new PaintingView(wp2);
+  _ctxs.push({ undo, wp2 });
+  return d;
+};
 
 function mkEngine(sub, constrain = false, rot = 0) {
   const eng = new ShapeBrushEngine();
@@ -619,16 +628,15 @@ describe("shape-brush · 正方/正圆 respect 透视（UI v2.4 接线烟测）"
   });
 });
 
-// 收尾（v0.6.14 测试卫生）：统一释放本文件建的所有 doc 的 tile 句柄。
+// 收尾（v0.6.14 测试卫生）：统一释放本文件建的所有工件的 tile 句柄。
 //   泄漏 assert 是池的正当兜底（所有权纪律在 src 是完整的），别删 assert，别 clearAll。
 describe("shape-brush 收尾", () => {
-  it("释放本文件的 doc tiles（防 tile-pool FR 泄漏误报刷屏）", async () => {
-    const { eachLeaf } = await import("../src/doc.ts");
-    for (const d of _docs) {
-      eachLeaf(d.layers, (l) => l.pixels?.dispose?.());
-      d.selection?.dispose?.();
+  it("释放本文件的 doc tiles（防 tile-pool FR 泄漏误报刷屏）", () => {
+    for (const { undo, wp2 } of _ctxs) {
+      undo.clear();
+      wp2.load({ width: 4, height: 4, nodes: [{ name: "空", visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false, pixels: null }] });
     }
-    _docs.length = 0;
+    _ctxs.length = 0;
     assert(true, "disposed");
   });
 });

@@ -1,8 +1,8 @@
 // brush-types.ts —— brush / 笔架数据形状的单一 TS 描述。
 //
-// 运行时真源仍是 brushes.js（.js，checkJs:false）。这里**诚实描述**消费方（brush-rack / brush-io）
+// 运行时真源是 brushes.ts。这里**诚实描述**消费方（brush-rack / brush-io）
 // 实际读写到的字段，挂 `[k]: unknown` index 兜底动态/未列字段——非穷举、非新契约，只是把抄在多处的
-// 隐式 any 收成一处可复用的形状。改 brushes.js 的字段时同步收紧此处（as-of v305 / 2026-06-19）。
+// 隐式 any 收成一处可复用的形状。改 brushes.ts 的字段时同步收紧此处（as-of v305 / 2026-06-19）。
 
 export interface BrushSize { base: number; max?: number; }
 // kind: "round" | "ellipse"。**没有 texture** —— 纹理笔尚未实现，v415 把那条死线整条清了
