@@ -52,17 +52,26 @@ export class BrowserTileArena implements Gl2TileArena {
   private _gl: WebGL2RenderingContext;
   private _tex: WebGLTexture | null = null;
   private _capacity: number;
+  private _disposed = false;
+  private _onDisposed: (() => void) | null;
 
-  constructor(gl: WebGL2RenderingContext, tileSize: number, initialSlices: number) {
+  constructor(gl: WebGL2RenderingContext, tileSize: number, initialSlices: number, onDisposed?: () => void) {
     this._gl = gl;
     this.tileSize = tileSize;
     this._capacity = initialSlices;
+    this._onDisposed = onDisposed ?? null;
     this._alloc();
   }
 
   get capacity(): number { return this._capacity; }
   // 壳侧/smoke harness 读回用（off-contract：backend 只见 Gl2TileArena）。
   get texture(): WebGLTexture { return this._tex!; }
+
+  // 退租后动词 = 响亮 throw（契约：用死租约是结构 bug——真 GL 里 bind null 纹理会静默 no-op，
+  //   比 throw 危险得多，所以门口挡）。
+  private _aliveGuard(): void {
+    if (this._disposed) throw new Error("ARENA_DISPOSED（退租后使用——owner 已 dispose 本 arena）");
+  }
 
   private _alloc(): void {
     const gl = this._gl;
@@ -81,6 +90,7 @@ export class BrowserTileArena implements Gl2TileArena {
 
   // 先删旧 → flush（催 GPU 真回收）→ 再建（防显存双峰，spec:175）。context-loss 后旧句柄已死，删除无害。
   recreate(newCapacity: number): void {
+    this._aliveGuard();
     const gl = this._gl;
     if (this._tex) { try { gl.deleteTexture(this._tex); } catch { /* context 已丢，无害 */ } }
     gl.flush();
@@ -89,6 +99,7 @@ export class BrowserTileArena implements Gl2TileArena {
   }
 
   uploadSlice(slice: number, pixels: Uint8Array): void {
+    this._aliveGuard();
     const gl = this._gl;
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this._tex);
     gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, slice, this.tileSize, this.tileSize, 1,
@@ -97,6 +108,7 @@ export class BrowserTileArena implements Gl2TileArena {
   }
 
   copySlice(from: PooledFBO, slice: number, srcX: number, srcY: number, w: number, h: number): void {
+    this._aliveGuard();
     const gl = this._gl;
     gl.bindFramebuffer(gl.FRAMEBUFFER, (from as BrowserFBO).fbo);
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this._tex);
@@ -106,7 +118,11 @@ export class BrowserTileArena implements Gl2TileArena {
   }
 
   dispose(): void {
+    if (this._disposed) return;   // 幂等
+    this._disposed = true;
     if (this._tex) { this._gl.deleteTexture(this._tex); this._tex = null; }
+    this._onDisposed?.();
+    this._onDisposed = null;
   }
 }
 
@@ -560,8 +576,19 @@ export class BrowserGl2Port implements Gl2Port {
   }
 
   // ---- tile arena ----
+  private _arenas = new Set<BrowserTileArena>();
+
   createTileArena(tileSize: number, initialSlices: number): Gl2TileArena {
-    return new BrowserTileArena(this.gl, tileSize, initialSlices);
+    const a: BrowserTileArena = new BrowserTileArena(this.gl, tileSize, initialSlices, () => this._arenas.delete(a));
+    this._arenas.add(a);
+    return a;
+  }
+
+  // 租户记账：活 arena 数 + 承诺显存（capacity 现值求和——recreate/grow 自动跟上）。
+  get arenaStats(): { count: number; bytes: number } {
+    let bytes = 0;
+    for (const a of this._arenas) bytes += a.capacity * a.tileSize * a.tileSize * 4;
+    return { count: this._arenas.size, bytes };
   }
 
   // context restored 后：旧 GL 对象句柄全失效 → 重编所有 program、清空 FBO 池（按需重建）、

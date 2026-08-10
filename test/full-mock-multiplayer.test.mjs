@@ -89,12 +89,19 @@ describe("full · mock multiplayer（共享 SoftGl2Port 双租户）", () => {
     assert(bytesEq(layerBytes(A, W, H), soloA), "A 字节 = solo 参考逐位（共享 Port 不串台）");
     assert(bytesEq(layerBytes(B, W, H), soloB), "B 字节 = solo 参考逐位");
 
-    // ── ③ 退租：dispose A，B 继续画+导出 ──
+    // ── ③ 退租：dispose A，B 继续画+导出；⑥ Port 记账随退租递减 ──
+    eq(port.arenaStats.count, 2, "两租户各持一 arena（懒建已发生）");
+    const bytesBoth = port.arenaStats.bytes;
+    assert(bytesBoth > 0, "记账字节 > 0");
     A.dispose();
+    eq(port.arenaStats.count, 1, "A 退租 → Port 记账 -1（真 GPU 语义 = 显存已 free）");
+    assert(port.arenaStats.bytes < bytesBoth, "A 的承诺字节已退");
     const b3 = B.strokeBegin(1, BRUSH_B);
     B.strokeAppend(b3, pts(4, 10, 10, 10, 10));
     assert(B.strokeEnd(b3), "A 退租后 B 照画");
     eq(B.canUndo(), true);
     B.dispose();
+    eq(port.arenaStats.count, 0, "全员退租 → 记账归零");
+    eq(port.arenaStats.bytes, 0);
   });
 });

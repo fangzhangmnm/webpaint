@@ -94,6 +94,12 @@ export interface Gl2Port {
   uniform 类型由实现体反射、mat3 row-major、sampler 单元+占位归实现体、blend 封闭三态。
   quadVAO 从接口删除（顶点域钉死单位 quad，不开放任意几何）。arena 的**租户配额记账**仍等
   第二真租户（C8 mock multiplayer），接口形状已定（recreate/uploadSlice/copySlice 显式源 FBO）。
+- **C8 第七棒落地回写（v0.8.46）**：arena 租户记账收口——`Gl2Port.arenaStats`（活 arena 数 +
+  Σ承诺字节，per-Port 观测口）；`Gl2TileArena.dispose` = 退租（幂等；**退租后动词响亮 throw
+  `ARENA_DISPOSED`**）。配额**裁决**不在 Port（各租户 GpuTilePool 已按自家预算 reserve 自限），
+  Port 只记账——HUD/tab 管理器读它。退租链：`WebPaintBackend.dispose → GlRoom.dispose`（arena +
+  IndexTexture + pseudo 纹理逐个还 Port；**共享 FBO 池不清**——跨租户公共钱包）。SoftGl2 弃引用
+  交 GC、真 GPU 立即 deleteTexture，同一契约语义。
 
 ## 3. WebPaintBackend 契约
 

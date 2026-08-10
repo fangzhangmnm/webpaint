@@ -5,9 +5,12 @@ export declare class BrowserTileArena implements Gl2TileArena {
     private _gl;
     private _tex;
     private _capacity;
-    constructor(gl: WebGL2RenderingContext, tileSize: number, initialSlices: number);
+    private _disposed;
+    private _onDisposed;
+    constructor(gl: WebGL2RenderingContext, tileSize: number, initialSlices: number, onDisposed?: () => void);
     get capacity(): number;
     get texture(): WebGLTexture;
+    private _aliveGuard;
     private _alloc;
     recreate(newCapacity: number): void;
     uploadSlice(slice: number, pixels: Uint8Array): void;
@@ -62,6 +65,11 @@ export declare class BrowserGl2Port implements Gl2Port {
     createTexture(): Gl2Texture;
     uploadTexture(tex: Gl2Texture, format: TexUploadFormat, w: number, h: number, data: ArrayBufferView): void;
     deleteTexture(tex: Gl2Texture): void;
+    private _arenas;
     createTileArena(tileSize: number, initialSlices: number): Gl2TileArena;
+    get arenaStats(): {
+        count: number;
+        bytes: number;
+    };
     private _rebuildAfterRestore;
 }

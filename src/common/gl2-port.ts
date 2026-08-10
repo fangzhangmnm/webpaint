@@ -73,9 +73,9 @@ export interface Gl2DrawSpec {
   textures?: Record<string, Gl2TexSource | { src: Gl2TexSource; filter: "nearest" | "linear" }>;
 }
 
-// GPU tile arena（纹理仓，TEXTURE_2D_ARRAY 等价物）——**归 Port 所有**（多 tab 公共资源；
-//   租户配额记账等第二真租户，C8 mock multiplayer 起）。记账层 GpuTilePool（backend 侧纯 JS）
-//   持本句柄当 backend；合成 pass 把它当 sampler2DArray 采样源。
+// GPU tile arena（纹理仓，TEXTURE_2D_ARRAY 等价物）——**归 Port 所有**（多 tab/多 backend 公共
+//   资源；每租户（GlRoom）持一个 arena）。记账层 GpuTilePool（backend 侧纯 JS）持本句柄当
+//   backend；合成 pass 把它当 sampler2DArray 采样源。
 export interface Gl2TileArena {
   readonly kind: "arena";
   readonly tileSize: number;                          // 方 tile 边长（= TILE_SIZE）
@@ -87,6 +87,9 @@ export interface Gl2TileArena {
   //   入池；doc 边缘 tile 不足额 → 部分拷贝，slice 余下 texel 是旧值但永不被采样——
   //   sampleTiled 的 docPos < docSize 保证 local uv 不越进 padding）。
   copySlice(from: PooledFBO, slice: number, srcX: number, srcY: number, w: number, h: number): void;
+  // 退租（C8 ⑥）：owner（GlRoom/backend dispose）显式释放——真 GPU 立即 free 显存、SoftGl2 弃
+  //   引用交 GC；Port 记账同步减（arenaStats）。**退租后任何动词 = 响亮 throw（ARENA_DISPOSED）**
+  //   ——用死租约是结构 bug，不静默吞。幂等（二次 dispose 无害）。
   dispose(): void;
 }
 
@@ -133,4 +136,8 @@ export interface Gl2Port {
 
   // ---- tile arena ----
   createTileArena(tileSize: number, initialSlices: number): Gl2TileArena;
+  // 租户记账（C8 ⑥）：本 Port 名下**活着的** arena 数 + 承诺显存字节（Σ capacity·tileSize²·4，
+  //   recreate 后按新容量现算）。多 backend 共享一个 Port 时的公共资源观测口（HUD/tab 管理器）。
+  //   配额**裁决**不在 Port——各租户 GpuTilePool 已按自家预算自限（reserve quota 顶）；这里只记账。
+  readonly arenaStats: { count: number; bytes: number };
 }

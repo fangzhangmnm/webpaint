@@ -434,3 +434,20 @@
   对比（缺口闭环：字段没了自然不再丢）。验收：tsc 0、快层 1256 绿 + 全量层 3 绿、build 五
   lint、GL smoke PASSED、MCP server 冒烟 OK。无新真机锚（行为逐像素不变；棋盘/导出既有
   真机锚覆盖）。
+- **C8 完 ✅ v0.8.46（2026-08-10）——⑤后半三方 golden + ⑥arena 租户记账**：
+  ①**三方 golden（gl-smoke harness `softTripartite`）**：SoftGl2Port 纯 TS 进浏览器页，与真 GPU
+  （SwiftShader/CI，真机同一套锚）+ 2D/解析参照**同页同场景**对拍——stamp 栅格（wash/buildup/
+  椭圆，GL↔Soft ±1）、合成 blend 五模式（u8 显示精度，Soft↔Canvas2D 过 tolFor、GL↔Soft ≤1）、
+  **bakeStamps 笔迹烤定全链**（RasterService/GlRoom 双 Port 同源 LayerPixels，落层字节 GL↔Soft
+  ≤2——MCP/headless 栅格域与真机 GPU 等价性的主锚）。②**arena 租户记账**：`Gl2Port.arenaStats`
+  （活 arena 数+Σ承诺字节）+ `Gl2TileArena.dispose` 退租语义（幂等；退租后动词响亮 throw
+  `ARENA_DISPOSED`——Browser 版 bind null 静默 no-op 比 throw 危险，门口挡）；配额裁决不进 Port
+  （各租户 GpuTilePool reserve 已自限），只记账。退租链 `WebPaintBackend.dispose → GlRoom.dispose`
+  （新方法：arena+IndexTexture+pseudo 纹理逐个还 Port；**共享 FBO 池不清**——跨租户公共钱包；
+  借出 FBO 先归还）。提案 §2 已回写（C8 第七棒节）。③mock multiplayer 补 dispose 记账断言
+  （A 退租 count 2→1、bytes 递减、全员退租归零）；soft-gl2-port.test 补两锚（记账/退租/用死租约
+  throw + GlRoom.dispose 不清共享池）；harness 补 `arenaAccounting`（真 GL 面同锚）。
+  ④环境注：worktree 里 `tools/esbuild/esbuild` 是 gitignored 本机件，smoke 前要从主 checkout 拷。
+  验收：tsc 0、快层 **1258 绿**（+2）+ 全量层 3 绿、build 五 lint 全过、GL smoke PASSED（+21 锚：
+  tri 18 + arena 3）。无新真机锚（软域/记账不进用户路径；真机批既有全流程条目覆盖）。
+  **C8 清账完毕。下一片 = C9 reference window 组件**（家族 web component 约定试点；§1 C9 行）。

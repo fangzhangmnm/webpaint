@@ -64,4 +64,8 @@ export interface Gl2Port {
     uploadTexture(tex: Gl2Texture, format: TexUploadFormat, w: number, h: number, data: ArrayBufferView): void;
     deleteTexture(tex: Gl2Texture): void;
     createTileArena(tileSize: number, initialSlices: number): Gl2TileArena;
+    readonly arenaStats: {
+        count: number;
+        bytes: number;
+    };
 }

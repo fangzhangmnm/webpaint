@@ -207,8 +207,9 @@ export class WebPaintBackend implements WebPaintBackendInterface {
     // interrupt=cancel 家规：open stroke/filter → 先取消（令牌收口、无痕）再释放。
     if (this._stroke) { const st = this._stroke; this._stroke = null; st.session.cancel(); }
     if (this._filter) { const fs = this._filter; this._filter = null; fs.token.cancel(); }
-    // GPU/软 arena：SoftGl2Port 随 backend GC；注入共享 Port 的租户配额退租随 C8 arena 记账批
-    //（接口形状与 mock multiplayer 第二真租户同批定，§6.3 不提前固化）。
+    // 栅格域退租（C8 ⑥）：room.dispose 释放 arena/IndexTexture/pseudo 纹理——注入共享 Port 时
+    // Port.arenaStats 同步减（真 GPU 显式 free；SoftGl2 弃引用交 GC）。懒建未发生 = 本就零持有。
+    if (this._room) { this._room.dispose(); this._room = null; this._raster = null; }
     // 换 1×1 空根释放当前 doc 全部 tileset → 清栈释放 undo 持有 → 观察者退租。
     this._wp2.load(blankData({ width: 1, height: 1 }));
     this._history.clear();

@@ -126,6 +126,24 @@ export class GlRoom {
   onInvalidate(cb: () => void): void { this._invalidateListeners.push(cb); }
   invalidateTree(): void { for (const cb of this._invalidateListeners) cb(); }
 
+  // ---- 退租（C8 ⑥）：backend dispose 时释放本租户全部 GPU 驻留 ----
+  // arena 显式还 Port（真 GPU 立即 free；SoftGl2 弃引用交 GC）+ IndexTexture/pseudo 纹理逐个删；
+  // 借出的 FBO 归还池（**池归 Port、跨租户共享，不 clearPool**——那是邻居的钱包）。
+  // dispose 后本 room 不可再用（消费类都持它，随 backend 一起弃；arena 动词有 ARENA_DISPOSED 墙）。
+  dispose(): void {
+    this.releaseLiveClip();
+    this.releaseOverlayFBO();
+    for (const rec of this.leaves.values()) rec.index.dispose();
+    this.leaves.clear();
+    if (this._selTex) { this.glctx.deleteTexture(this._selTex); this._selTex = null; this._selTexSrc = null; }
+    if (this._fillTex) { this.glctx.deleteTexture(this._fillTex); this._fillTex = null; this._fillTexColor = -1; }
+    for (const e of this._floatTex.values()) this.glctx.deleteTexture(e.tex);
+    this._floatTex.clear(); this._floats.clear();
+    this._overlay = null;
+    this._invalidateListeners = [];
+    this.arena.dispose();
+  }
+
   // ---- context-loss：机房侧全量作废（段缓存/display 归 RenderTree 自己清） ----
   handleContextRestored(): void {
     this.pool.clearAll();

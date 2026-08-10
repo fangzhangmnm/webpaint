@@ -274,3 +274,39 @@ describe("soft-gl2 · RasterService.bakeStamps headless（笔迹烤定全链，�
     pixels.dispose();
   });
 });
+
+describe("soft-gl2 · arena 租户记账（C8 ⑥）", () => {
+  it("createTileArena 记账 / dispose 退租 / 用死租约响亮 throw", () => {
+    const port = new SoftGl2Port();
+    assert.deepEqual(port.arenaStats, { count: 0, bytes: 0 });
+    const a = port.createTileArena(256, 4);
+    const b = port.createTileArena(256, 8);
+    assert.equal(port.arenaStats.count, 2);
+    assert.equal(port.arenaStats.bytes, (4 + 8) * 256 * 256 * 4);
+    a.recreate(16);   // grow 后记账按现容量现算
+    assert.equal(port.arenaStats.bytes, (16 + 8) * 256 * 256 * 4);
+    a.dispose();
+    assert.equal(port.arenaStats.count, 1);
+    assert.equal(port.arenaStats.bytes, 8 * 256 * 256 * 4);
+    a.dispose();   // 幂等
+    assert.equal(port.arenaStats.count, 1);
+    assert.throws(() => a.uploadSlice(0, new Uint8Array(256 * 256 * 4)), /ARENA_DISPOSED/);
+    assert.throws(() => a.recreate(4), /ARENA_DISPOSED/);
+    b.dispose();
+    assert.deepEqual(port.arenaStats, { count: 0, bytes: 0 });
+  });
+  it("GlRoom.dispose 退租（arena 归还 Port 记账）；FBO 池不被清（跨租户共享）", () => {
+    const port = new SoftGl2Port();
+    const roomA = new GlRoom(port, 512);
+    const roomB = new GlRoom(port, 512);
+    assert.equal(port.arenaStats.count, 2);
+    const f = port.borrowFBO(64, 64, "u8");
+    port.returnFBO(f);
+    const pooledBefore = port.fboPoolStats.count;
+    roomA.dispose();
+    assert.equal(port.arenaStats.count, 1, "A 退租，B 的 arena 还在");
+    assert.equal(port.fboPoolStats.count, pooledBefore, "共享 FBO 池不被邻居 dispose 清空");
+    roomB.dispose();
+    assert.equal(port.arenaStats.count, 0);
+  });
+});

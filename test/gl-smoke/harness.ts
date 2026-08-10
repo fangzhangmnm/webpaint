@@ -7,8 +7,9 @@
 // 结果 → window.__SMOKE__ = { ok, checks:[{name,ok,detail}], error, newGoldens }。
 
 import { BrowserGl2Port, BrowserTileArena } from "../../src/shell/browser-gl2-port.ts";
+import { SoftGl2Port } from "../../src/backend/soft-gl2-port.ts";
 import { GpuTilePool, IndexTexture, GPU_TILE_BYTES } from "../../src/backend/gl/gpu-tile-pool.ts";
-import type { PooledFBO, Gl2Texture } from "../../src/common/gl2-port.ts";
+import type { PooledFBO, Gl2Texture, Gl2Port } from "../../src/common/gl2-port.ts";
 import { TILE_SIZE, tilesAcross } from "../../src/common/tile-geometry.ts";
 import { GLCompositor } from "../../src/backend/gl/gl-compositor.ts";
 import { BLEND_MODES } from "../../src/backend/gl/blend-glsl.ts";
@@ -224,7 +225,7 @@ function maxPremulDiff(ref: Uint8ClampedArray, glpx: Uint8Array, n: number): { m
   const px = (ai / 4) % n, py = Math.floor((ai / 4) / n);
   return { md: Math.round(md), at: `@(${px},${py}) ref=[${ref[ai]},${ref[ai + 1]},${ref[ai + 2]},${ref[ai + 3]}] gl=[${glpx[ai]},${glpx[ai + 1]},${glpx[ai + 2]},${glpx[ai + 3]}]` };
 }
-function idx1(glctx: BrowserGl2Port, slice: number): IndexTexture {
+function idx1(glctx: Gl2Port, slice: number): IndexTexture {
   const t = new IndexTexture(glctx, TILE_SIZE, TILE_SIZE); t.setSlice(0, 0, slice); return t;
 }
 // doc 尺寸直值 RGBA8 2D 纹理（live overlay 用；C8 走 Port 纹理动词）。
@@ -236,7 +237,7 @@ function makeTex2D(glctx: BrowserGl2Port, img: Uint8Array, n: number): Gl2Textur
 function L(srcIndex: IndexTexture, opacity: number, mode: string, clip = false): Leaf {
   return { kind: "leaf", srcIndex, opacity, mode, clip, visible: true, hasContent: true };
 }
-function readComposite(glctx: BrowserGl2Port, comp: GLCompositor, accum: PooledFBO, n: number): Uint8Array {
+function readComposite(glctx: Gl2Port, comp: GLCompositor, accum: PooledFBO, n: number): Uint8Array {
   const out = glctx.borrowFBO(n, n, "u8");
   comp.presentTo(accum, out, n, n);   // 累积器已直值（S7）→ 纯拷贝
   const px = glctx.readPixels(out, 0, 0, n, n);
@@ -1269,6 +1270,132 @@ function brushPipelineParity(glctx: BrowserGl2Port, add: Add): void {
   }
 }
 
+// ---- H) C8 ⑤ 三方 golden：真 GPU（SwiftShader/CI 或真机 GPU）vs SoftGl2Port（迂腐软实现）vs
+//        2D/解析参照，**同一页同一份场景**对拍。SoftGl2 是纯 TS——它在 node 侧是 MCP/headless 的
+//        栅格真身，这里验它与真 GPU 在真消费类（GLStampRasterizer/GLCompositor/RasterService）
+//        全链上 ±ε 一致（ADR-0009：f16 舍入/光栅 tie-break 不复刻，golden ±ε 吸收）。----
+function softTripartite(glctx: BrowserGl2Port, add: Add): void {
+  const soft = new SoftGl2Port();
+
+  // ① stamp 栅格（wash/buildup + 椭圆）：GL vs Soft vs 解析公式
+  {
+    const NS = 128;
+    const rasG = new GLStampRasterizer(glctx);
+    const rasS = new GLStampRasterizer(soft);
+    const color: [number, number, number] = [0.2, 0.6, 0.9];
+    const stamps: Stamp[] = [
+      { x: 40, y: 40, size: 50, alpha: 0.6 },
+      { x: 70, y: 55, size: 40, alpha: 0.5 },
+      { x: 55, y: 80, size: 60, alpha: 0.7 },
+    ];
+    for (const [name, shape] of [
+      ["wash", { hardness: 0.3, color, buildup: false }],
+      ["buildup", { hardness: 0.3, color, buildup: true }],
+      ["wash椭圆", { hardness: 0.4, color, buildup: false, aspect: 2.2, rotation: 0.6 }],
+    ] as const) {
+      const fg = rasG.rasterize(stamps, shape, 0, 0, NS, NS);
+      const pg = glctx.readPixels(fg, 0, 0, NS, NS); glctx.returnFBO(fg);
+      const fs = rasS.rasterize(stamps, shape, 0, 0, NS, NS);
+      const ps = soft.readPixels(fs, 0, 0, NS, NS); soft.returnFBO(fs);
+      const ref = cpuStampRef(NS, stamps, color, shape.hardness, shape.buildup,
+        (shape as { aspect?: number }).aspect ?? 1, (shape as { rotation?: number }).rotation ?? 0);
+      const sVsRef = maxByteDiff(ref, ps, NS);
+      const gVsS = maxByteDiff(new Uint8ClampedArray(ps.buffer, ps.byteOffset, ps.byteLength), pg, NS);
+      add(`tri:stamp ${name} Soft vs 解析`, sVsRef.md <= 1, `maxΔ=${sVsRef.md} ${sVsRef.md > 1 ? sVsRef.at : ""}`);
+      add(`tri:stamp ${name} GL vs Soft`, gVsS.md <= 4, `maxΔ=${gVsS.md} ${gVsS.md > 4 ? gVsS.at : ""}`);
+    }
+  }
+
+  // ② 合成 blend（u8 显示精度，单 tile）：GL vs Soft vs Canvas2D（W3C 同规范）
+  {
+    const n = TILE_SIZE;
+    const bd = makeImg(n, (x, y) => [8 + (x % 240), 8 + (y % 240), 8 + ((x + y) % 240), 160 + ((x * 7) % 80)]);
+    const src = makeImg(n, (x, y) => [247 - (y % 240), 8 + (x % 240), 8 + ((x * y) % 240), 48 + ((y * 5) % 192)]);
+    const opacity = 0.8;
+    const runPort = (port: Gl2Port, mode: string): Uint8Array => {
+      const arena = port.createTileArena(TILE_SIZE, 4);
+      arena.uploadSlice(0, bd); arena.uploadSlice(1, src);
+      const comp = new GLCompositor(port, "u8");
+      const i0 = idx1(port, 0), i1 = idx1(port, 1);
+      const accum = compositeTree(comp, arena, [L(i0, 1, "source-over"), L(i1, opacity, mode)], n, n);
+      const px = readComposite(port, comp, accum, n);
+      port.returnFBO(accum); i0.dispose(); i1.dispose(); arena.dispose();
+      return px;
+    };
+    for (const mode of ["source-over", "multiply", "screen", "color-dodge", "overlay"]) {
+      const pg = runPort(glctx, mode);
+      const ps = runPort(soft, mode);
+      const ref = canvas2dRef(n, bd, src, mode, opacity);
+      const tol = tolFor(mode);
+      const sVsRef = maxPremulDiff(ref, ps, n);
+      const gVsS = maxPremulDiff(new Uint8ClampedArray(ps.buffer, ps.byteOffset, ps.byteLength), pg, n);
+      add(`tri:blend ${mode} Soft vs Canvas2D`, sVsRef.md <= tol, `maxΔ=${sVsRef.md} ${sVsRef.md > tol ? sVsRef.at : ""}`);
+      add(`tri:blend ${mode} GL vs Soft`, gVsS.md <= tol, `maxΔ=${gVsS.md} ${gVsS.md > tol ? gVsS.at : ""}`);
+    }
+  }
+
+  // ③ bakeStamps 笔迹烤定全链（RasterService/GlRoom 真消费装配，双 Port 同源 LayerPixels）：
+  //    落层字节 GL vs Soft ±4（预乘多级量化）。这是 MCP/headless 栅格域与真机 GPU 的等价性主锚。
+  {
+    const N = 512;
+    const stamps: { x: number; y: number; size: number; alpha: number }[] = [];
+    for (let i = 0; i < 8; i++) stamps.push({ x: 80 + i * 16, y: 90 + i * 14, size: 48, alpha: 0.85 });
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const s of stamps) { const r = s.size / 2 + 1; x0 = Math.min(x0, s.x - r); y0 = Math.min(y0, s.y - r); x1 = Math.max(x1, s.x + r); y1 = Math.max(y1, s.y + r); }
+    const bx = Math.max(0, Math.floor(x0)), by = Math.max(0, Math.floor(y0));
+    const bw = Math.min(N, Math.ceil(x1)) - bx, bh = Math.min(N, Math.ceil(y1)) - by;
+    const selData = new Uint8Array(bw * bh);
+    for (let y = 0; y < bh; y++) for (let x = 0; x < Math.floor(bw / 2); x++) selData[y * bw + x] = 255;
+    const cases = [
+      { name: "wash", buildup: false, erase: false, blendMode: "source-over", lockAlpha: false, sel: false, opacity: 0.7 },
+      { name: "buildup", buildup: true, erase: false, blendMode: "source-over", lockAlpha: false, sel: false, opacity: 1 },
+      { name: "multiply+lockAlpha+selMask", buildup: false, erase: false, blendMode: "multiply", lockAlpha: true, sel: true, opacity: 0.9 },
+    ];
+    let id = 900;
+    for (const c of cases) {
+      id++;
+      const cBase = makeLayerCanvas(N, N, (x, y) => [80 + (x % 120), 90 + (y % 100), 140, (x + y) % 3 === 0 ? 0 : 230]);
+      const ov = (layerId: number) => ({
+        stamps, shape: { hardness: 0.6, color: [0.9, 0.3, 0.2] as [number, number, number], buildup: c.buildup },
+        bx, by, bw, bh, layerId, opacity: c.opacity, erase: c.erase, blendMode: c.blendMode,
+        lockAlpha: c.lockAlpha, selMask: c.sel ? { data: selData, ox: bx, oy: by, ow: bw, oh: bh } : null,
+      });
+      const runBake = (port: Gl2Port): Uint8ClampedArray => {
+        const room = new GlRoom(port, 512);
+        const raster = new RasterService(room);
+        const pixels = pixelsFromCanvas(N, N, 0, 0, cBase);
+        const ok = raster.bakeStamps(id, pixels, ov(id) as never, N, N, (px, x, y, w, h) => pixels.applyRegionDiff(x, y, w, h, px));
+        const bytes = ok ? pixels.getRegion(0, 0, N, N) : new Uint8ClampedArray(0);
+        pixels.dispose();
+        room.dispose();
+        return bytes;
+      };
+      const bytesG = runBake(glctx);
+      const bytesS = runBake(soft);
+      if (!bytesG.length || !bytesS.length) { add(`tri:bake ${c.name}`, false, "bake 失败"); continue; }
+      // 预乘域对比（straight 低 α 处 unpremult 病态放大 LSB）。
+      const { md, at } = maxPremulDiff(bytesS, new Uint8Array(bytesG.buffer, bytesG.byteOffset, bytesG.byteLength), N);
+      add(`tri:bake ${c.name} GL vs Soft（落层字节）`, md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
+    }
+  }
+}
+
+// ---- I) C8 ⑥ arena 租户记账（BrowserGl2Port 真 GL 面；SoftGl2 面在 node soft-gl2-port.test）----
+function arenaAccounting(glctx: BrowserGl2Port, add: Add): void {
+  const st0 = glctx.arenaStats;
+  const a = glctx.createTileArena(TILE_SIZE, 4);
+  const grew = glctx.arenaStats.count === st0.count + 1
+    && glctx.arenaStats.bytes === st0.bytes + 4 * TILE_SIZE * TILE_SIZE * 4;
+  add("arena:createTileArena 记账 +1（count+bytes）", grew, `count ${st0.count}→${glctx.arenaStats.count}`);
+  a.dispose();
+  let threw = false;
+  try { a.uploadSlice(0, new Uint8Array(GPU_TILE_BYTES)); } catch { threw = true; }
+  add("arena:dispose 退租归账 + 用死租约响亮 throw", glctx.arenaStats.count === st0.count && threw,
+    `count=${glctx.arenaStats.count} threw=${threw}`);
+  a.dispose();   // 幂等（不再减账）
+  add("arena:二次 dispose 幂等", glctx.arenaStats.count === st0.count, `count=${glctx.arenaStats.count}`);
+}
+
 function run(): { ok: boolean; checks: Check[]; error: string | null } {
   const checks: Check[] = [];
   const add: Add = (name, ok, detail = "") => checks.push({ name, ok, detail });
@@ -1360,6 +1487,8 @@ function run(): { ok: boolean; checks: Check[]; error: string | null } {
   try { warpParity(glctx, add); } catch (e) { add("warp parity", false, String(e)); }
   try { warpClipParity(glctx, add); } catch (e) { add("warpclip parity", false, String(e)); }
   try { mergeDownParity(glctx, add); } catch (e) { add("mergedown parity", false, String(e)); }
+  try { softTripartite(glctx, add); } catch (e) { add("soft tripartite", false, String(e)); }
+  try { arenaAccounting(glctx, add); } catch (e) { add("arena accounting", false, String(e)); }
 
   const finalErr = gl.getError();   // 只读一次（getError 读后即清，二次读会误报 0）
   add("no GL error", finalErr === gl.NO_ERROR, `0x${finalErr.toString(16)}`);

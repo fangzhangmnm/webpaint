@@ -124,6 +124,7 @@ export declare class GlRoom {
     };
     onInvalidate(cb: () => void): void;
     invalidateTree(): void;
+    dispose(): void;
     handleContextRestored(): void;
     syncLeafSafe(leafId: number, pixels: LayerPixels, docW: number, docH: number): void;
     private _syncPixels;

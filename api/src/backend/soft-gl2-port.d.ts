@@ -23,5 +23,10 @@ export declare class SoftGl2Port implements Gl2Port {
     createTexture(): Gl2Texture;
     uploadTexture(tex: Gl2Texture, format: TexUploadFormat, w: number, h: number, data: ArrayBufferView): void;
     deleteTexture(tex: Gl2Texture): void;
+    private _arenas;
     createTileArena(tileSize: number, initialSlices: number): Gl2TileArena;
+    get arenaStats(): {
+        count: number;
+        bytes: number;
+    };
 }

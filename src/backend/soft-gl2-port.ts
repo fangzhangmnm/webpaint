@@ -38,20 +38,29 @@ class SoftTileArena implements Gl2TileArena {
   readonly kind = "arena" as const;
   readonly tileSize: number;
   private _slices: Uint8Array[] = [];
-  constructor(tileSize: number, initialSlices: number) {
+  private _disposed = false;
+  private _onDisposed: (() => void) | null;
+  constructor(tileSize: number, initialSlices: number, onDisposed?: () => void) {
     this.tileSize = tileSize;
+    this._onDisposed = onDisposed ?? null;
     this._alloc(initialSlices);
   }
   private _alloc(n: number): void {
     this._slices = [];
     for (let i = 0; i < n; i++) this._slices.push(new Uint8Array(this.tileSize * this.tileSize * 4));
   }
+  // 退租后动词 = 响亮 throw（契约语义，与 BrowserTileArena 同）。
+  private _aliveGuard(): void {
+    if (this._disposed) throw new Error("ARENA_DISPOSED（退租后使用——owner 已 dispose 本 arena）");
+  }
   get capacity(): number { return this._slices.length; }
-  recreate(newCapacity: number): void { this._alloc(newCapacity); }
+  recreate(newCapacity: number): void { this._aliveGuard(); this._alloc(newCapacity); }
   uploadSlice(slice: number, pixels: Uint8Array): void {
+    this._aliveGuard();
     this._slices[slice].set(pixels.subarray(0, this._slices[slice].length));
   }
   copySlice(from: PooledFBO, slice: number, srcX: number, srcY: number, w: number, h: number): void {
+    this._aliveGuard();
     const f = from as SoftFBO;
     const dst = this._slices[slice];
     for (let y = 0; y < h; y++) {
@@ -66,9 +75,15 @@ class SoftTileArena implements Gl2TileArena {
       }
     }
   }
-  dispose(): void { this._slices = []; }
+  dispose(): void {
+    if (this._disposed) return;   // 幂等
+    this._disposed = true;
+    this._slices = [];            // 弃引用交 GC（软域无显存句柄）
+    this._onDisposed?.();
+    this._onDisposed = null;
+  }
   // 测试观测口（off-contract）：slice 原始字节。
-  sliceBytes(slice: number): Uint8Array { return this._slices[slice]; }
+  sliceBytes(slice: number): Uint8Array { this._aliveGuard(); return this._slices[slice]; }
 }
 
 // SoftTexRead 适配（2D sampler 源：纹理 / FBO 颜色面）。
@@ -309,7 +324,18 @@ export class SoftGl2Port implements Gl2Port {
   }
 
   // ---- tile arena ----
+  private _arenas = new Set<SoftTileArena>();
+
   createTileArena(tileSize: number, initialSlices: number): Gl2TileArena {
-    return new SoftTileArena(tileSize, initialSlices);
+    const a: SoftTileArena = new SoftTileArena(tileSize, initialSlices, () => this._arenas.delete(a));
+    this._arenas.add(a);
+    return a;
+  }
+
+  // 租户记账（与 BrowserGl2Port 同形；软域「显存」= JS heap 承诺量）。
+  get arenaStats(): { count: number; bytes: number } {
+    let bytes = 0;
+    for (const a of this._arenas) bytes += a.capacity * a.tileSize * a.tileSize * 4;
+    return { count: this._arenas.size, bytes };
   }
 }
