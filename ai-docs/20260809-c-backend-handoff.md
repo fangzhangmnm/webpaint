@@ -314,7 +314,28 @@
   同步迁移（纹理助手/readback 走动词；harness 屏幕读回/getError/readSliceRaw 留 BrowserGl2Port
   具体类 `gl`——壳侧合法，契约面摸不到）。验收：tsc 0、**1225 绿**、build 五 lint 全过、
   GL smoke PASSED（行为不变纯收编，golden 未移位、no GL error）。无新真机锚（对比锚 =
-  真机批既有全流程绘画条目）。**C8 剩余（接力）**：SoftGl2Port（迂腐语义实现这份动词契约）+
-  shader 注册表 GPU/CPU 对表 + backend stroke/filter 档口接通（node 无 GL 跑通笔画）+
-  arena 租户配额记账（等 mock multiplayer）+ MCP 红队 + 测试分级（npm test / test:full +
-  Playwright 三方对拍）。
+  真机批既有全流程绘画条目）。
+- **C8 第二棒 ✅ v0.8.40（2026-08-10）——SoftGl2Port + shader CPU 对表**：
+  ①`src/backend/soft-shaders.ts` = CPU 对表（ADR-0009 决定 5）：composite 全变体（12 blend ×
+  tiled/group/overlay × overlay blendMode——逐行镜像 compositeFragSource，含 erase/lockAlpha/
+  selMask/clip 双模/sampleTiled）、stamp-accum（instanced 光栅语义：像素中心落实例 quad 内）、
+  stamp-color、warp/warpbake（bilinear/bicubic 反振铃限幅/spline B 样条全采样器族镜像
+  WARP_FUNCS）、checker、present；**GPU_ONLY 显式登记**（present-affine 屏显专属）；未登记名
+  → program() 响亮 throw `SHADER_NO_CPU_EQUIV`（对表纪律结构化——新 shader 溜不进来）。
+  ②`src/backend/soft-gl2-port.ts` = Gl2Port 全动词纯软实现：**u8 目标逐写量化**（GPU
+  blend→store 同步语义——wash/buildup 逐 dab 量化次序逐位对齐）、三态 blend/scissor/clear、
+  软 arena、FBO 池借还 stale 语义同 GPU、决定论（无时钟无随机；f16 舍入/光栅 tie-break 不复刻，
+  golden ±ε 吸收）。target:"screen" 软域响亮 throw（headless 无屏，present 走 FBO+readPixels）。
+  ③blend 枚举+W3C 公式 CPU 版抽 `src/common/blend-modes.ts`（GLSL 版留 blend-glsl 并
+  re-export；双实现同步纪律入注，锚 = smoke 2D-vs-GL diff + soft 对拍）。④**milestone：真消费
+  类无 GL 跑通**——GLStampRasterizer/GLCompositor/GlRoom/RasterService 拿 SoftGl2Port 在 node
+  完成栅格/合成/**bakeStamps 笔迹烤定全链**（+14 锚：对表 throw/round-trip/wash·buildup·椭圆·
+  scissor 逐位 ±1/四 blend 模式 vs W3C ±1/烤定预乘域 ±4+selMask 裁剪）。验收：tsc 0、
+  **1239 绿**、build 五 lint、GL smoke PASSED。无新真机锚（软域不进用户路径）。
+  **C8 剩余（接力）**：③backend stroke/filter 档口接通（webpaint-backend 的 strokeBegin/…
+  throw 占位换真实现；inject.gl 缺省 SoftGl2Port——StrokeSession deps 的 commitStamps/
+  invalidate 屏显注入面要给 headless 变体，census §2.1 + stroke-session.ts 是情报）+
+  ④MCP server 红队（create/crop/draw/circle/undo/redo/export，user：「你多红队一点」）+
+  ⑤测试分级（npm test 快层 / npm run test:full 全量层：全量画作 round-trip、真 GPU vs
+  SwiftShader vs SoftGl2 三方 golden ±ε、mock multiplayer 双 backend）+ ⑥arena 租户配额
+  记账（等 mock multiplayer 当第二真租户）。
