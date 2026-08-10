@@ -151,3 +151,18 @@
   验收：tsc 0、**1186 绿**（1233−47：删死行为锚、增 v2 锚）、build 四 lint 全过、GL smoke
   PASSED（含迁移后 mergedown/brushpipe 对拍）。无新真机锚（行为不变；剪贴板复制 PNG 已有
   旧锚覆盖，属真机批既有条目）。**下一片 = C4 普查**（预览/事务违规户盘点，产物回写提案 §6）。
+- **C4 ✅ doc-only（2026-08-10，不 bump）**：普查产物落 `20260810-c4-transaction-census.md`
+  （四路全代码勘探：11 张事实卡带 file:line + 分类总表 + 结构发现链）；transaction 协议 +
+  EditMode 归属已回写提案 §6.1/§6.2（原「留白」节改组为 §6.3）。要点：①三类本质→三形态
+  （一次终值=原子 verb；累积真改=stroke 档**一个**，全笔类共用；参数重算=filter 档
+  begin/setParams/commit/cancel，原型=filters-adjust surrogate 逐字升格）；②互斥=单令牌墙
+  接口化（第二 begin/开着时 undo/冲突 verb→响亮拒绝）；③transform 裁定**无档口**（frontend
+  括号+原子 verb 序列；ctrl-z 分叉的结构根源=有无挂起令牌——挂了事务栈被锁只能 abort，
+  想中途 undo 就不能挂）；④EditMode 归 frontend（backend 只有「有无 open transaction」，
+  两层防线分工入契约）；⑤C6 施工单细化（液化笔内替身化用现成 startSnap 冻结源/形状笔
+  替身重画最易迁/魔棒迁预览宿两候选路 C6 现场定）。**普查新发现的账**：无令牌像素写只
+  静默不记账（观察者 `!tokenOpen` early-return，layer-tiles.ts:349）→ C7 硬化候选；三处
+  doc-code 分歧记录在案待 human（census §7：ADR-0008 §6 PendingFill 清不在 fill commit 步、
+  ADR-0006 persp「ctrl-z 回快照」代码不存在 apply≡abort、液化 cancel 注释过时）。无代码
+  改动、无新真机锚。**下一片 = C5 StrokeSession**（事务代码迁出 input.ts + 手感数学随迁
+  backend + 壁钟→事件 t；census §2.1/§3.8 是现成情报）。

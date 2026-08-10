@@ -108,7 +108,7 @@ export interface WebPaintBackendInterface {
   strokeAppend(id: StrokeId, points: Float32Array): void;   // (x,y,p,t)×N，stride 版本化留扩展位
   strokeEnd(id: StrokeId): boolean;         // 平滑+栅格+bake+记账全在 backend（preview==commit 同管线）
   strokeCancel(id: StrokeId): void;
-  // filter/transform 等 transaction 档口：C4 普查后定形（见 §6 留白）
+  // filter/transform 档口：C4 已定形（§6.1——filter 档 begin/setParams/commit/cancel；transform 无档口）
   undo(): void; redo(): void;
   onChange(cb: (ev: ChangeEvent) => void): void;   // dirty/结构变更事件（壳/embedding 消费）
 }
@@ -158,13 +158,61 @@ export interface WebPaintBackendInterface {
 | **C9** | **reference window web component 试点**：家族组件约定模板（vendor .mjs/属性事件/宿主解耦） | 组件独立可挂；约定 doc 化 |
 | 尾挂 | B 剩余批（password/单 .html/wizard/三兄弟）另立 handoff；UX 抽象层 grill（UI 骑士侧）；gallery/editor 组件（E/embedding 骑士）；bodypaint 投影服务（远期） | — |
 
-## 6. 留白（显式未定，等切片产出，不许提前固化）
+## 6. transaction 协议 + EditMode 归属（C4 普查定形，v0.8.28+；证据链 = `20260810-c4-transaction-census.md`）
 
-- transaction 协议细节（filter/transform 档口签名、互斥拒绝语义）——等 C4 普查。
-- EditMode 归属（倾向：backend 令牌互斥 + frontend 交互仲裁）——等 C4。
+### 6.1 transaction 协议
+
+**互斥模型 = workpiece 单令牌墙的接口化身**：backend 同时最多一个 open transaction。
+第二个 begin、开着期间的 undo/redo、与事务冲突的 verb → **响亮拒绝（throw/错误返回）**，
+不排队、不静默丢弃、不自动收口（现状锚：workpiece.ts 单令牌 assert + beforeApply throw）。
+`dispose()` 时有 open transaction → cancel 后释放（interrupt=cancel 家规）；远程句柄失联兜底
+（超时/FR）细节随 C7/C8 落地回写。
+
+**三类本质 → 三种指令形态**（普查分类：一次终值 / 参数重算 / 累积真改）：
+
+1. **一次终值 → 普通原子 verb**：内部自带令牌开合，返回即入栈一步（no-op 不占步）。
+   住户：selection set（魔棒 tap/选区笔/扩缩收口）、fill commit、float 五 verb、层树/doc 几何。
+2. **累积真改 → stroke 档**（§3 已定 strokeBegin/Append/End/Cancel，**全部笔类共用这一个档口**
+   ——brush/eraser/液化/形状笔/选区笔的差异在 ResolvedBrush 快照与 engineKey 内部）：token
+   贯穿手势，交互期允许令牌内 substrate 写（collector 记账），End 一步入栈、Cancel 回滚无痕。
+3. **参数重算 → filter 档（preview session）**：
+   ```ts
+   filterBegin(leafId: number, filterId: string): FilterSessionId  // 冻结源（bbox 字节+选区 mask）；
+                                                                   // token 挂起 = 源的互斥租约
+   filterSetParams(id: FilterSessionId, params: JsonObject): void  // 纯函数重 bake 替身；不记账不占步
+   filterCommit(id: FilterSessionId): boolean                      // 终值一次落层 → 一步 undo；false=no-op
+   filterCancel(id: FilterSessionId): void                         // 无痕（预览期真层零写 → no-op 回滚）
+   ```
+   原型 = filters-adjust surrogate 模式（开面板取 token→纯函数 bake 替身→GL 显示→commit/cancel）
+   逐字升格；wire 签名细化随 C7 回写。
+
+**transform 无档口**（C4 裁定）：变换会话 = frontend UX 括号（EditMode transient + histchange
+reconciler），backend 只见原子 verb 序列（lift / setFloatTransform(matrix) / stamp / accept /
+reject——每 verb 一步 undo）；正因无挂起事务，会话中途 undo/redo 自由（ctrl-z 语义分叉的结构
+根源：**挂了事务栈被锁、ctrl-z 只能先收口；想要中途 undo 就不能挂事务**——adjust 与 transform
+是同一条互斥定律的两个投影）。
+
+**档口选择判据**（后来者用）：交互期需要真 substrate 写或事件流不可重算 → stroke 档；预览可由
+(冻结源 × 参数) 纯函数重算 → filter 档；两者都不是 → 拆原子 verbs + frontend 括号。
+
+### 6.2 EditMode 归属
+
+- **backend 无 EditMode**：backend 的「模式」只有一个事实——有无 open transaction；互斥由
+  令牌墙强制（fail-loud）。
+- **EditMode 状态机整体归 frontend**（交互仲裁：谁能起手势、点工具=apply/cancel、canDraw
+  fail-safe、ctrl-z 路由）。无 DOM 依赖（唯 `_emit` 事件口），随 C5+ 迁 `src/frontend/`；
+  事件口换回调后可进 toolkit。
+- 两层防线各司其职、缺一不可（普查实证）：EditMode 挡「正常流不该发生的交互」（fail-safe
+  不响）；令牌墙挡「任何 bug 的写坏账」（fail-loud throw）。
+
+### 6.3 仍留白（显式未定，等切片产出，不许提前固化）
+
 - Gl2Port 动词面：C1 已回写第一刀（§2「C1 落地回写」——lifecycle/program/FBO/quad 已收编，
   `gl` 裸口过渡）；**全量收编签名**（pass/instanced/readPixels 动词化）等 C5/C8 逐片回写。
 - backend interface 的 verbs 全清单——等 C7 逐条过（workpiece v2 现有面 api 化）。
+- 魔棒拖选预览宿的迁移形态（SelectionPreviewTx api 化 vs 预览全引擎自持）——等 C6 现场定
+  （两候选路见普查 doc §6.3）。
+- filter 档口 wire 细节（session 超时/多 tab 租户下的互斥归属）——等 C7/C8。
 
 ## 7. 测试与纪律
 
