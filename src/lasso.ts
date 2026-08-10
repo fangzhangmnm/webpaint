@@ -21,7 +21,7 @@
 // selection.js 的 Selection 类。lasso 只负责手势光栅化（产 Selection）+ 自由变换 gizmo。
 
 import { Selection, rasterizePolygonGray8 } from "./selection.ts";
-import { LineartOracle } from "./flat-coloring-oracle.ts";
+import { FlatColoringOracle } from "./flat-coloring-oracle.ts";
 import { floodRegionFrom, similarRegionFrom } from "./backend/algorithms/magic-wand.ts";
 import type { ColorMetric } from "./common/color-dist.ts";
 import { makeBitmap } from "./bitmap.ts";
@@ -80,7 +80,7 @@ export class LassoEngine {
   _fillGapPx = 0;
   _magicAutoExpandPx: number;
   _magicAlgorithm: MagicAlgorithm = "classic";
-  _lineartOracle = new LineartOracle();
+  _flatColoringOracle = new FlatColoringOracle();
   _points: Point[];
   _rect: DraftRect | null;
   _magicStart: Point | null;
@@ -116,7 +116,7 @@ export class LassoEngine {
   }
   setDoc(doc: LassoDoc | null) {
     this.doc = doc;
-    this._lineartOracle.invalidate();   // 换文档释放 label map（16MB 级）；key 本身安全，这里纯腾内存
+    this._flatColoringOracle.invalidate();   // 换文档释放 label map（16MB 级）；key 本身安全，这里纯腾内存
   }
   // v0.4.7（S6）：float 状态在 workpiece——lift/变换/stamp/accept/reject 全走 operator，接线在此注入。
   attachWorkpiece(doc: PaintingView, history: History, float: FloatLayerComponent, sel: SelectionComponent) { this._ft.attach(doc, history, float, sel); }
@@ -160,26 +160,26 @@ export class LassoEngine {
   getMagicAlgorithm(): MagicAlgorithm { return this._magicAlgorithm; }
   /** 线稿分区缓存是否已就绪（首次 tap 前 UI 可提示「分析线稿中…」） */
   lineartReady(sourceLayer: ViewLeaf | null): boolean {
-    return !this.doc || this._lineartOracle.isReady(this.doc, sourceLayer);
+    return !this.doc || this._flatColoringOracle.isReady(this.doc, sourceLayer);
   }
   // 线稿算法 knob 透传（扳手弹出用；RAM-only，改了 oracle 自己丢缓存）
-  setLineartCloseDist(px: number) { this._lineartOracle.setCloseDist(px); }
-  getLineartCloseDist() { return this._lineartOracle.getCloseDist(); }
-  setLineartInkThreshold(pct: number) { this._lineartOracle.setInkThreshold(pct); }
-  getLineartInkThreshold() { return this._lineartOracle.getInkThreshold(); }
-  setLineartMinRegion(px: number) { this._lineartOracle.setMinRegion(px); }
-  getLineartMinRegion() { return this._lineartOracle.getMinRegion(); }
-  setLineartTipSensitivity(pct: number) { this._lineartOracle.setTipSensitivity(pct); }
-  getLineartTipSensitivity() { return this._lineartOracle.getTipSensitivity(); }
-  setLineartBleed(px: number) { this._lineartOracle.setBleed(px); }
-  getLineartBleed() { return this._lineartOracle.getBleed(); }
+  setLineartCloseDist(px: number) { this._flatColoringOracle.setCloseDist(px); }
+  getLineartCloseDist() { return this._flatColoringOracle.getCloseDist(); }
+  setLineartInkThreshold(pct: number) { this._flatColoringOracle.setInkThreshold(pct); }
+  getLineartInkThreshold() { return this._flatColoringOracle.getInkThreshold(); }
+  setLineartMinRegion(px: number) { this._flatColoringOracle.setMinRegion(px); }
+  getLineartMinRegion() { return this._flatColoringOracle.getMinRegion(); }
+  setLineartTipSensitivity(pct: number) { this._flatColoringOracle.setTipSensitivity(pct); }
+  getLineartTipSensitivity() { return this._flatColoringOracle.getTipSensitivity(); }
+  setLineartBleed(px: number) { this._flatColoringOracle.setBleed(px); }
+  getLineartBleed() { return this._flatColoringOracle.getBleed(); }
   // 调试视图（v0.7.4）：端点+候选桥 overlay。开着且分区已缓存才有数据（渲染路径绝不触发重建）。
   _lineartDebugView = false;
   setLineartDebugView(on: unknown) { this._lineartDebugView = !!on; }
   getLineartDebugView() { return this._lineartDebugView; }
   lineartDebugInfo(sourceLayer: ViewLeaf | null) {
     if (!this._lineartDebugView || this._magicAlgorithm !== "lineart" || !this.doc) return null;
-    return this._lineartOracle.debugInfo(this.doc, sourceLayer);
+    return this._flatColoringOracle.debugInfo(this.doc, sourceLayer);
   }
   setSampleMode(m: string) { this._ft.setSampleMode(m); }
   getSampleMode() { return this._ft.getSampleMode(); }
@@ -410,7 +410,7 @@ export class LassoEngine {
       ? this.doc.selection.bboxMask()
       : null;
     let sel: SelectionLike | null = this._magicAlgorithm === "lineart" && start
-      ? this._lineartOracle.selectAt(this.doc, sourceLayer, start.x, start.y)
+      ? this._flatColoringOracle.selectAt(this.doc, sourceLayer, start.x, start.y)
       : this._magicAlgorithm === "similar"
         ? similarSelectFrom(this.doc, start, sourceLayer, this._similarThreshold, this._colorMetric)
         : floodSelectFrom(this.doc, start, sourceLayer, this._magicThreshold, this._colorMetric, stopMask, this._fillGapPx);

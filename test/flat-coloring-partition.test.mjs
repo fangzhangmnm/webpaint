@@ -7,7 +7,7 @@ const { edtSquared } = await import("../src/backend/algorithms/flat-coloring/edt
 const { traceBorderCycles, keypointsFromBinary } = await import("../src/backend/algorithms/flat-coloring/border.ts");
 const { digitizeSpline, transitionCount, areaGuardOk } = await import("../src/backend/algorithms/flat-coloring/closing.ts");
 const {
-  binarizeLuma, buildPartitionFromBinary, regionMaskAt, attachInkDepth, DEFAULT_LINEART_PARAMS,
+  binarizeLuma, buildPartitionFromBinary, regionMaskAt, attachInkDepth, DEFAULT_FLAT_COLORING_PARAMS,
 } = await import("../src/backend/algorithms/flat-coloring/partition.ts");
 
 // ---- 合成图形 helpers ----
@@ -41,7 +41,7 @@ function rectOutlineWithGap(w, h, x0, y0, x1, y1, gx0, gx1) {
   return Ib;
 }
 const labelAt = (part, x, y) => part.labels[y * part.w + x];
-const noClose = { ...DEFAULT_LINEART_PARAMS, dmax: 0, smax: 0, erode: false };
+const noClose = { ...DEFAULT_FLAT_COLORING_PARAMS, dmax: 0, smax: 0, erode: false };
 
 describe("lineart · EDT（Meijster 距离平方）", () => {
   it("单 feature 点：距离平方 = 欧氏", () => {
@@ -169,7 +169,7 @@ describe("lineart · 断口闭合与分区（论文主张：不闭合就没有�
     fillRect(Ib, w, 0, 10, 12, 10); fillRect(Ib, w, 19, 10, 31, 10);   // 线 A（y=10）
     fillRect(Ib, w, 0, 12, 12, 12); fillRect(Ib, w, 19, 12, 31, 12);   // 线 B（y=12）
     // cmax=1：一端一桥，排除「从桥侧腹溜出去的斜跨桥」搅乱中带（那是 τ 的已知宽松面，另议）
-    const part = buildPartitionFromBinary(Ib, w, h, { ...DEFAULT_LINEART_PARAMS, amin: 40, erode: false, cmax: 1 });
+    const part = buildPartitionFromBinary(Ib, w, h, { ...DEFAULT_FLAT_COLORING_PARAMS, amin: 40, erode: false, cmax: 1 });
     assert(part.bridges.filter((b) => b.ok).length >= 2, "两条缝都补上");
     const top = labelAt(part, 16, 3), mid = labelAt(part, 16, 11), bot = labelAt(part, 16, 24);
     assert(top !== mid && mid !== bot && top !== bot, `三带分区（实得 ${top}/${mid}/${bot}）`);

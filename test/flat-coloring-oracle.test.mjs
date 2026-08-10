@@ -2,7 +2,7 @@
 // fake layer 走 OracleSourceLayer 结构面（≈ floodSelectFrom 的 mock 风格），node 直测无 DOM。
 import { describe, it, assert, eq } from "./runner.mjs";
 
-const { LineartOracle } = await import("../src/flat-coloring-oracle.ts");
+const { FlatColoringOracle } = await import("../src/flat-coloring-oracle.ts");
 
 /** 断口圆线稿 RGBA（黑线白透明底），断口朝 +x ~6px */
 function gapRingRgba(w, h, cx, cy, r, thick, gapHalf) {
@@ -39,7 +39,7 @@ describe("flat-coloring-oracle · tap→Selection + contentRev 缓存", () => {
 
   it("断口圆内 tap → 有界选区（闭合生效），且吃进线下", () => {
     const L = fakeLayer(gapRingRgba(w, h, 32, 32, 20, 3, 3 / 20), w, h);
-    const o = new LineartOracle();
+    const o = new FlatColoringOracle();
     const sel = o.selectAt(doc, L, 32, 32);
     assert(sel, "应有选区");
     const n = count255(sel);
@@ -50,7 +50,7 @@ describe("flat-coloring-oracle · tap→Selection + contentRev 缓存", () => {
 
   it("缓存：同层再 tap 不重建；contentRev bump 后重建", () => {
     const L = fakeLayer(gapRingRgba(w, h, 32, 32, 20, 3, 3 / 20), w, h);
-    const o = new LineartOracle();
+    const o = new FlatColoringOracle();
     eq(o.isReady(doc, L), false, "建前未就绪");
     o.selectAt(doc, L, 32, 32).dispose();
     eq(L.calls, 1, "首 tap 读一次像素");
@@ -69,7 +69,7 @@ describe("flat-coloring-oracle · tap→Selection + contentRev 缓存", () => {
   });
 
   it("空源层：整图一区（对齐 flood 点透明全选的语义）", () => {
-    const o = new LineartOracle();
+    const o = new FlatColoringOracle();
     const sel = o.selectAt(doc, null, 5, 5);
     assert(sel, "应有选区");
     eq(count255(sel), w * h, "全图");
@@ -77,13 +77,13 @@ describe("flat-coloring-oracle · tap→Selection + contentRev 缓存", () => {
   });
 
   it("出界 tap → null", () => {
-    const o = new LineartOracle();
+    const o = new FlatColoringOracle();
     eq(o.selectAt(doc, null, -1, 5), null, "出界 null");
   });
 
   it("knob（v0.7.2 扳手）：变值丢缓存重建，同值 no-op", () => {
     const L = fakeLayer(gapRingRgba(w, h, 32, 32, 20, 3, 3 / 20), w, h);
-    const o = new LineartOracle();
+    const o = new FlatColoringOracle();
     o.selectAt(doc, L, 32, 32).dispose();
     eq(L.calls, 1, "建一次");
     o.setCloseDist(64);   // = 默认值
@@ -104,7 +104,7 @@ describe("flat-coloring-oracle · tap→Selection + contentRev 缓存", () => {
 
   it("knob（v0.7.4）：碎区下限/端点灵敏度失效逻辑 + 调试数据只在缓存就绪时给", () => {
     const L = fakeLayer(gapRingRgba(w, h, 32, 32, 20, 3, 3 / 20), w, h);
-    const o = new LineartOracle();
+    const o = new FlatColoringOracle();
     eq(o.debugInfo(doc, L), null, "未建缓存 → 无调试数据（渲染路径不触发重建）");
     o.selectAt(doc, L, 32, 32).dispose();
     const dbg = o.debugInfo(doc, L);
@@ -124,7 +124,7 @@ describe("flat-coloring-oracle · tap→Selection + contentRev 缓存", () => {
 
   it("蔓延距离（v0.7.17）：query-time 参数不作废缓存，选区随之收缩", () => {
     const L = fakeLayer(gapRingRgba(w, h, 32, 32, 20, 3, 3 / 20), w, h);
-    const o = new LineartOracle();
+    const o = new FlatColoringOracle();
     const selAuto = o.selectAt(doc, L, 32, 32);
     const nAuto = count255(selAuto);
     selAuto.dispose();

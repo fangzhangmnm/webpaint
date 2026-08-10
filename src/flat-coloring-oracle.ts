@@ -7,9 +7,9 @@
 //   query（贱）：tap → label 查表 → tight-bbox mask → Selection。
 // 该文件不懂论文数学（全在 src/flat-coloring/），也不懂指针/UI；供 LassoEngine 调用。
 import {
-  buildLineartPartition, regionMaskAt, attachInkDepth, binarizeLuma, DEFAULT_LINEART_PARAMS,
+  buildFlatColoringPartition, regionMaskAt, attachInkDepth, binarizeLuma, DEFAULT_FLAT_COLORING_PARAMS,
 } from "./backend/algorithms/flat-coloring/partition.ts";
-import type { LineartPartition, LineartParams } from "./backend/algorithms/flat-coloring/partition.ts";
+import type { FlatColoringPartition, FlatColoringParams } from "./backend/algorithms/flat-coloring/partition.ts";
 import { Selection } from "./selection.ts";
 
 /** 结构化最小依赖（≈ floodSelectFrom 的 mock 面）：node 直测不拖 doc.ts */
@@ -19,11 +19,11 @@ export interface OracleSourceLayer {
   getImageData(x: number, y: number, w: number, h: number): { data: Uint8ClampedArray };
 }
 
-export class LineartOracle {
+export class FlatColoringOracle {
   private _cache: {
-    layerId: number; rev: number; w: number; h: number; part: LineartPartition;
+    layerId: number; rev: number; w: number; h: number; part: FlatColoringPartition;
   } | null = null;
-  private _params: LineartParams = DEFAULT_LINEART_PARAMS;
+  private _params: FlatColoringParams = DEFAULT_FLAT_COLORING_PARAMS;
 
   /** 命中缓存则查表即回；否则同步重建分区（调用方自行决定要不要 busy 提示）。 */
   selectAt(
@@ -106,7 +106,7 @@ export class LineartOracle {
   debugInfo(
     doc: { width: number; height: number },
     sourceLayer: OracleSourceLayer | null,
-  ): { w: number; h: number; keypoints: LineartPartition["keypoints"]; bridges: LineartPartition["bridges"] } | null {
+  ): { w: number; h: number; keypoints: FlatColoringPartition["keypoints"]; bridges: FlatColoringPartition["bridges"] } | null {
     if (!this.isReady(doc, sourceLayer)) return null;
     const p = this._cache!.part;
     return { w: p.w, h: p.h, keypoints: p.keypoints, bridges: p.bridges };
@@ -115,7 +115,7 @@ export class LineartOracle {
   private _ensurePartition(
     doc: { width: number; height: number },
     sourceLayer: OracleSourceLayer | null,
-  ): LineartPartition {
+  ): FlatColoringPartition {
     const id = sourceLayer ? sourceLayer.id : -1;
     const rev = sourceLayer ? sourceLayer.contentRev : 0;
     const c = this._cache;
@@ -124,7 +124,7 @@ export class LineartOracle {
     const rgba: Uint8ClampedArray = sourceLayer
       ? sourceLayer.getImageData(0, 0, doc.width, doc.height).data
       : new Uint8ClampedArray(doc.width * doc.height * 4);
-    const part = buildLineartPartition(rgba, doc.width, doc.height, this._params);
+    const part = buildFlatColoringPartition(rgba, doc.width, doc.height, this._params);
     this._cache = { layerId: id, rev, w: doc.width, h: doc.height, part };
     return part;
   }

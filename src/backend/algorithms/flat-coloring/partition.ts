@@ -13,7 +13,7 @@ import { closeStrokes } from "./closing.ts";
 import type { Keypoint } from "./border.ts";
 import type { BridgeDebug } from "./closing.ts";
 
-export interface LineartParams {
+export interface FlatColoringParams {
   /** 白底合成亮度 ≤ 此值（0..255）判为笔画 */
   binarizeThreshold: number;
   /** 法线平滑核半径 L */
@@ -37,7 +37,7 @@ export interface LineartParams {
 }
 
 // 论文声称同一组默认参数跑遍全部实验图；这里的数值按同精神取，测试图上调定。
-export const DEFAULT_LINEART_PARAMS: LineartParams = {
+export const DEFAULT_FLAT_COLORING_PARAMS: FlatColoringParams = {
   binarizeThreshold: 128,
   kernelL: 5,
   thetaKappa: 0.24,
@@ -50,7 +50,7 @@ export const DEFAULT_LINEART_PARAMS: LineartParams = {
   erode: true,
 };
 
-export interface LineartPartition {
+export interface FlatColoringPartition {
   w: number;
   h: number;
   /** 每像素区域号 1..regionCount；0 = 无区域（仅整图全笔画的病态情形） */
@@ -72,7 +72,7 @@ export interface LineartPartition {
 }
 
 /** 懒补 inkDepth（v0.7.19）：Ib0 = 原始二值墨水（oracle 按同一墨线判定重新 binarize）。 */
-export function attachInkDepth(part: LineartPartition, Ib0: Uint8Array): void {
+export function attachInkDepth(part: FlatColoringPartition, Ib0: Uint8Array): void {
   const { w, h } = part;
   const bg = new Uint8Array(w * h);
   for (let i = 0; i < bg.length; i++) bg[i] = Ib0[i] ? 0 : 1;
@@ -185,10 +185,10 @@ function propagateUnderStrokes(labels: Int32Array, w: number, h: number, bboxes:
   }
 }
 
-/** 二值笔画图 → 分区（测试与调参入口；buildLineartPartition 的后半段）。 */
+/** 二值笔画图 → 分区（测试与调参入口；buildFlatColoringPartition 的后半段）。 */
 export function buildPartitionFromBinary(
-  Ib0: Uint8Array, w: number, h: number, params: LineartParams = DEFAULT_LINEART_PARAMS,
-): LineartPartition {
+  Ib0: Uint8Array, w: number, h: number, params: FlatColoringParams = DEFAULT_FLAT_COLORING_PARAMS,
+): FlatColoringPartition {
   let Ib = Ib0;
   let halfW = 0;
   let hasStroke = false;
@@ -226,9 +226,9 @@ export function buildPartitionFromBinary(
 }
 
 /** 总入口：RGBA → 分区。 */
-export function buildLineartPartition(
-  rgba: Uint8Array | Uint8ClampedArray, w: number, h: number, params: LineartParams = DEFAULT_LINEART_PARAMS,
-): LineartPartition {
+export function buildFlatColoringPartition(
+  rgba: Uint8Array | Uint8ClampedArray, w: number, h: number, params: FlatColoringParams = DEFAULT_FLAT_COLORING_PARAMS,
+): FlatColoringPartition {
   return buildPartitionFromBinary(binarizeLuma(rgba, w, h, params.binarizeThreshold), w, h, params);
 }
 
@@ -236,7 +236,7 @@ export function buildLineartPartition(
  *  bleedPx（v0.7.17 蔓延距离，query-time 参数不碰缓存）：-1=自动（填到中线，现行为）；
  *  ≥0 = 最多陷进真墨水 bleedPx（0=像素画模式，真墨水一个不碰；虚拟闭合桥不是墨水，恒可跨）。 */
 export function regionMaskAt(
-  part: LineartPartition, x: number, y: number, bleedPx = -1,
+  part: FlatColoringPartition, x: number, y: number, bleedPx = -1,
 ): { x: number; y: number; w: number; h: number; mask: Uint8Array } | null {
   const xi = Math.floor(x), yi = Math.floor(y);
   if (xi < 0 || xi >= part.w || yi < 0 || yi >= part.h) return null;
