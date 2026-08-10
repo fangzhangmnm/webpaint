@@ -1,5 +1,5 @@
 import type { GestureViewport } from "./pointer-gesture.ts";
-import type { PaintingView } from "./workpiece/painting-view.ts";
+import type { PaintingView } from "./backend/workpiece/painting-view.ts";
 type RefViewport = GestureViewport;
 interface ReferenceWindowOpts {
     panel: HTMLElement;

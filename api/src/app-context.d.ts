@@ -1,11 +1,11 @@
-import type { PaintingView } from "./workpiece/painting-view.ts";
+import type { PaintingView } from "./backend/workpiece/painting-view.ts";
 import type { Board } from "./board.ts";
 import type { InputController } from "./input.ts";
 import type { EditMode } from "./edit-mode.ts";
-import type { History } from "./workpiece/history.ts";
-import type { LayersFace } from "./layers-face.ts";
-import type { PaintingWorkpiece } from "./workpiece/painting-workpiece.ts";
-import type { LayerTiles } from "./workpiece/layer-tiles.ts";
+import type { History } from "./backend/workpiece/history.ts";
+import type { LayersFace } from "./backend/layers-face.ts";
+import type { PaintingWorkpiece } from "./backend/workpiece/painting-workpiece.ts";
+import type { LayerTiles } from "./backend/workpiece/layer-tiles.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
 export interface ToolDial {
     size: number;

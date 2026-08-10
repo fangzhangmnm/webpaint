@@ -5,4 +5,5 @@ export declare function imageSourceToBytes(src: DecodedImage | HTMLCanvasElement
     w: number;
     h: number;
 };
+export declare function installPngDecodeFallback(): void;
 export declare function canvasToBlob(canvas: OffscreenCanvas | HTMLCanvasElement, type?: string): Promise<Blob | null>;

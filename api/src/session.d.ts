@@ -1,4 +1,4 @@
-import type { PaintingView } from "./workpiece/painting-view.ts";
+import type { PaintingView } from "./backend/workpiece/painting-view.ts";
 export declare function getCurrentSessionName(): string;
 export declare function setCurrentSessionName(name: string): void;
 /** 合成字节 → 缩略图 blob（最长边 = maxSide）。PNG 保 alpha（容器 CSS 背景可独立调色）。

@@ -14,8 +14,8 @@ type StampCollect = {
     bw: number;
     bh: number;
 } | null;
-import type { PaintingView, ViewLeaf } from "./workpiece/painting-view.ts";
-import type { LayerPixels } from "./tiles/tile-layer.ts";
+import type { PaintingView, ViewLeaf } from "./backend/workpiece/painting-view.ts";
+import type { LayerPixels } from "./backend/tiles/tile-layer.ts";
 interface Viewport {
     tx: number;
     ty: number;
@@ -57,7 +57,7 @@ export interface PerspGizmoData {
         y: number;
     }]>;
 }
-import type { Selection } from "./selection.ts";
+import type { Selection } from "./backend/selection.ts";
 interface MeshPt {
     x: number;
     y: number;

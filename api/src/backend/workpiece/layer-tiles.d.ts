@@ -40,11 +40,15 @@ export declare class LayerTiles implements CollectorComponent {
     private _computed;
     private _exchange;
     private _suspend;
+    private _observerDispose;
     constructor(wp: Workpiece, host: TilesHost);
+    /** 退租（WebPaintBackend.dispose）：解除观察者注册。之后本实例不再收集（也不该再被写）。 */
+    dispose(): void;
     /** 内部/装载协作面：自带记账的窗口挂起收集（exchange/computed verb 体内、load 灌入——收了=双记账）。 */
     _suspendCollect(on: boolean): void;
     private _tilesets;
     private _nextTilesetId;
+    private _stampOwner;
     /** 新 tileset 入册，refs=1 归调用方（json 收养 +1 后调用方 release——净移交）。 */
     createTileset(lp: LayerPixels): number;
     /** 零拷贝复制（句柄共享快照）：duplicateLayer 用。refs=1 归调用方。 */

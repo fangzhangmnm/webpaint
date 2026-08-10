@@ -1,0 +1,98 @@
+// webpaint-backend-interface —— 纯接口文件（类 .h）：契约与实现分离（提案 §3，pin 住；
+// 形状变了要回写 20260808-c-headless-proposal.md）。实现体 = ./webpaint-backend.ts。
+//
+// 【硬纪律】本文件全部方法只收/吐 标量 | JSON-able 对象 | TypedArray/bytes——它同时是
+// 进程内 api、postMessage 协议、MCP tool schema、multiplayer 序列化面（同一把刀）。
+// ViewLeaf/LayerPixels 等引擎对象**不得**出现在签名里。
+//
+// 事务模型（提案 §6.1，C4 普查定形）：同时最多一个 open transaction（workpiece 单令牌墙的
+// 接口化身）；第二个 begin、开着期间的 undo/redo、冲突 verb → 响亮拒绝（throw）。
+// dispose 时开着 → cancel 后释放（interrupt=cancel 家规）。
+//
+// C7 第一棒收编范围：生命周期 + 字节面 + 读面 + 层结构 verbs（LayersFace 穿接口衣）+ undo。
+// stroke/filter 档口**契约已 pin、进程内实现待 C8**（栅格域要 SoftGl2Port 兜底才能 headless 跑）
+// ——本棒实现体对它们响亮 throw（fail-loud，不静默）。
+// verbs 全清单（选区/浮层/fill/doc 几何）随后棒逐条过（§6.3 留白纪律：不提前固化）。
+
+// ---- 读面投影（JSON-able；引擎树的标量镜像）----
+export interface BackendLayerNode {
+  id: number; name: string; visible: boolean; opacity: number; mode: string;
+  clippingMask: boolean;
+  lockAlpha?: boolean;                    // 叶才有
+  children?: BackendLayerNode[];          // 组才有
+}
+export interface BackendDocInfo {
+  width: number; height: number; backgroundColor: string;
+  activeId: number | null; referenceLayerId: number | null;
+  layerCount: number;                     // 叶计数（maxLayers 预算对照）
+}
+export interface BackendChangeEvent {
+  canUndo: boolean; canRedo: boolean; isDirty: boolean;
+}
+
+// ---- 指令面返回形（标量版 OpStatus/AddLayerResult）----
+export type BackendOpResult = { ok: true } | { ok: false; msg?: string };
+export type BackendAddResult = { ok: true; id: number } | { ok: false; msg?: string };
+
+// ---- 多步事务句柄（≈ WriteToken 的远程化身）----
+export type StrokeId = number;
+export type FilterSessionId = number;
+
+/** ResolvedBrush 快照（begin 冻结一笔；画一半动笔=下一笔生效）。C7 先按不透明 JSON-able 对象
+ *  过墙（真形状 = resolved-brush.ts ResolvedBrush，全标量已满足纪律；C8 接通引擎时钉细）。 */
+export type ResolvedBrushSnapshot = Record<string, unknown>;
+
+export interface WebPaintBackendInterface {
+  // ── 生命周期：born-loaded，无空态无 load 方法（liminal space 结构性不存在）——
+  //    换画 = 弃旧建新；load/new 的舒服语义住壳层 tab 管理器。
+  dispose(): void;                        // 显式释放（undo 栈/tileset/观察者退租；幂等）
+  readonly disposed: boolean;
+
+  // ── 字节面：吐包好的 binary（加密等外包装壳再开一次包）──
+  encodeOra(opts?: {
+    /** 壳 sidecar（不透明携带，backend 不解释）：desk struct → .webpaint/editor-state.json。 */
+    editorSidecar?: object;
+    /** 参考窗图 bytes → webpaint/reference.png。 */
+    referencePng?: Uint8Array;
+  }): Promise<Uint8Array>;
+  exportImage(fmt: "png" | "jpg"): Promise<Uint8Array>;   // 合成→字节；jpg 经注入编码器；GL 缺席响亮失败
+
+  // ── 读面（JSON-able 投影）──
+  docInfo(): BackendDocInfo;
+  layerTree(): BackendLayerNode[];        // bottom-first（与 stack.xml/decode 同序）
+  isDirty(): boolean;
+  markSaved(): void;
+
+  // ── 指令面：只收终值 verb；交互/手柄/多步输入 backend 绝不碰 ──
+  // 层结构（LayersFace 现有面 api 化第一批；返回即入栈一步，no-op 不占步）
+  layerAdd(name?: string): BackendAddResult;
+  layerDuplicate(id: number): BackendAddResult;
+  layerRemove(id: number): BackendOpResult;
+  layerMove(id: number, delta: number): BackendOpResult;
+  layerMergeDown(id: number): BackendOpResult;            // 需合成注入（GL/软合成）；缺席响亮失败
+  layerSetProp(id: number, prop: "name" | "visible" | "opacity" | "mode" | "clippingMask" | "lockAlpha", value: string | number | boolean): BackendOpResult;
+  layerSetActive(id: number): boolean;
+  layerClear(id: number): BackendOpResult;
+  setReferenceLayer(id: number | null): BackendOpResult;
+
+  // ── undo（open transaction 期间 throw——令牌墙语义）──
+  undo(): boolean;
+  redo(): boolean;
+  canUndo(): boolean;
+  canRedo(): boolean;
+
+  // ── 多步事务档口（契约 pin；进程内实现 C8 接通栅格域后落地，现在响亮 throw）──
+  // stroke 档（累积真改；全部笔类共用——差异在 ResolvedBrush 快照/engineKey 内部）
+  strokeBegin(leafId: number, brush: ResolvedBrushSnapshot): StrokeId;
+  strokeAppend(id: StrokeId, points: Float32Array): void;   // (x,y,p,t)×N，stride=4，版本化留扩展位
+  strokeEnd(id: StrokeId): boolean;                         // 平滑+栅格+bake+记账全在 backend；false=no-op
+  strokeCancel(id: StrokeId): void;
+  // filter 档（参数重算；原型 = filters-adjust surrogate 逐字升格）
+  filterBegin(leafId: number, filterId: string): FilterSessionId;
+  filterSetParams(id: FilterSessionId, params: Record<string, unknown>): void;
+  filterCommit(id: FilterSessionId): boolean;               // false = no-op
+  filterCancel(id: FilterSessionId): void;
+
+  // ── 事件（壳/embedding 消费；返回 disposer）──
+  onChange(cb: (ev: BackendChangeEvent) => void): () => void;
+}

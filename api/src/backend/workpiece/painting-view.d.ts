@@ -3,6 +3,7 @@ import type { PaintingWorkpiece } from "./painting-workpiece.ts";
 import type { LayerTiles } from "./layer-tiles.ts";
 import type { Selection } from "../selection.ts";
 export declare const LAYER_HARD_CEIL = 64;
+export declare function setDeviceMemoryGB(gb: number): void;
 export declare function layerByteBudget(): number;
 export declare function computeMaxLayers(currentLeafCount: number, residentBytes: number, budgetBytes?: number): number;
 export interface ViewLeafSnap {

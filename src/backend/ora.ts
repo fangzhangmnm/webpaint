@@ -206,7 +206,9 @@ export async function encodeDocToOra(doc: EncodeDoc, opts: EncodeOpts) {
   // thumbnail 末尾（云端 byte-range 优化）——必须是最后一个 entry，见上方 reference.png 注释。
   entries.push({ path: "Thumbnails/thumbnail.png", data: thumbPng as Uint8Array });
 
-  return await zipPack(entries);
+  // C7 决定论 encode：entry 时间戳钉死 zip epoch（1980-01-01）——同内容 → 同字节
+  // （backend round-trip 锚；云 diff 友好）。zip entry 日期无消费者（同步/peek 全按文件级元数据）。
+  return await zipPack(entries, { lastModDate: new Date(Date.UTC(1980, 0, 1, 0, 0, 0)) });
 }
 
 // ---- decode：.ora Blob → PaintingData（T3b-2：plain data，wp2.load 灌入）----

@@ -1,5 +1,5 @@
-import type { ViewLeaf } from "./workpiece/painting-view.ts";
-import type { Selection } from "./selection.ts";
+import type { ViewLeaf } from "./backend/workpiece/painting-view.ts";
+import type { Selection } from "./backend/selection.ts";
 interface BrushFilter {
     id?: string;
     beginBrushStroke(layer: ViewLeaf, params: unknown, brushSettings: unknown, selection: Selection | null, x: number, y: number, pressure: number): unknown;

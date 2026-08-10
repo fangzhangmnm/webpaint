@@ -1,6 +1,6 @@
-import type { ViewLeaf } from "../workpiece/painting-view.ts";
+import type { ViewLeaf } from "../backend/workpiece/painting-view.ts";
 import type { SplinePlane } from "../backend/algorithms/bspline.ts";
-import type { Selection } from "../selection.ts";
+import type { Selection } from "../backend/selection.ts";
 interface LiquifySettings {
     bleed?: string;
     sample?: string;

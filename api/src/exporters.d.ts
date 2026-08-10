@@ -1,4 +1,4 @@
-import type { PaintingView } from "./workpiece/painting-view.ts";
+import type { PaintingView } from "./backend/workpiece/painting-view.ts";
 export interface ExportOpts {
     scope?: string;
     cropRect?: {

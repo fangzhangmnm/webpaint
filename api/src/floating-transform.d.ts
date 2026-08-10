@@ -1,8 +1,8 @@
-import type { ViewLeaf, ViewGroup, PaintingView } from "./workpiece/painting-view.ts";
-import type { FloatFrame, TransformClass, FloatLayerComponent } from "./workpiece/float-component.ts";
-import type { SelectionComponent } from "./workpiece/selection-component.ts";
-import type { RigidMap } from "./workpiece/float-ops.ts";
-import type { History } from "./workpiece/history.ts";
+import type { ViewLeaf, ViewGroup, PaintingView } from "./backend/workpiece/painting-view.ts";
+import type { FloatFrame, TransformClass, FloatLayerComponent } from "./backend/workpiece/float-component.ts";
+import type { SelectionComponent } from "./backend/workpiece/selection-component.ts";
+import type { RigidMap } from "./backend/workpiece/float-ops.ts";
+import type { History } from "./backend/workpiece/history.ts";
 import type { SplinePlane } from "./backend/algorithms/bspline.ts";
 import type { U8Plane } from "./backend/algorithms/rotsprite.ts";
 type Node = ViewLeaf | ViewGroup;

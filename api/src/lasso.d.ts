@@ -1,13 +1,13 @@
-import { Selection } from "./selection.ts";
+import { Selection } from "./backend/selection.ts";
 import { FlatColoringOracle } from "./flat-coloring-oracle.ts";
 import type { ColorMetric } from "./common/color-dist.ts";
 import { FloatingTransform } from "./floating-transform.ts";
 import type { WarpBakeFn } from "./floating-transform.ts";
-import type { ViewLeaf, ViewGroup, PaintingView } from "./workpiece/painting-view.ts";
-import type { History } from "./workpiece/history.ts";
-import type { FloatLayerComponent } from "./workpiece/float-component.ts";
-import type { SelectionComponent } from "./workpiece/selection-component.ts";
-import { SelectionPreviewTx } from "./workpiece/selection-component.ts";
+import type { ViewLeaf, ViewGroup, PaintingView } from "./backend/workpiece/painting-view.ts";
+import type { History } from "./backend/workpiece/history.ts";
+import type { FloatLayerComponent } from "./backend/workpiece/float-component.ts";
+import type { SelectionComponent } from "./backend/workpiece/selection-component.ts";
+import { SelectionPreviewTx } from "./backend/workpiece/selection-component.ts";
 interface Point {
     x: number;
     y: number;

@@ -1,5 +1,5 @@
 import type { BlendMode } from "./blend-glsl.ts";
-import type { LayerPixels } from "../tiles/tile-layer.ts";
+import type { LayerPixels } from "../backend/tiles/tile-layer.ts";
 export interface DocLeaf {
     isGroup: false;
     id: number;

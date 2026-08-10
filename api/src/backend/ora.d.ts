@@ -1,3 +1,4 @@
+export declare function setOraLogReporter(fn: (msg: string) => void): void;
 import type { PaintingData } from "./workpiece/painting-workpiece.ts";
 export interface EncodeLeaf {
     isGroup: false;
@@ -36,6 +37,7 @@ type EncodeDoc = {
  *  getImageData = 纯切片，无 canvas、无追写风险）。 */
 export declare function paintingDataToEncodeDoc(data: PaintingData): EncodeDoc;
 interface EncodeOpts {
+    wroteWith: string;
     mergedBytes?: {
         data: Uint8ClampedArray;
         w: number;
@@ -60,7 +62,7 @@ export interface DecodedPainting {
  *
  * opts.referenceImage: optional Blob
  */
-export declare function encodeDocToOra(doc: EncodeDoc, opts?: EncodeOpts): Promise<any>;
+export declare function encodeDocToOra(doc: EncodeDoc, opts: EncodeOpts): Promise<any>;
 /** Blob (.ora 明文) → DecodedPainting（json 形 + 内联 tile 字节 + sidecar）。 */
 export declare function decodeOraToPainting(blob: Blob): Promise<DecodedPainting>;
 export declare function parseAppVersion(s: string | null | undefined): number | null;

@@ -1,63 +1,11 @@
 // ORA 嵌套组序列化（batch 2 step 3）：buildStackXml ↔ parseStackXml 树往返 + id + active。
-// 纯 XML 字符串往返（无 canvas / 无 PNG）。node 无 DOMParser → 本文件装一个极简 XML parser
-// polyfill（只够解析我们自己 emit 的 well-formed XML：元素 / 属性 / 自闭合 / 嵌套 stack）。
+// 纯 XML 字符串往返（无 canvas / 无 PNG）。node 无 DOMParser → 极简 XML parser polyfill
+// （C7 抽共享 test/xml-shim.mjs——webpaint-backend round-trip 同用）。
 // C3：fixture 从旧 PaintDoc 迁 OraDoc 鸭形直构（buildStackXml 的输入契约就是纯结构 duck——
 //   生产侧 ora.ts encode 喂的也是 exportData 冻结鸭形，不再有类依赖）。
 import { describe, it, assert, eq } from "./runner.mjs";
 
-// ---- 极简 XML parser polyfill（recursive descent；只解析受控输出）----
-function decodeEntities(s) {
-  return s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
-}
-function makeEl(tagName) {
-  return { tagName, _attrs: {}, children: [], getAttribute(n) { return n in this._attrs ? this._attrs[n] : null; } };
-}
-function parseXml(text) {
-  text = text.replace(/<\?[\s\S]*?\?>/g, "").replace(/<!--[\s\S]*?-->/g, "");
-  let i = 0; const n = text.length;
-  const isWs = (c) => c === " " || c === "\t" || c === "\n" || c === "\r";
-  function parseElement() {
-    i++;                                            // skip '<'
-    let name = "";
-    while (i < n && !isWs(text[i]) && text[i] !== "/" && text[i] !== ">") name += text[i++];
-    const el = makeEl(name);
-    while (i < n) {
-      while (i < n && isWs(text[i])) i++;
-      if (text[i] === "/") { while (i < n && text[i] !== ">") i++; i++; return el; }   // self-closing
-      if (text[i] === ">") { i++; break; }          // open tag done → children
-      let an = "";
-      while (i < n && !isWs(text[i]) && text[i] !== "=" && text[i] !== ">") an += text[i++];
-      while (i < n && isWs(text[i])) i++;
-      if (text[i] === "=") {
-        i++; while (i < n && isWs(text[i])) i++;
-        const q = text[i++]; let av = "";
-        while (i < n && text[i] !== q) av += text[i++];
-        i++; el._attrs[an] = decodeEntities(av);
-      } else if (an) { el._attrs[an] = ""; }
-    }
-    while (i < n) {                                  // children until </name>
-      if (text[i] === "<") {
-        if (text[i + 1] === "/") { i += 2; while (i < n && text[i] !== ">") i++; i++; return el; }
-        el.children.push(parseElement());
-      } else i++;
-    }
-    return el;
-  }
-  while (i < n && text[i] !== "<") i++;
-  return parseElement();
-}
-class FakeDOMParser {
-  parseFromString(text) {
-    const root = parseXml(text);
-    return {
-      querySelector(sel) {
-        if (sel === "parsererror") return null;
-        if (sel === "image") return (root.tagName || "").toLowerCase() === "image" ? root : null;
-        return null;
-      },
-    };
-  }
-}
+import { FakeDOMParser } from "./xml-shim.mjs";
 
 const _prevDP = globalThis.DOMParser;
 globalThis.DOMParser = FakeDOMParser;

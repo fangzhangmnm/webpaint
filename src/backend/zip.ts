@@ -38,14 +38,16 @@ interface ZipEntry {
   data: Blob | Uint8Array | ArrayBuffer | string;
 }
 
-/** entries: [{ path, data: Blob|Uint8Array|ArrayBuffer|string }, ...]; return Blob */
-export async function zipPack(entries: ZipEntry[]) {
+/** entries: [{ path, data: Blob|Uint8Array|ArrayBuffer|string }, ...]; return Blob
+ *  opts.lastModDate：钉死 entry 时间戳 → **决定论 encode**（同内容 → 同字节；ADR-0009 方向，
+ *  C7 backend round-trip 锚 + 云 diff 友好）。缺省 = zip.js 默认（当前时刻）。 */
+export async function zipPack(entries: ZipEntry[], opts: { lastModDate?: Date } = {}) {
   ensureConfigured();
   const z = Z();
   const writer = new z.ZipWriter(new z.BlobWriter("application/zip"));
   for (const { path, data } of entries) {
     // level: 0 = STORE。PNG 已是压缩流，再 deflate 没意义还更慢。
-    await writer.add(path, toZipReader(data), { level: 0 });
+    await writer.add(path, toZipReader(data), { level: 0, ...(opts.lastModDate ? { lastModDate: opts.lastModDate } : {}) });
   }
   return await writer.close();
 }
