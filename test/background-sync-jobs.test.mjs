@@ -87,8 +87,8 @@ describe("bg-jobs · 输入插队", () => {
 });
 
 // deflate codec（vendored fflate sync 路径）——池的压缩管就吃这一个接口
-import { deflateTileCodec } from "../src/tiles/cpu-tile-compression.ts";
-import { CpuTilePool, bytesPerTile } from "../src/tiles/cpu-tile-pool.ts";
+import { deflateTileCodec } from "../src/backend/tiles/cpu-tile-compression.ts";
+import { CpuTilePool, bytesPerTile } from "../src/backend/tiles/cpu-tile-pool.ts";
 
 describe("cpu-tile-compression · deflate codec", () => {
   it("三格式往返无损 + 平坦内容真的变小", () => {

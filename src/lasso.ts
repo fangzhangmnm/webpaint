@@ -20,18 +20,18 @@
 // 选区值 + mask 操作（compose/invert/outline/applyMaskPostStroke/fill/clear/crop）已搬到
 // selection.js 的 Selection 类。lasso 只负责手势光栅化（产 Selection）+ 自由变换 gizmo。
 
-import { Selection, rasterizePolygonGray8 } from "./selection.ts";
+import { Selection, rasterizePolygonGray8 } from "./backend/selection.ts";
 import { FlatColoringOracle } from "./flat-coloring-oracle.ts";
 import { floodRegionFrom, similarRegionFrom } from "./backend/algorithms/magic-wand.ts";
 import type { ColorMetric } from "./common/color-dist.ts";
 import { makeBitmap } from "./bitmap.ts";
 import { FloatingTransform } from "./floating-transform.ts";
 import type { WarpBakeFn } from "./floating-transform.ts";
-import type { ViewLeaf, ViewGroup, PaintingView } from "./workpiece/painting-view.ts";
-import type { History } from "./workpiece/history.ts";
-import type { FloatLayerComponent } from "./workpiece/float-component.ts";
-import type { SelectionComponent } from "./workpiece/selection-component.ts";
-import { SelectionPreviewTx } from "./workpiece/selection-component.ts";
+import type { ViewLeaf, ViewGroup, PaintingView } from "./backend/workpiece/painting-view.ts";
+import type { History } from "./backend/workpiece/history.ts";
+import type { FloatLayerComponent } from "./backend/workpiece/float-component.ts";
+import type { SelectionComponent } from "./backend/workpiece/selection-component.ts";
+import { SelectionPreviewTx } from "./backend/workpiece/selection-component.ts";
 
 // ---- 本文件用到的最小局部类型（selection/doc/layer 的真类型在各自模块；此处只描述本类消费面）----
 interface Point { x: number; y: number; }

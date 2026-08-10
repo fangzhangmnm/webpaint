@@ -1,10 +1,10 @@
 // LayerTree（T3a，ADR-0008）：纯 json substrate / 换根收集 / tileset 引用计数所有权算术
 //（TreeStructureOp bounded 泄漏的 v2 解——回归锚：删组→驱逐→无泄漏）/ verbs 契约 / setActive 不记账。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { UndoStack } from "../src/workpiece/undo-stack.ts";
-import { PaintingWorkpiece } from "../src/workpiece/painting-workpiece.ts";
-import { LayerTree } from "../src/workpiece/layer-tree.ts";
-import { LayerPixels } from "../src/tiles/tile-layer.ts";
+import { UndoStack } from "../src/backend/workpiece/undo-stack.ts";
+import { PaintingWorkpiece } from "../src/backend/workpiece/painting-workpiece.ts";
+import { LayerTree } from "../src/backend/workpiece/layer-tree.ts";
+import { LayerPixels } from "../src/backend/tiles/tile-layer.ts";
 
 class Wp extends PaintingWorkpiece {
   attachTree(t) { this.register(t, { undo: "recorded" }); }

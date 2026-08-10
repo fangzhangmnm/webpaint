@@ -24,8 +24,8 @@ import { pinchScaleRot, solveAnchorTranslation } from "./pointer-gesture.ts";
 import type { GestureViewport } from "./pointer-gesture.ts";
 import { raiseWindow } from "./surfaces.ts";
 import { desk } from "./workbench-state.ts";
-import { renderNodesToCanvas } from "./doc-render.ts";
-import type { PaintingView } from "./workpiece/painting-view.ts";
+import { renderNodesToCanvas } from "./backend/doc-render.ts";
+import type { PaintingView } from "./backend/workpiece/painting-view.ts";
 
 // 参考窗内部 viewport（image-origin 约定）。形同 GestureViewport。
 type RefViewport = GestureViewport;

@@ -12,7 +12,7 @@
 // 全文件零 DOM 依赖 → node 全测（C3 债 b：Canvas2D facade 拆除，2D 参照域的 canvas 桥
 // 在 test/gl-smoke/canvas2d-facade.ts）。
 
-import { TILE_SIZE, tilesAcross, tileKey, tileCoord, forEachTileInRect } from "../common/tile-geometry.ts";
+import { TILE_SIZE, tilesAcross, tileKey, tileCoord, forEachTileInRect } from "../../common/tile-geometry.ts";
 import { appTilePool } from "./app-tile-pool.ts";
 import { computeBBox, type TileHandle } from "./cpu-tile-pool.ts";
 

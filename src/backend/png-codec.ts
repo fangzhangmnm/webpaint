@@ -10,10 +10,16 @@
 // 【硬原则（user）】：库外任何地方不许再为 PNG 编解码创建 canvas / createImageBitmap——
 // 字节进出一律走这里。新需求（调色板量化/16bit/APNG）改本库，别在外面绕。
 
-import { makeBitmap } from "./bitmap.ts";
-import UPNG from "../vendor/upng/upng.esm.js";
+import UPNG from "../../vendor/upng/upng.esm.js";
 
 export interface RgbaPlane { data: Uint8ClampedArray; w: number; h: number }
+
+// C7：canvas 回退路（createImageBitmap+2d 读出）物理移壳（shell/image-io.ts）——backend 零 canvas。
+// 壳 boot 显式安装（app.ts）；headless 无回退 → iCCP/坏文件走 UPNG 硬解（忽略 profile，能解则解）。
+// 「安全网永不删」承诺不变——它只是搬到壳域住，浏览器行为逐字节同旧。
+export type PngDecodeFallback = (u8: Uint8Array) => Promise<RgbaPlane>;
+let _decodeFallback: PngDecodeFallback | null = null;
+export function setPngDecodeFallback(fn: PngDecodeFallback): void { _decodeFallback = fn; }
 
 // ---- CRC32（PNG chunk 校验；pHYs 注入用）----
 const CRC_TABLE = (() => {
@@ -80,29 +86,22 @@ export async function encodePngFromBytes(data: Uint8ClampedArray, w: number, h: 
 // ---- 解码 ----
 
 /** PNG 字节 → straight RGBA。主路 UPNG（全格式、零 canvas、零 premult 损）；
- *  iCCP 色彩配置 / 解码失败 → canvas 回退（安全网，永不删——数据安全 >> 纯度）。 */
+ *  iCCP 色彩配置 / 解码失败 → 注入的壳回退（安全网，永不删——数据安全 >> 纯度）。 */
 export async function decodePngToBytes(bytes: Uint8Array | Blob): Promise<RgbaPlane> {
   const u8 = bytes instanceof Blob ? new Uint8Array(await bytes.arrayBuffer()) : bytes;
+  const upngDecode = (): RgbaPlane => {
+    const img = UPNG.decode(u8.buffer === undefined ? (u8 as unknown as ArrayBuffer) : new Uint8Array(u8).buffer);
+    const rgba = UPNG.toRGBA8(img)[0];
+    return { data: new Uint8ClampedArray(rgba), w: img.width, h: img.height };
+  };
   if (!hasChunk(u8, "iCCP")) {
     try {
-      const img = UPNG.decode(u8.buffer === undefined ? (u8 as unknown as ArrayBuffer) : new Uint8Array(u8).buffer);
-      const rgba = UPNG.toRGBA8(img)[0];
-      return { data: new Uint8ClampedArray(rgba), w: img.width, h: img.height };
+      return upngDecode();
     } catch (_) { /* 回退 */ }
   }
-  return decodePngViaCanvas(u8);
+  // iCCP（浏览器原生解码会应用 profile）或 UPNG 失败 → 壳回退；headless 无回退 → UPNG 硬解兜底。
+  if (_decodeFallback) return _decodeFallback(u8);
+  return upngDecode();
 }
 
-// 回退路：浏览器原生解码（会应用色彩 profile）+ 一次 canvas 读出。
-async function decodePngViaCanvas(u8: Uint8Array): Promise<RgbaPlane> {
-  const blob = new Blob([u8 as unknown as BlobPart], { type: "image/png" });
-  const bmp = await createImageBitmap(blob);
-  const c = makeBitmap(bmp.width, bmp.height);
-  const ctx = c.getContext("2d", { willReadFrequently: true }) as CanvasRenderingContext2D;
-  ctx.drawImage(bmp, 0, 0);
-  bmp.close?.();
-  const img = ctx.getImageData(0, 0, c.width, c.height);
-  return { data: img.data, w: img.width, h: img.height };
-}
-
-export { setDeflateLevel } from "../vendor/upng/upng.esm.js";
+export { setDeflateLevel } from "../../vendor/upng/upng.esm.js";

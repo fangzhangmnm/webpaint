@@ -10,7 +10,7 @@ import { clusterColors, partitionByNearest, hexOf, type ColorCluster } from "./b
 import { colorNameIn, defaultCulture, namingCategories, categoryLabel } from "./color-name.ts";
 import { wireInlineSelect } from "./inline-select.ts";
 import { makeRampSlider, type RampSliderHandle } from "./ui/ramp-slider.ts";
-import { countViewLeaves, type ViewLeaf } from "./workpiece/painting-view.ts";
+import { countViewLeaves, type ViewLeaf } from "./backend/workpiece/painting-view.ts";
 import { t } from "./i18n/index.ts";
 import type { AppContext } from "./app-context.ts";
 

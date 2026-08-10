@@ -6,7 +6,7 @@
 //   dom-shim 的最小 ImageData。
 import { describe, it, assert, eq } from "./runner.mjs";
 const { LiquifyEngine } = await import("../src/plugins/liquify-engine.ts");
-const { Selection } = await import("../src/selection.ts");
+const { Selection } = await import("../src/backend/selection.ts");
 
 // mock layer：整 doc RGBA 缓冲；snapshotImageData 按内容 bbox 物化（与真 Layer 形状一致）。
 function mockLayer(docW, docH) {

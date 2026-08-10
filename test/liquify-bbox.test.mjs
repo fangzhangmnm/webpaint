@@ -8,9 +8,9 @@
 // node dom-shim 的 canvas 是 no-op（无真像素）→ 不能做像素断言；改测「工作区是否长到 footprint」这一根因。
 // C3：fixture 从旧 PaintDoc 迁 v2 基座（PaintingWorkpiece + PaintingView；layer = ViewLeaf）。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { UndoStack } from "../src/workpiece/undo-stack.ts";
-import { PaintingWorkpiece } from "../src/workpiece/painting-workpiece.ts";
-import { PaintingView } from "../src/workpiece/painting-view.ts";
+import { UndoStack } from "../src/backend/workpiece/undo-stack.ts";
+import { PaintingWorkpiece } from "../src/backend/workpiece/painting-workpiece.ts";
+import { PaintingView } from "../src/backend/workpiece/painting-view.ts";
 const { LiquifyEngine } = await import("../src/plugins/liquify-engine.ts");
 
 const _ctxs = [];

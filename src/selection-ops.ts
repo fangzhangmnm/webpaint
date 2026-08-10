@@ -5,10 +5,10 @@
 //     入口在 input.ts KEYBOARD_SHORTCUTS（hub）；run 派发 window 事件，逻辑搬到这（要 doc/import/setColor）。
 //     Ctrl+T 直接复用 lassoTransformBtn.click()，不在此。Ctrl+C/V 仅走系统剪贴板，无内部 buffer / token。
 import { readImageFromClipboard, writeImageBlobToClipboard } from "./session.ts";
-import { encodePngFromBytes } from "./png-codec.ts";
-import { Selection } from "./selection.ts";
-import { disposeViewSnap as disposeLayerSnap, type ViewLeafSnap as LayerSnap } from "./workpiece/painting-view.ts";
-import { countViewLeaves } from "./workpiece/painting-view.ts";
+import { encodePngFromBytes } from "./backend/png-codec.ts";
+import { Selection } from "./backend/selection.ts";
+import { disposeViewSnap as disposeLayerSnap, type ViewLeafSnap as LayerSnap } from "./backend/workpiece/painting-view.ts";
+import { countViewLeaves } from "./backend/workpiece/painting-view.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { reportError } from "./error-badge.ts";
 import { updateLassoToolbar } from "./toolbar.ts";

@@ -4,7 +4,7 @@
 import { describe, it, assert, eq } from "./runner.mjs";
 
 const { floodSelectFrom } = await import("../src/lasso.ts");
-const { Selection } = await import("../src/selection.ts");
+const { Selection } = await import("../src/backend/selection.ts");
 
 // 假图层：w×h 的 RGBA 数据，bbox 盖满
 function fakeLayer(w, h, fill) {

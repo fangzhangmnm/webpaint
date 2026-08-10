@@ -14,8 +14,8 @@
 //   cancelBrushStroke?(state)                            可选，取消（abort 路径）
 //   flushDirty?(state) → [x0,y0,x1,y1] | null            可选，告诉 board dirty bbox
 
-import type { ViewLeaf } from "./workpiece/painting-view.ts";
-import type { Selection } from "./selection.ts";
+import type { ViewLeaf } from "./backend/workpiece/painting-view.ts";
+import type { Selection } from "./backend/selection.ts";
 
 // filter-brush 模式下 Filter 必须实现的最小契约（brush 方法在 filters.js 运行时挂上，
 // 故此处只描述本引擎会 dispatch 的子集；handle/params 对引擎是不透明的）。

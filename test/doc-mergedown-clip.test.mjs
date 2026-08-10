@@ -5,11 +5,11 @@
 // C3：从旧 PaintDoc.mergeDownLayer 迁 **LayersFace.mergeDown**（v2 真生产路径：renderNodesToBytes
 // 同一注入 seam + layer-tree.mergeDown verb——旧注「mergeDown 走 GL node 不可测」已不成立）。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { PaintingWorkpiece } from "../src/workpiece/painting-workpiece.ts";
-import { PaintingView, flattenViewLeaves, countViewLeaves } from "../src/workpiece/painting-view.ts";
-import { History } from "../src/workpiece/history.ts";
-import { LayersFace } from "../src/layers-face.ts";
-const { setDocCompositorBytes } = await import("../src/doc-render.ts");
+import { PaintingWorkpiece } from "../src/backend/workpiece/painting-workpiece.ts";
+import { PaintingView, flattenViewLeaves, countViewLeaves } from "../src/backend/workpiece/painting-view.ts";
+import { History } from "../src/backend/workpiece/history.ts";
+import { LayersFace } from "../src/backend/layers-face.ts";
+const { setDocCompositorBytes } = await import("../src/backend/doc-render.ts");
 
 // 参照合成器：nodes（结构化叶）自底向上 source-over；clippingMask 叶的 as 乘最近非剪裁基底的 alpha。
 // ⚠注入是模块单例、后注入者赢（app-boot 测试 import app.ts 会覆盖成 node 下恒 null 的 board 后端）

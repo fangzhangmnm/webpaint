@@ -39,6 +39,17 @@ export function imageSourceToBytes(src: DecodedImage | HTMLCanvasElement | Offsc
   return { data: img.data, w, h };
 }
 
+// C7：png-codec 的 canvas 回退路（iCCP 色彩配置 / UPNG 解码失败 → 浏览器原生解码一次性读出）
+// 从 backend/png-codec.ts 移壳到此。app.ts boot 显式安装；
+// 逻辑与旧 decodePngViaCanvas 逐字节同（decodeImageFile 的 Image 兜底顺带更鲁棒）。
+import { setPngDecodeFallback } from "../backend/png-codec.ts";
+export function installPngDecodeFallback(): void {
+  setPngDecodeFallback(async (u8) => {
+    const blob = new Blob([u8 as unknown as BlobPart], { type: "image/png" });
+    return imageSourceToBytes(await decodeImageFile(blob));
+  });
+}
+
 // canvas → Blob（jpg 编码等壳域名单场景）。OffscreenCanvas 用 convertToBlob，普通 canvas 用 toBlob。
 export function canvasToBlob(canvas: OffscreenCanvas | HTMLCanvasElement, type = "image/png") {
   if ((canvas as OffscreenCanvas).convertToBlob) return (canvas as OffscreenCanvas).convertToBlob({ type });

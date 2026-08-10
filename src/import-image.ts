@@ -14,7 +14,7 @@ import { t } from "./i18n/index.ts";
 import { session } from "./session-state.ts";
 import { decodeImageFile, imageSourceToBytes } from "./shell/image-io.ts";
 import { resampleBytes } from "./backend/algorithms/resample-bytes.ts";
-import { decodeOraToPainting } from "./ora.ts";
+import { decodeOraToPainting } from "./backend/ora.ts";
 import { store as _store } from "./app-store.ts";
 import { stripSessionExt } from "./config.ts";
 import { unlockImportedContainer } from "./enc-thumbs.ts";

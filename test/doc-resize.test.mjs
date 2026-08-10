@@ -2,10 +2,10 @@
 // crop/cropResample/resample 的实例交换记账：exchange record（undo 包 = 另一侧实例，自反互换）
 // + 树尺寸 setTreeProp 同 step 同向翻 + 双捕获断言 + 所有权收支（清栈/换文档后池归零）。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { UndoStack } from "../src/workpiece/undo-stack.ts";
-import { PaintingWorkpiece } from "../src/workpiece/painting-workpiece.ts";
-import { PaintingView } from "../src/workpiece/painting-view.ts";
-import { appTilePool } from "../src/tiles/app-tile-pool.ts";
+import { UndoStack } from "../src/backend/workpiece/undo-stack.ts";
+import { PaintingWorkpiece } from "../src/backend/workpiece/painting-workpiece.ts";
+import { PaintingView } from "../src/backend/workpiece/painting-view.ts";
+import { appTilePool } from "../src/backend/tiles/app-tile-pool.ts";
 
 const _ctxs = [];
 function mk() {

@@ -12,10 +12,10 @@ import type { Stamp, StrokeShape } from "./gl/gl-stamp.ts";
 // brush.collectStamps() 的返回形（board 不 import BrushEngine，结构化接）。
 type StampCollect = { stamps: Stamp[]; shape: StrokeShape; layer: ViewLeaf; mode: string; opacity: number; blendMode: string; bx: number; by: number; bw: number; bh: number } | null;
 import type { GLDoc, GLLeaf } from "./gl/gl-board.ts";
-import type { PaintingView, ViewLeaf } from "./workpiece/painting-view.ts";
-import { layerByteBudget } from "./workpiece/painting-view.ts";
-import { eachViewLeaf } from "./workpiece/painting-view.ts";
-import type { LayerPixels } from "./tiles/tile-layer.ts";
+import type { PaintingView, ViewLeaf } from "./backend/workpiece/painting-view.ts";
+import { layerByteBudget } from "./backend/workpiece/painting-view.ts";
+import { eachViewLeaf } from "./backend/workpiece/painting-view.ts";
+import type { LayerPixels } from "./backend/tiles/tile-layer.ts";
 
 // ---- 本文件用到的结构类型（局部定义，只覆盖 board 实际访问的成员）----
 
@@ -33,7 +33,7 @@ export interface PerspGizmoData {
 }
 
 // 选区（doc.selection）：gray8 tile mask + 紧 bbox（真类型在 selection.ts；v0.4.6 maskCanvas 死）
-import type { Selection } from "./selection.ts";
+import type { Selection } from "./backend/selection.ts";
 import { antsOutline } from "./marching-ants.ts";
 import { clipSegToBox } from "./shape-geometry.ts";
 

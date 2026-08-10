@@ -6,8 +6,8 @@
 //   - begin/clear = 导航态声明写（无 token 合法、不记账）；setColorLive 中间值不记账；
 //   - 同 token 首捕获赢 + 净变化为零不占步；无令牌 commitPreApplied → throw（令牌墙）。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { PaintingWorkpiece } from "../src/workpiece/painting-workpiece.ts";
-import { UndoStack } from "../src/workpiece/undo-stack.ts";
+import { PaintingWorkpiece } from "../src/backend/workpiece/painting-workpiece.ts";
+import { UndoStack } from "../src/backend/workpiece/undo-stack.ts";
 
 const _ctxs = [];
 function mk() {

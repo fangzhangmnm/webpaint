@@ -7,8 +7,8 @@
 //   - v0.8.29：VP 编辑器也进记账面（user 2026-08-10「拖一次可以undo一次」——commitPreApplied
 //     每拖一步；旧「VP setting 不进 undo history」收窄 supersede）。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { PaintingWorkpiece } from "../src/workpiece/painting-workpiece.ts";
-import { UndoStack } from "../src/workpiece/undo-stack.ts";
+import { PaintingWorkpiece } from "../src/backend/workpiece/painting-workpiece.ts";
+import { UndoStack } from "../src/backend/workpiece/undo-stack.ts";
 
 const _ctxs = [];
 // 迷你 desk host：形状对齐 workbench-state 的 persp 结构（组件零结构知识，remap 由 host 实现）

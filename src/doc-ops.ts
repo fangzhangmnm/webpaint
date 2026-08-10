@@ -15,9 +15,9 @@ import { t } from "./i18n/index.ts";
 import { resizeCropRect, resizeCropRectAspect, fitRectToBBox, cropRectToInts } from "./crop-geometry.ts";
 import { loadCanvasTemplates, fillTemplateSelect, templatePx, templateById } from "./canvas-templates.ts";
 import { desk } from "./workbench-state.ts";
-import { LayerPixels } from "./tiles/tile-layer.ts";
+import { LayerPixels } from "./backend/tiles/tile-layer.ts";
 import { resampleBytes } from "./backend/algorithms/resample-bytes.ts";
-import type { Selection } from "./selection.ts";
+import type { Selection } from "./backend/selection.ts";
 import type { AppContext } from "./app-context.ts";
 
 interface Rect { x: number; y: number; w: number; h: number; }

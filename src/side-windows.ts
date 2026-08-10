@@ -10,7 +10,7 @@ import { PaletteWindow } from "./palette.ts";
 import { els } from "./els.ts";
 import { decodeImageFile, imageSourceToBytes } from "./shell/image-io.ts";
 import { areaResampleBytes } from "./backend/algorithms/resample-bytes.ts";
-import { encodePngFromBytes } from "./png-codec.ts";
+import { encodePngFromBytes } from "./backend/png-codec.ts";
 import { setColor } from "./color-panel.ts";
 import { setMenuOpen } from "./settings-menu.ts";
 import type { AppContext } from "./app-context.ts";

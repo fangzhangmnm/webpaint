@@ -22,14 +22,14 @@
 // 渲染：2×2 mesh → GPU warp（gl-compositor，per-pixel inverse homography；本文件只出 warp 矩阵，
 //   栅格在 GPU）。浮层源 = straight 字节平面 typed-array 直传（v0.6.38 去 canvas 化；WeakMap 缓存）。
 
-import { findViewNodeById, eachViewLeaf } from "./workpiece/painting-view.ts";
-import type { ViewLeaf, ViewGroup, PaintingView } from "./workpiece/painting-view.ts";
-import { cloneFloatMeta } from "./workpiece/float-component.ts";
-import type { FloatFrame, FloatTransformMeta, WorkpieceFloat, FloatState, TransformClass, FloatLayerComponent } from "./workpiece/float-component.ts";
-import type { SelectionComponent } from "./workpiece/selection-component.ts";
-import { extractFloatPixels, composeCutHole, composeIdentityWriteback, composeRigidWriteback, composeOverWriteback, applyRegionBuf } from "./workpiece/float-ops.ts";
-import type { RigidMap } from "./workpiece/float-ops.ts";
-import type { History } from "./workpiece/history.ts";
+import { findViewNodeById, eachViewLeaf } from "./backend/workpiece/painting-view.ts";
+import type { ViewLeaf, ViewGroup, PaintingView } from "./backend/workpiece/painting-view.ts";
+import { cloneFloatMeta } from "./backend/workpiece/float-component.ts";
+import type { FloatFrame, FloatTransformMeta, WorkpieceFloat, FloatState, TransformClass, FloatLayerComponent } from "./backend/workpiece/float-component.ts";
+import type { SelectionComponent } from "./backend/workpiece/selection-component.ts";
+import { extractFloatPixels, composeCutHole, composeIdentityWriteback, composeRigidWriteback, composeOverWriteback, applyRegionBuf } from "./backend/workpiece/float-ops.ts";
+import type { RigidMap } from "./backend/workpiece/float-ops.ts";
+import type { History } from "./backend/workpiece/history.ts";
 import { prefilterToSplinePlane } from "./backend/algorithms/bspline.ts";
 import type { SplinePlane } from "./backend/algorithms/bspline.ts";
 import { rotspriteUpscale } from "./backend/algorithms/rotsprite.ts";

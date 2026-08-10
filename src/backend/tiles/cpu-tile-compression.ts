@@ -8,7 +8,7 @@
 // 格式：裸 deflate 字节流（无自述头——format/bbox/原长都在池的 TileRecord 里，不重复存）。
 // 动漫向的自定义 filter+编码（spec line 119-121）是后续候选：换 codec 只动这里（池按 codec 注入）。
 
-import { deflateSync, inflateSync } from "../../vendor/fflate/fflate.esm.js";
+import { deflateSync, inflateSync } from "../../../vendor/fflate/fflate.esm.js";
 import type { TileCodec } from "./cpu-tile-pool.ts";
 
 export const deflateTileCodec: TileCodec = {

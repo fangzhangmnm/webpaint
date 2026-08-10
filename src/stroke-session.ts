@@ -25,10 +25,10 @@
 import type { BrushEngine } from "./brush.ts";
 import type { FilterBrushEngine } from "./filter-brush.ts";
 import type { ShapeBrushEngine } from "./shape-brush.ts";
-import type { ViewLeaf, ViewLeafSnap } from "./workpiece/painting-view.ts";
-import type { WriteToken } from "./workpiece/workpiece.ts";
-import type { Selection } from "./selection.ts";
-import { LayerPixels, disposePixelsSnapshot } from "./tiles/tile-layer.ts";
+import type { ViewLeaf, ViewLeafSnap } from "./backend/workpiece/painting-view.ts";
+import type { WriteToken } from "./backend/workpiece/workpiece.ts";
+import type { Selection } from "./backend/selection.ts";
+import { LayerPixels, disposePixelsSnapshot } from "./backend/tiles/tile-layer.ts";
 import { TILE_SIZE } from "./common/tile-geometry.ts";
 
 // 液化 = filterBrush 的 LiquifyFilter payload（v132 起无直连双轨）。

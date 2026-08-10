@@ -10,7 +10,7 @@ import {
   buildFlatColoringPartition, regionMaskAt, attachInkDepth, binarizeLuma, DEFAULT_FLAT_COLORING_PARAMS,
 } from "./backend/algorithms/flat-coloring/partition.ts";
 import type { FlatColoringPartition, FlatColoringParams } from "./backend/algorithms/flat-coloring/partition.ts";
-import { Selection } from "./selection.ts";
+import { Selection } from "./backend/selection.ts";
 
 /** 结构化最小依赖（≈ floodSelectFrom 的 mock 面）：node 直测不拖 doc.ts */
 export interface OracleSourceLayer {

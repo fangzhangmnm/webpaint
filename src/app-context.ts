@@ -12,14 +12,14 @@
 //   · 反应式 state / dialReactive / rack / 浮窗 / gallery 的形状暂在此**诚实描述**（不 import 其 .ts 源，
 //     避免 cascade 把屎山拖进门）——随各源逐步类型化再收敛引用。本接口是增量推进的锚，不是终态。
 
-import type { PaintingView } from "./workpiece/painting-view.ts";
+import type { PaintingView } from "./backend/workpiece/painting-view.ts";
 import type { Board } from "./board.ts";
 import type { InputController } from "./input.ts";
 import type { EditMode } from "./edit-mode.ts";
-import type { History } from "./workpiece/history.ts";
-import type { LayersFace } from "./layers-face.ts";
-import type { PaintingWorkpiece } from "./workpiece/painting-workpiece.ts";
-import type { LayerTiles } from "./workpiece/layer-tiles.ts";
+import type { History } from "./backend/workpiece/history.ts";
+import type { LayersFace } from "./backend/layers-face.ts";
+import type { PaintingWorkpiece } from "./backend/workpiece/painting-workpiece.ts";
+import type { LayerTiles } from "./backend/workpiece/layer-tiles.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
 
 // ---- 反应式 RAM 态（editor-state.ts 的 state/dialReactive；此处描述消费方读到的字段）----

@@ -5,7 +5,7 @@
 import { BrowserGl2Port } from "../../src/shell/browser-gl2-port.ts";
 import { GlRoom, poolCapacityForBudget } from "../../src/gl/gl-room.ts";
 import { RenderTree } from "../../src/gl/render-tree.ts";
-import { LayerPixels } from "../../src/tiles/tile-layer.ts";
+import { LayerPixels } from "../../src/backend/tiles/tile-layer.ts";
 import { replaceFromCanvas } from "./canvas2d-facade.ts";
 import type { DocNode } from "../../src/gl/gl-doc-bridge.ts";
 

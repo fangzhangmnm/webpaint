@@ -10,13 +10,13 @@
 
 import { GpuTilePool, GLGpuTileBackend, IndexTexture, GPU_TILE_BYTES } from "./gpu-tile-pool.ts";
 import { CpuGpuTileBridge } from "./tile-bridge.ts";
-import { appTilePool } from "../tiles/app-tile-pool.ts";
+import { appTilePool } from "../backend/tiles/app-tile-pool.ts";
 import { tilesAcross, tilesDown } from "../common/tile-geometry.ts";
 import { GLCompositor } from "./gl-compositor.ts";
 import type { Acc, OverlayDesc, FloatDesc } from "./gl-compositor.ts";
 import { safeMode } from "./gl-doc-bridge.ts";
 import type { DocNode, DocLeaf } from "./gl-doc-bridge.ts";
-import { LayerPixels } from "../tiles/tile-layer.ts";
+import { LayerPixels } from "../backend/tiles/tile-layer.ts";
 import { GLStampRasterizer } from "./gl-stamp.ts";
 import type { Stamp, StrokeShape } from "./gl-stamp.ts";
 import type { Plan, PlanNode, PlanStep, SegBuild } from "../render/render-plan.ts";

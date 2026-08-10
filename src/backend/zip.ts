@@ -1,5 +1,6 @@
 // ZIP 读写 = vendored zip.js (gildas-lormeau)。
-// UMD bundle 自挂 window.zip，HTML head 里以 classic <script> 加载。
+// UMD bundle 自挂 window.zip（浏览器 window ≡ globalThis；node 测试 shim 同挂）——
+// C7 起本文件读 globalThis（backend 禁浏览器词；语义逐字节同旧）。HTML head 里以 classic <script> 加载。
 //
 // 只管明文 zip（外层加密容器 + .ora 本体）。payload 的加密走 .7z（src/sevenzip.js）。
 
@@ -8,10 +9,11 @@
 type ZipLib = any;
 
 function Z(): ZipLib {
-  if (typeof window === "undefined" || !(window as unknown as { zip?: ZipLib }).zip) {
+  const g = globalThis as unknown as { zip?: ZipLib };
+  if (!g.zip) {
     throw new Error("zip.js 未加载（应在 app.js 之前以 classic <script> 引入 ./vendor/zip-js/zip-full.min.js）");
   }
-  return (window as unknown as { zip: ZipLib }).zip;
+  return g.zip;
 }
 
 // 首次访问时关掉 web workers —— inline worker 在某些场景被 CSP 拒；不开省心。

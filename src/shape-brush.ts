@@ -23,7 +23,7 @@
 //     restoreFromSnapshot 擦上一帧再整形重画。
 //   · 恒压 0.5、强制无 taper（覆写冻结 ResolvedBrush）。
 import { BrushEngine } from "./brush.ts";
-import { disposeViewSnap as disposeLayerSnap } from "./workpiece/painting-view.ts";
+import { disposeViewSnap as disposeLayerSnap } from "./backend/workpiece/painting-view.ts";
 import {
   snapLineEnd, rectCorners, fitEllipse,
   linePolyline, rectPolyline, ellipseArcPolyline, maxSegLenFor,
@@ -38,8 +38,8 @@ import {
 } from "./perspective-frame.ts";
 import { bresenhamConicInQuad } from "./pixel-conic.ts";
 import type { Family, PerspConfig, Mat3 } from "./perspective-frame.ts";
-import type { ViewLeafSnap as LayerSnap } from "./workpiece/painting-view.ts";
-import type { ViewLeaf } from "./workpiece/painting-view.ts";
+import type { ViewLeafSnap as LayerSnap } from "./backend/workpiece/painting-view.ts";
+import type { ViewLeaf } from "./backend/workpiece/painting-view.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
 import type { Pt } from "./shape-geometry.ts";
 

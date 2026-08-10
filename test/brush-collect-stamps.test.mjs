@@ -4,9 +4,9 @@
 //   - 列表非空、在画布内、size/alpha 合理；shape 字段（buildup/color/椭圆 aspect/rotation）正确透传。
 //   - pixelMode → null（caller 回退 CPU 直绘路径）。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { UndoStack } from "../src/workpiece/undo-stack.ts";
-import { PaintingWorkpiece } from "../src/workpiece/painting-workpiece.ts";
-import { PaintingView } from "../src/workpiece/painting-view.ts";
+import { UndoStack } from "../src/backend/workpiece/undo-stack.ts";
+import { PaintingWorkpiece } from "../src/backend/workpiece/painting-workpiece.ts";
+import { PaintingView } from "../src/backend/workpiece/painting-view.ts";
 const { BrushEngine } = await import("../src/brush.ts");
 const { resolveBrush } = await import("../src/resolved-brush.ts");
 

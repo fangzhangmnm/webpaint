@@ -10,7 +10,7 @@
 
 import { els } from "./els.ts";
 import { PANELS, openExclusive, closeExclusive, getCurrentExclusive } from "./panel-state.ts";
-import { Selection } from "./selection.ts";
+import { Selection } from "./backend/selection.ts";
 import { MAGIC_ALGORITHMS } from "./lasso.ts";
 import { makeRampSlider } from "./ui/ramp-slider.ts";
 import type { RampSliderHandle } from "./ui/ramp-slider.ts";
@@ -23,8 +23,8 @@ import { anchorPopupToBtn } from "./anchored-popup.ts";
 import { configFromModeState, planesForMode, defaultVpsForMode } from "./perspective-frame.ts";
 import type { PerspMode } from "./perspective-frame.ts";
 import type { AppContext } from "./app-context.ts";
-import type { ViewLeafSnap as LayerSnap } from "./workpiece/painting-view.ts";
-import type { SelectionPreviewTx } from "./workpiece/selection-component.ts";
+import type { ViewLeafSnap as LayerSnap } from "./backend/workpiece/painting-view.ts";
+import type { SelectionPreviewTx } from "./backend/workpiece/selection-component.ts";
 
 // 静态存在的工具栏元素查表 helper（initToolbar 在 DOM 就绪后调）。
 const byId = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;

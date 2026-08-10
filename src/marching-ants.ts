@@ -10,7 +10,7 @@
 //   **像素边界阶梯轮廓**（整数格；每个入选像素的裸露边直接发段）。所见轮廓 = 将被操作的像素集
 //   真边界，像素画视角严格阶梯。阈值 >128 与 Selection.morphed/消费端二值化一致（选区已全二值）。
 
-import type { Selection } from "./selection.ts";
+import type { Selection } from "./backend/selection.ts";
 
 const _cache = new WeakMap<Selection, Float32Array[]>();
 

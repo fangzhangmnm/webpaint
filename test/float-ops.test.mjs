@@ -14,11 +14,11 @@
 // （旧锚「源层被外力删掉 → 不可恢复」在 v2 下结构上不可能——树只能经 recorded verb 改，
 //   栈序保证 undo lift 前层必在；桥的不可恢复协议锚在 legacy-bridge.test.mjs。）
 import { describe, it, assert, eq } from "./runner.mjs";
-import { Selection } from "../src/selection.ts";
-import { PaintingWorkpiece } from "../src/workpiece/painting-workpiece.ts";
-import { PaintingView, flattenViewLeaves } from "../src/workpiece/painting-view.ts";
-import { History } from "../src/workpiece/history.ts";
-import { LayersFace } from "../src/layers-face.ts";
+import { Selection } from "../src/backend/selection.ts";
+import { PaintingWorkpiece } from "../src/backend/workpiece/painting-workpiece.ts";
+import { PaintingView, flattenViewLeaves } from "../src/backend/workpiece/painting-view.ts";
+import { History } from "../src/backend/workpiece/history.ts";
+import { LayersFace } from "../src/backend/layers-face.ts";
 import { FloatingTransform } from "../src/floating-transform.ts";
 
 // 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）

@@ -14,8 +14,8 @@
 import { registerFilter } from "../filters.ts";
 import type { Filter, FilterParams, BrushLayer, BrushSettings, BrushSelection, DirtyRect } from "../filters.ts";
 import { LiquifyEngine } from "./liquify-engine.ts";
-import type { ViewLeaf } from "../workpiece/painting-view.ts";
-import type { Selection } from "../selection.ts";
+import type { ViewLeaf } from "../backend/workpiece/painting-view.ts";
+import type { Selection } from "../backend/selection.ts";
 
 // liquify 把 stroke 委托给 LiquifyEngine；单 stroke 的可变状态只持一个 engine 引用。
 interface LiquifyBrushState {

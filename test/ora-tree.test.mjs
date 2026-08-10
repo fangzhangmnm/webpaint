@@ -61,7 +61,7 @@ class FakeDOMParser {
 
 const _prevDP = globalThis.DOMParser;
 globalThis.DOMParser = FakeDOMParser;
-const { buildStackXml, parseStackXml } = await import("../src/ora-stack-xml.ts");
+const { buildStackXml, parseStackXml } = await import("../src/backend/ora-stack-xml.ts");
 globalThis.DOMParser = _prevDP;
 
 const useStub = () => { globalThis.DOMParser = FakeDOMParser; };

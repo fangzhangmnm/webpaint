@@ -1,7 +1,7 @@
 // cpu-tile-pool：0.4 纪元底座（不可变 tile + 显式引用计数 + raw quota 阻塞压缩）。
 // 这里钉死的是**契约**：UAF 必 throw、双 release 必 throw、压缩对读者透明、quota 宁卡不爆。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { CpuTilePool, computeBBox, bytesPerTile } from "../src/tiles/cpu-tile-pool.ts";
+import { CpuTilePool, computeBBox, bytesPerTile } from "../src/backend/tiles/cpu-tile-pool.ts";
 
 const eqJson = (a, b, msg) => eq(JSON.stringify(a), JSON.stringify(b), msg);
 

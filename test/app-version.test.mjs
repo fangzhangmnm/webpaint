@@ -1,8 +1,8 @@
-// parseAppVersion：0.4 纪元版本换制的解析器（src/ora.ts）。
+// parseAppVersion：0.4 纪元版本换制的解析器（src/backend/ora.ts）。
 // 这组比较错了，「文档由新版本写入」守卫（session-state）会对所有旧 ORA 误报——
 // 旧制 /^v(\d+)/ 把 "v0.4.0" 解析成 0，v438(=438) > 0 → 每个旧文件都被当成未来文件。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { parseAppVersion } from "../src/ora.ts";
+import { parseAppVersion } from "../src/backend/ora.ts";
 
 const p = parseAppVersion;
 

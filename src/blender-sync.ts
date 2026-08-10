@@ -17,11 +17,11 @@
 import type { AppContext } from "./app-context.ts";
 import { reportError } from "./error-badge.ts";
 import { session } from "./session-state.ts";
-import type { ViewLeaf } from "./workpiece/painting-view.ts";
+import type { ViewLeaf } from "./backend/workpiece/painting-view.ts";
 import { renderDocToImageBlob } from "./session.ts";
 import { imageSourceToBytes } from "./shell/image-io.ts";
 import { resampleBytes } from "./backend/algorithms/resample-bytes.ts";
-import { encodePngFromBytes } from "./png-codec.ts";
+import { encodePngFromBytes } from "./backend/png-codec.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { setMenuOpen } from "./settings-menu.ts";
 import { desk } from "./workbench-state.ts";

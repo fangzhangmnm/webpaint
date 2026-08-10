@@ -14,9 +14,9 @@ import { reactive } from "../vendor/vue/vue.esm-browser.prod.js";
 import { WEBPAINT_VERSION } from "./version.ts";
 import { reportError } from "./error-badge.ts";
 import { thumbBlobFromBytes, setCurrentSessionName } from "./session.ts";
-import { renderNodesToBytes } from "./doc-render.ts";
-import { encodeDocToOra, decodeOraToPainting, paintingDataToEncodeDoc, parseAppVersion, type DecodedPainting } from "./ora.ts";
-import { flattenViewLeaves } from "./workpiece/painting-view.ts";
+import { renderNodesToBytes } from "./backend/doc-render.ts";
+import { encodeDocToOra, decodeOraToPainting, paintingDataToEncodeDoc, parseAppVersion, type DecodedPainting } from "./backend/ora.ts";
+import { flattenViewLeaves } from "./backend/workpiece/painting-view.ts";
 import { tLatin } from "./i18n/index.ts";
 import { isSignedIn, store as _store } from "./app-store.ts";
 import type { EncryptedBlob } from "./store/index.ts";   // 密文 at-rest 字节（branded：明文流不进只收密文的 sink）
@@ -173,7 +173,7 @@ async function _encodeCurrentOraWithPeek(): Promise<{ bytes: Blob; peek: Blob | 
   //   编辑都追不进快照；无句柄、无 dispose。paintingDataToEncodeDoc 只是纯切片视图。
   const frozen = paintingDataToEncodeDoc(wp2.exportData());
   const meta = _buildOraMeta();
-  const bytes = await encodeDocToOra(frozen, { ...meta, mergedBytes: merged }) as Blob;
+  const bytes = await encodeDocToOra(frozen, { ...meta, mergedBytes: merged, wroteWith: WEBPAINT_VERSION }) as Blob;
   const peek = merged ? await thumbBlobFromBytes(merged, 256) : null;
   return { bytes, peek };
 }

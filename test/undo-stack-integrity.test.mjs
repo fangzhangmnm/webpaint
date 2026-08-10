@@ -8,10 +8,10 @@
 //   ③ v0.7.41 导入=一个 undo 整点（微步聚合 + lift 封口）。
 // 不直接 import src/import-image.ts（拽 els/i18n/store 整串 DOM 依赖）——测的是它必须遵守的流程形状。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { PaintingWorkpiece } from "../src/workpiece/painting-workpiece.ts";
-import { PaintingView, flattenViewLeaves } from "../src/workpiece/painting-view.ts";
-import { History } from "../src/workpiece/history.ts";
-import { LayersFace } from "../src/layers-face.ts";
+import { PaintingWorkpiece } from "../src/backend/workpiece/painting-workpiece.ts";
+import { PaintingView, flattenViewLeaves } from "../src/backend/workpiece/painting-view.ts";
+import { History } from "../src/backend/workpiece/history.ts";
+import { LayersFace } from "../src/backend/layers-face.ts";
 import { FloatingTransform } from "../src/floating-transform.ts";
 
 // 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；同 float-ops.test.mjs）

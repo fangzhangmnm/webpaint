@@ -18,12 +18,12 @@
 //     把"加载失败的 path"当 oldName 删掉
 //   - **破坏性操作永远用「真正载入的路径」**，不用这里的 getCurrentSessionName()
 
-import { renderNodesToBytes } from "./doc-render.ts";
+import { renderNodesToBytes } from "./backend/doc-render.ts";
 import { areaResampleBytes } from "./backend/algorithms/resample-bytes.ts";
-import { encodePngFromBytes } from "./png-codec.ts";
+import { encodePngFromBytes } from "./backend/png-codec.ts";
 import { canvasToBlob } from "./shell/image-io.ts";
 import { appState } from "./app-state.ts";   // active session name = appState.currentFile（synced-app-state，跨设备 resume）
-import type { PaintingView } from "./workpiece/painting-view.ts";
+import type { PaintingView } from "./backend/workpiece/painting-view.ts";
 
 // navigator.canShare/share 的 files 形参在部分 lib.dom 里未覆盖 → 窄化扩展（不引入 any）。
 // 抄 src/brush-io.ts 的 FileShareNavigator 模式。

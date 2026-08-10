@@ -82,7 +82,7 @@ describe("crop-geometry · 模板锁比", () => {
 
 describe("裁剪+重采样组合（C3：旧 PaintDoc.cropResampleTo 死壳拆除，直测 doc-ops 同款内核组合）", () => {
   it("frame=目标 px 整数 → 纯裁剪逐字节；÷2 → 面积平均", async () => {
-    const { LayerPixels } = await import("../src/tiles/tile-layer.ts");
+    const { LayerPixels } = await import("../src/backend/tiles/tile-layer.ts");
     const { resampleBytes } = await import("../src/backend/algorithms/resample-bytes.ts");
     const lp = new LayerPixels(64, 64);
     const buf = new Uint8ClampedArray(16 * 16 * 4);

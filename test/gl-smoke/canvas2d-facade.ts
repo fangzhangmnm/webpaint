@@ -1,7 +1,7 @@
 // Canvas2D facade（**测试域**，browser-only）：LayerPixels ⇄ canvas 的桥，gl-smoke 2D 参照
 // 合成器/预览 harness 专用。C3 债 b 起生产 src/ 零 canvas facade——真写者全走
 // editRegionBytes/replaceFromBytes/putRegion；本文件是 2D 参照域（canvas 语义即输出）的合法住所。
-import { LayerPixels } from "../../src/tiles/tile-layer.ts";
+import { LayerPixels } from "../../src/backend/tiles/tile-layer.ts";
 
 type Bitmap2D = HTMLCanvasElement | OffscreenCanvas;
 function scratch2D(w: number, h: number): Bitmap2D {

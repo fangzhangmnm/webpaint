@@ -8,10 +8,10 @@
 //   - 令牌墙：无令牌直调组件记账 verb → throw；token cancel 倒序回滚无痕；
 //     同 token 多次记账 = 首捕获赢（中间产物即弃、一步一 entry）。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { Selection } from "../src/selection.ts";
-import { PaintingWorkpiece } from "../src/workpiece/painting-workpiece.ts";
-import { PaintingView } from "../src/workpiece/painting-view.ts";
-import { History } from "../src/workpiece/history.ts";
+import { Selection } from "../src/backend/selection.ts";
+import { PaintingWorkpiece } from "../src/backend/workpiece/painting-workpiece.ts";
+import { PaintingView } from "../src/backend/workpiece/painting-view.ts";
+import { History } from "../src/backend/workpiece/history.ts";
 
 const _ctxs = [];
 function mk() {

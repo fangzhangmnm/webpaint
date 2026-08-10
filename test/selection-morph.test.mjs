@@ -3,7 +3,7 @@
 // 语义差异（有意）：bbox 一律为**紧**内容框（旧 canvas 版收缩沿用原 bbox、留空边）。
 import { describe, it, assert } from "./runner.mjs";
 
-const { Selection } = await import("../src/selection.ts");
+const { Selection } = await import("../src/backend/selection.ts");
 
 // doc 坐标 alpha
 function maskA(sel, dx, dy) { return sel.sampleAt(dx, dy); }

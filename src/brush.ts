@@ -35,7 +35,7 @@
 //     抬笔 finish() 收尾把直线桥换成动量弧尾、钉终点。
 
 import { StrokeSmoother, PressureLPF } from "./backend/stroke-smoother.ts";
-import type { ViewLeaf } from "./workpiece/painting-view.ts";
+import type { ViewLeaf } from "./backend/workpiece/painting-view.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
 import type { Stamp, StrokeShape } from "./gl/gl-stamp.ts";
 

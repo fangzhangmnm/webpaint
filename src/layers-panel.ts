@@ -27,8 +27,8 @@ import { positionPopup } from "./anchored-popup.ts";
 // 浮窗 top 出血区（v0.4.11，真机 1.1 softlock）：iPad 顶部 hidden title bar / 系统手势区会拦截
 //   贴顶元素的拖动——面板头一旦钻进去就拉不回来。地板 ≈ safe-area + 顶栏（同 reference MIN_TOP 先例）。
 export const PANEL_MIN_TOP = 60;
-import { countViewLeaves, findViewNodeById, flattenViewLeaves, type ViewNode, type ViewLeaf, type ViewGroup } from "./workpiece/painting-view.ts";
-import { renderNodesToCanvas, renderNodesToBytes } from "./doc-render.ts";
+import { countViewLeaves, findViewNodeById, flattenViewLeaves, type ViewNode, type ViewLeaf, type ViewGroup } from "./backend/workpiece/painting-view.ts";
+import { renderNodesToCanvas, renderNodesToBytes } from "./backend/doc-render.ts";
 import { t, tLatin } from "./i18n/index.ts";
 import { docVersion, bumpDoc } from "./signals.ts";
 import { els } from "./els.ts";

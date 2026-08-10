@@ -5,8 +5,8 @@
 // C3：旧 PaintDoc.rotate90CCW 死壳拆除——生产路径 = doc-ops → LayerTiles.rotate90All →
 //   LayerPixels.rotated90CCW（本文件直测该内核，字节原生零 stub canvas）+ Selection.rotated90CCW。
 import { describe, it, assert, eq } from "./runner.mjs";
-const { LayerPixels } = await import("../src/tiles/tile-layer.ts");
-const { Selection } = await import("../src/selection.ts");
+const { LayerPixels } = await import("../src/backend/tiles/tile-layer.ts");
+const { Selection } = await import("../src/backend/selection.ts");
 
 const _lps = [];
 const mkLp = (w, h) => { const lp = new LayerPixels(w, h); _lps.push(lp); return lp; };

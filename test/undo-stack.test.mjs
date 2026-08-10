@@ -4,8 +4,8 @@
 // silent 组件 record 即弃+silentDirty、无 undo workpiece 写面纪律统一、双计数语义分离。
 // 这些是 v2 纪元（ADR-0008）的全部承重墙；旧栈 undo-history.test 在 T5 拆除时按此迁移退役。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { UndoStack } from "../src/workpiece/undo-stack.ts";
-import { Workpiece } from "../src/workpiece/workpiece.ts";
+import { UndoStack } from "../src/backend/workpiece/undo-stack.ts";
+import { Workpiece } from "../src/backend/workpiece/workpiece.ts";
 
 // 玩具组件：单值 substrate + 值对象 collector（首写扣押旧值快照——ADR-0008「json 收快照」形态）。
 class ValueComp {

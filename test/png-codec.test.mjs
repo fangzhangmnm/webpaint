@@ -1,8 +1,8 @@
-// PNG 编解码接缝（src/png-codec.ts，UPNG 内脏）验收：
+// PNG 编解码接缝（src/backend/png-codec.ts，UPNG 内脏）验收：
 // ①无损 roundtrip 含低 α straight RGB（premult 往返退出持久化的铁证——ora 层存读走此路）；
 // ②pHYs 注入后仍可解（chunk/CRC 合法）；③iCCP 探测。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { encodePngFromBytes, decodePngToBytes, insertPhys } from "../src/png-codec.ts";
+import { encodePngFromBytes, decodePngToBytes, insertPhys } from "../src/backend/png-codec.ts";
 
 describe("png-codec · UPNG 内脏", () => {
   it("无损 roundtrip：低 α straight RGB 逐字节保真（老 canvas 编码在 α≤3 时 RGB 会烂）", async () => {

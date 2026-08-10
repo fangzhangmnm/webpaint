@@ -6,11 +6,14 @@ import { createRequire } from "node:module";
 // 挂到 window.zip（src/zip.js 的 Z() 在 call-time 查 window）。
 export function ensureZipLoaded() {
   globalThis.window = globalThis.window || globalThis;
-  if (globalThis.window.zip && globalThis.window.zip.ZipWriter) return;
+  if (globalThis.zip && globalThis.zip.ZipWriter) return;
   const code = fs.readFileSync(new URL("../vendor/zip-js/zip-full.min.js", import.meta.url), "utf8");
   const exp = {};
   new Function("exports", "module", "define", code).call(globalThis, exp, { exports: exp }, undefined);
   if (!exp.ZipWriter) throw new Error("vendored zip.js 没加载成");
+  // C7：src/backend/zip.ts 的 Z() 读 globalThis.zip（backend 禁浏览器词）；dom-shim 场景下
+  // window 是独立假对象 ≠ globalThis，所以两处都挂（浏览器里 window≡globalThis 本就是同一格）。
+  globalThis.zip = exp;
   globalThis.window.zip = exp;
 }
 

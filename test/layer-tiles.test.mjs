@@ -2,9 +2,9 @@
 // verbs / no-op 守卫（pixel-tx-noop 后继）/ computed 白名单 + 双捕获断言 + flip→undo→逐字节等原图锚 /
 // tokenBeforeImage（选区 finalize 的 pre 物化）/ record dispose 释放句柄。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { UndoStack } from "../src/workpiece/undo-stack.ts";
-import { PaintingWorkpiece } from "../src/workpiece/painting-workpiece.ts";
-import { LayerPixels } from "../src/tiles/tile-layer.ts";
+import { UndoStack } from "../src/backend/workpiece/undo-stack.ts";
+import { PaintingWorkpiece } from "../src/backend/workpiece/painting-workpiece.ts";
+import { LayerPixels } from "../src/backend/tiles/tile-layer.ts";
 
 // 玩具 host：map 背 LayerPixels（T2 app 里是 doc 树；本测试关心组件本体）。
 function mkHost(docW = 96, docH = 96) {

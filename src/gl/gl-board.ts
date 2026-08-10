@@ -9,7 +9,7 @@ import { GlRoom } from "./gl-room.ts";
 import { RenderTree } from "./render-tree.ts";
 import { RasterService } from "./raster-service.ts";
 import type { FloatInput, OverlayInput, SurrogateInput } from "./gl-room.ts";
-import type { LayerPixels } from "../tiles/tile-layer.ts";
+import type { LayerPixels } from "../backend/tiles/tile-layer.ts";
 import type { DocNode, DocLeaf } from "./gl-doc-bridge.ts";
 import type { Background } from "./gl-compositor.ts";
 

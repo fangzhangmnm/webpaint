@@ -3,7 +3,7 @@
 import { describe, it, assert, eq } from "./runner.mjs";
 
 const { LassoEngine } = await import("../src/lasso.ts");
-const { Selection } = await import("../src/selection.ts");
+const { Selection } = await import("../src/backend/selection.ts");
 
 // 三色竖条 fake layer：x<16 红 / 16..31 蓝 / 32..47 红 / 48+ 透明（threshold 20 下互为 barrier）
 function stripeLayer(w, h) {

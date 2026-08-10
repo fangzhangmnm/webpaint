@@ -19,9 +19,13 @@
 // **注意**：blob 全是 Uint8Array 传给 zip.js。Canvas.toBlob 拿到 Blob，需要
 // arrayBuffer() 转 Uint8Array。
 
-import { reportError } from "./error-badge.ts";
+// C7：backend 不 import error-badge（DOM funnel 是壳知识）——良性告警走注入槽，
+// 壳 boot 接 error-badge funnel（app.ts；同 tiles/ setTilePoolLeakReporter 模式）。headless 默认静默。
+let _oraLog: (msg: string) => void = () => {};
+export function setOraLogReporter(fn: (msg: string) => void): void { _oraLog = fn; }
+const reportError = (err: unknown, _level?: string) => _oraLog(String(err instanceof Error ? err.message : err));
 import { zipPack, zipUnpack } from "./zip.ts";
-import { areaResampleBytes } from "./backend/algorithms/resample-bytes.ts";
+import { areaResampleBytes } from "./algorithms/resample-bytes.ts";
 import { encodePngFromBytes, decodePngToBytes } from "./png-codec.ts";
 // 纯树↔stack.xml 序列化（嵌套组 + id + active）抽到独立深模块（无 canvas 依赖，可纯 node 测）。
 import { buildStackXml, parseStackXml } from "./ora-stack-xml.ts";
@@ -90,8 +94,9 @@ export function paintingDataToEncodeDoc(data: PaintingData): EncodeDoc {
     activeId: data.activeId ?? null, referenceLayerId: data.referenceLayerId ?? null,
   };
 }
-// encode opts：两个可选 WebPaint 私有扩展。
+// encode opts：wroteWith 必填（C7：版本戳是壳知识，backend 不 import version.ts）+ 两个可选 WebPaint 私有扩展。
 interface EncodeOpts {
+  wroteWith: string;   // stack.xml webpaint:wrote-with 版本戳（壳传 WEBPAINT_VERSION；backend 装配传注入的 appVersion）
   mergedBytes?: { data: Uint8ClampedArray; w: number; h: number } | null;   // S9/C3：调用方渲好的合成字节（GL renderNodesToBytes）；缺省=透明占位
   referenceImage?: Blob;
   desk?: object;   // desk.Serialize() → .webpaint/editor-state.json（desk per-doc；不向后兼容 webpaint/state.json）
@@ -150,7 +155,7 @@ async function renderThumbnailAdaptive(merged: { data: Uint8ClampedArray; w: num
  *
  * opts.referenceImage: optional Blob
  */
-export async function encodeDocToOra(doc: EncodeDoc, opts: EncodeOpts = {}) {
+export async function encodeDocToOra(doc: EncodeDoc, opts: EncodeOpts) {
   // S9：merged 由调用方渲入（opts.mergedBytes，GL 合成字节、与 display 同源；v134 约定保 alpha 不涂底）。
   //   缺省（node 测试 / GL lost 的 autosave 兜底）= 透明占位——层数据完整，mergedimage 只是预览件。
   const merged = opts.mergedBytes
@@ -166,7 +171,7 @@ export async function encodeDocToOra(doc: EncodeDoc, opts: EncodeOpts = {}) {
   //   3. mergedimage / layer 是大块，放中间
   const entries: { path: string; data: string | Uint8Array }[] = [
     { path: "mimetype", data: "image/openraster" },
-    { path: "stack.xml", data: buildStackXml(doc) },
+    { path: "stack.xml", data: buildStackXml(doc, opts.wroteWith) },
     { path: "mergedimage.png", data: mergedPng },
   ];
 

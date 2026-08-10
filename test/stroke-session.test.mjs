@@ -6,14 +6,14 @@
 //   - PressureLPF（backend 手感数学）：事件钟决定论——dt 来自事件 t 差，无 t 走 FALLBACK 16ms，
 //     同一 (p,t) 序列恒同输出（壁钟已拔除，ADR-0009）。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { UndoStack } from "../src/workpiece/undo-stack.ts";
-import { PaintingWorkpiece } from "../src/workpiece/painting-workpiece.ts";
-import { PaintingView } from "../src/workpiece/painting-view.ts";
+import { UndoStack } from "../src/backend/workpiece/undo-stack.ts";
+import { PaintingWorkpiece } from "../src/backend/workpiece/painting-workpiece.ts";
+import { PaintingView } from "../src/backend/workpiece/painting-view.ts";
 import { StrokeSession } from "../src/stroke-session.ts";
 import { PressureLPF } from "../src/backend/stroke-smoother.ts";
 const { BrushEngine } = await import("../src/brush.ts");
 const { resolveBrush } = await import("../src/resolved-brush.ts");
-const { Selection } = await import("../src/selection.ts");
+const { Selection } = await import("../src/backend/selection.ts");
 
 // 测试卫生：工件收集起来文件末尾统一释放（防 tile-pool FR 泄漏 assert 刷屏；非产品泄漏）。
 const _rigs = [];

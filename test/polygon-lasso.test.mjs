@@ -4,7 +4,7 @@
 //   - 会话：顶点=会话级（cancelDrawing 不清——双指/掌触只 abort 笔级）；
 //     polygonCancelSession/setSubTool/闭合 才清；闭合走 setOp 合并出 history entry。
 import { describe, it, assert, eq } from "./runner.mjs";
-const { rasterizePolygonGray8, Selection } = await import("../src/selection.ts");
+const { rasterizePolygonGray8, Selection } = await import("../src/backend/selection.ts");
 const { LassoEngine } = await import("../src/lasso.ts");
 
 describe("polygon · rasterizePolygonGray8", () => {

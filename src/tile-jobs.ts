@@ -6,8 +6,8 @@
 // 返回 disposer（真 app 永不调；app-boot 测试靠它拆 interval/监听，否则 node 进程挂死）。
 
 import { BackgroundSyncJobs } from "./background-sync-jobs.ts";
-import { appTilePool, setTilePoolCodec, setTilePoolLeakReporter } from "./tiles/app-tile-pool.ts";
-import { deflateTileCodec } from "./tiles/cpu-tile-compression.ts";
+import { appTilePool, setTilePoolCodec, setTilePoolLeakReporter } from "./backend/tiles/app-tile-pool.ts";
+import { deflateTileCodec } from "./backend/tiles/cpu-tile-compression.ts";
 import { reportError } from "./error-badge.ts";
 
 const TICK_MS = 250;

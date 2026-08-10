@@ -5,7 +5,7 @@ import { describe, it, assert, eq } from "./runner.mjs";
 const { selPenSettingsFrom, stampsToBinaryGray8, SEL_PEN_BAND } = await import("../src/sel-pen.ts");
 const { resolveBrush } = await import("../src/resolved-brush.ts");
 const { BrushEngine } = await import("../src/brush.ts");
-const { Selection } = await import("../src/selection.ts");
+const { Selection } = await import("../src/backend/selection.ts");
 
 describe("sel-pen · 笔架笔 → 选区笔渲染态（v0.7.26：配置归笔架，无自有变体轮子）", () => {
   it("覆写：色带色/半透明/normal blend/pixelMode 压平；动力学字段原样穿透", () => {

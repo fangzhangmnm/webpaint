@@ -123,16 +123,9 @@ echo "[build] ✓ v0.4 分层干净"
 #     注释行豁免；WebGL 句柄类型（WebGLTexture 等）= Gl2Port 契约 opaque 类型，不在禁词内。
 #   （C2 时 backend/、frontend/ 尚未有住户——存量随 C3/C5 切片搬入，规则先立防退化。）
 echo "[build] C2 目录格律 lint…"
-COMMON_DEP_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"]\.\./" src/common --include='*.ts' 2>/dev/null || true)
-BACKEND_DEP_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"](\.\./)" src/backend --include='*.ts' 2>/dev/null | grep -vE "['\"](\.\./)+(common|vendor)/" || true)
-FRONTEND_DEP_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"](\.\./)" src/frontend --include='*.ts' 2>/dev/null | grep -vE "['\"](\.\./)+(common|backend|vendor)/" || true)
-BROWSERWORD_HITS=$(grep -rnE "\b(document|window|navigator|localStorage|sessionStorage)\b|getContext\(|createElement\(|addEventListener\(" src/common src/backend --include='*.ts' 2>/dev/null | grep -vE ":[0-9]+:[[:space:]]*(//|\*|/\*)" || true)
-if [ -n "$COMMON_DEP_HITS$BACKEND_DEP_HITS$FRONTEND_DEP_HITS$BROWSERWORD_HITS" ]; then
-  echo "[build] ✗ C2 目录格律违规：" >&2
-  echo "$COMMON_DEP_HITS$BACKEND_DEP_HITS$FRONTEND_DEP_HITS$BROWSERWORD_HITS" >&2
-  exit 1
-fi
-echo "[build] ✓ C2 目录格律干净"
+# C7 起：grep 版升格 scripts/lint-dirs.mjs（真路径解析——backend 子目录互引不误咬、逃逸必咬；
+# 语义同旧注释，规则只增不减）。
+node scripts/lint-dirs.mjs
 
 # 1. esbuild bundle 到临时名
 "$ESBUILD" "$ENTRY" \

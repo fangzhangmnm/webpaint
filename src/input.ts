@@ -33,16 +33,16 @@ import { inputSmooth } from "./stroke-input-smooth.ts";
 import { t } from "./i18n/index.ts";
 import { SMOOTH } from "./smooth-config.ts";
 import type { GestureViewport, TapRef } from "./pointer-gesture.ts";
-import type { PaintingView, ViewLeaf } from "./workpiece/painting-view.ts";
+import type { PaintingView, ViewLeaf } from "./backend/workpiece/painting-view.ts";
 import type { Board } from "./board.ts";
 import type { EditMode } from "./edit-mode.ts";
-import type { History } from "./workpiece/history.ts";
-import type { PaintingWorkpiece } from "./workpiece/painting-workpiece.ts";
-import type { LayerTiles } from "./workpiece/layer-tiles.ts";
+import type { History } from "./backend/workpiece/history.ts";
+import type { PaintingWorkpiece } from "./backend/workpiece/painting-workpiece.ts";
+import type { LayerTiles } from "./backend/workpiece/layer-tiles.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
 import { StrokeSession } from "./stroke-session.ts";
 import type { StrokeSessionDeps } from "./stroke-session.ts";
-import { Selection } from "./selection.ts";
+import { Selection } from "./backend/selection.ts";
 import { selPenSettingsFrom, stampsToBinaryGray8 } from "./sel-pen.ts";
 
 // ---- 引擎真类型已全部 .ts 化，直接 import（见各引擎模块）。本文件仅保留以下接缝别名/最小壳。----

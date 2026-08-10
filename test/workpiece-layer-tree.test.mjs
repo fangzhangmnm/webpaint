@@ -10,10 +10,10 @@
 //   - statuses → step.hint（undo/redo 状态栏文案）；装配纪律 throw。
 // mergeDown 走 GL 合成，node 不可测（归 gl-smoke/真机批，同旧注）。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { PaintingWorkpiece } from "../src/workpiece/painting-workpiece.ts";
-import { PaintingView, flattenViewLeaves, countViewLeaves } from "../src/workpiece/painting-view.ts";
-import { History } from "../src/workpiece/history.ts";
-import { LayersFace } from "../src/layers-face.ts";
+import { PaintingWorkpiece } from "../src/backend/workpiece/painting-workpiece.ts";
+import { PaintingView, flattenViewLeaves, countViewLeaves } from "../src/backend/workpiece/painting-view.ts";
+import { History } from "../src/backend/workpiece/history.ts";
+import { LayersFace } from "../src/backend/layers-face.ts";
 
 // 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏）
 const _ctxs = [];

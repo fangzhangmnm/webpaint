@@ -11,9 +11,9 @@
 //   - H7（液化选区 doc-space）：**RED 挂线**（S8 液化重写转绿），todo() 占位
 import { describe, it, assert, eq, todo } from "./runner.mjs";
 
-const { Selection } = await import("../src/selection.ts");
+const { Selection } = await import("../src/backend/selection.ts");
 const { antsOutline } = await import("../src/marching-ants.ts");
-const { appTilePool } = await import("../src/tiles/app-tile-pool.ts");
+const { appTilePool } = await import("../src/backend/tiles/app-tile-pool.ts");
 const { TILE_SIZE } = await import("../src/common/tile-geometry.ts");
 
 // gray8 矩形工厂：在 (x,y) 放 w×h 的实心 v 值块
@@ -174,8 +174,8 @@ describe("Selection · 窄读口 + 所有权", () => {
 
 describe("SelectionComponent · 往返 + 句柄释放（T4a：SwapSelectionOp 锚迁移）", () => {
   async function setup() {
-    const { PaintingWorkpiece } = await import("../src/workpiece/painting-workpiece.ts");
-    const { UndoStack } = await import("../src/workpiece/undo-stack.ts");
+    const { PaintingWorkpiece } = await import("../src/backend/workpiece/painting-workpiece.ts");
+    const { UndoStack } = await import("../src/backend/workpiece/undo-stack.ts");
     const stack = new UndoStack({ maxQuotaBytes: 1 << 20 });
     const wp2 = new PaintingWorkpiece({ undo: stack, tree: { width: 64, height: 64 } });
     return { wp2, stack, sel: wp2.selection };
@@ -268,7 +268,7 @@ describe("marching-ants · outline golden + 缓存", () => {
 describe("Selection · fromLayerAlpha（v0.7.38 从图层 alpha 建选区）", () => {
   it("半透明边缘二值化（α≥128 入选）、位置随 layer bbox、恒二值不变量", async () => {
     // C3：fixture 从旧 PaintDoc 迁 LayerPixels 直构（fromLayerAlpha 只吃 bbox+getImageData 鸭形）。
-    const { LayerPixels } = await import("../src/tiles/tile-layer.ts");
+    const { LayerPixels } = await import("../src/backend/tiles/tile-layer.ts");
     const leafOf = (lp) => {
       const b = lp.contentBounds(true);
       return {

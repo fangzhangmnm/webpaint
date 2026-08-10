@@ -19,9 +19,10 @@
 // shareOrDownloadBlob / triggerDownload。exporter 只管「doc → 该格式的字节」。
 
 import { makeRegistry } from "./registry.ts";
-import { encodeDocToOra } from "./ora.ts";
+import { encodeDocToOra } from "./backend/ora.ts";
+import { WEBPAINT_VERSION } from "./version.ts";
 import { renderDocToImageBlob } from "./session.ts";
-import type { PaintingView } from "./workpiece/painting-view.ts";
+import type { PaintingView } from "./backend/workpiece/painting-view.ts";
 
 export interface ExportOpts {
   scope?: string;
@@ -62,7 +63,7 @@ registerExporter({
   //   （store 的 ZipFile.getEncryptedBlob）原样导出 at-rest 密文容器，落地名 <名>.ora.zip。
   //   所以这条路径只会被明文作品走到。
   encode: async (doc) => {
-    return await encodeDocToOra(doc);
+    return await encodeDocToOra(doc, { wroteWith: WEBPAINT_VERSION });
   },
 });
 registerExporter({

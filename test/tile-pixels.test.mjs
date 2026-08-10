@@ -1,6 +1,6 @@
 // LayerPixels 纯核心测试（图层像素新 SoT，bbox-free 稀疏 tile）。Canvas2D facade 在 smoke 验。
 import { describe, it, assert } from "./runner.mjs";
-import { LayerPixels } from "../src/tiles/tile-layer.ts";
+import { LayerPixels } from "../src/backend/tiles/tile-layer.ts";
 
 const W = 1024, H = 1024;   // 4×4 tile
 
@@ -142,8 +142,8 @@ describe("LayerPixels · snapshot/restore", () => {
 });
 
 // ── v0.4：底层换 cpu-tile-pool 句柄后的新契约 ──────────────────────────────────
-import { disposePixelsSnapshot } from "../src/tiles/tile-layer.ts";
-import { appTilePool } from "../src/tiles/app-tile-pool.ts";
+import { disposePixelsSnapshot } from "../src/backend/tiles/tile-layer.ts";
+import { appTilePool } from "../src/backend/tiles/app-tile-pool.ts";
 
 describe("LayerPixels · v0.4 句柄语义（零拷贝快照 + dispose）", () => {
   it("snapshot 与活层共享同一批 tile（零拷贝：句柄指同 id）", () => {

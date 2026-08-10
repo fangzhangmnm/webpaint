@@ -1,8 +1,8 @@
 // PaintingWorkpiece 树模式（T3b-1，ADR-0008）：出生单空叶 / load 令牌灌入（旧 doc 随 record 驱逐
 // 零手工 dispose）/ exportData 冻结快照往返 / addGroup（v1 addGroup 语义）/ 写面纪律统一。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { UndoStack } from "../src/workpiece/undo-stack.ts";
-import { PaintingWorkpiece } from "../src/workpiece/painting-workpiece.ts";
+import { UndoStack } from "../src/backend/workpiece/undo-stack.ts";
+import { PaintingWorkpiece } from "../src/backend/workpiece/painting-workpiece.ts";
 
 function mk(opts = {}) {
   const undo = new UndoStack({ maxQuotaBytes: opts.maxQuotaBytes ?? (1 << 30) });

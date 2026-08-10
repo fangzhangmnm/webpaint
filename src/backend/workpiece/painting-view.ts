@@ -27,9 +27,12 @@ import type { Selection } from "../selection.ts";
 // ---- 层数上限策略（C3：随 doc.ts 拆除迁入；board/_configureDocMemory 同款消费）----
 export const LAYER_HARD_CEIL = 64;
 
+// C7：设备内存读数改壳注入（backend 零 navigator）；app.ts boot 传 navigator.deviceMemory，
+// headless 缺省 4GB 档（与旧 `deviceMemory ?? 4` 兜底同值，行为不变）。
+let _deviceMemoryGB = 4;
+export function setDeviceMemoryGB(gb: number): void { _deviceMemoryGB = gb; }
 export function layerByteBudget(): number {
-  const deviceMemoryGB = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4;
-  const budgetMB = Math.max(256, Math.min(768, deviceMemoryGB * 1024 * 0.15));
+  const budgetMB = Math.max(256, Math.min(768, _deviceMemoryGB * 1024 * 0.15));
   return budgetMB * 1e6;
 }
 

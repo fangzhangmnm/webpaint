@@ -26,9 +26,9 @@ import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { setMenuOpen } from "./settings-menu.ts";
 import { signIn, isAuthConfigured } from "./app-store.ts";   // auth 是公共面（cloud-auth-ui 同款直连；v415 红线针对的是 sync store，不含 auth）
 import { sessionNameConflict } from "./session-name.ts";
-import { decodeOraToPainting } from "./ora.ts";
+import { decodeOraToPainting } from "./backend/ora.ts";
 import { t } from "./i18n/index.ts";
-import type { ViewLeaf } from "./workpiece/painting-view.ts";
+import type { ViewLeaf } from "./backend/workpiece/painting-view.ts";
 
 import type { AppContext } from "./app-context.ts";
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);

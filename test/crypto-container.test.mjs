@@ -16,7 +16,7 @@ const {
   scanEncPeekFromEnd, decryptPeek, encryptPeek,
   makeGuid, PEEK_TAIL_WINDOW, configureCryptoCodec,
 } = await import("../src/store/crypto-container.ts");
-const { zipPack, zipUnpack } = await import("../src/zip.ts");
+const { zipPack, zipUnpack } = await import("../src/backend/zip.ts");
 const { pack7z, unpack7z } = await import("../src/sevenzip.ts");
 // cutover：crypto-container 不再静态 import 宿主 zip/7z（HOST-SEAM 注入）→ 测试前注入 codec。
 configureCryptoCodec({ zipPack, zipUnpack, pack7z, unpack7z });

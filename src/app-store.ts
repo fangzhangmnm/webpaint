@@ -8,7 +8,7 @@ import type { Store } from "./store/index.ts";
 import { stripSessionExt, sessionFileName } from "./config.ts";
 import { storeUI } from "./store-ui.ts";
 import { CLIENT_ID, SCOPES } from "./config.ts";
-import { zipReadEntry, zipPack, zipUnpack } from "./zip.ts";
+import { zipReadEntry, zipPack, zipUnpack } from "./backend/zip.ts";
 import { pack7z, unpack7z } from "./sevenzip.ts";
 import { getPassword } from "./crypto-state.ts";
 import { wirePreferences } from "./app-prefs.ts";

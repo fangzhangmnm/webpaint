@@ -7,13 +7,13 @@
 //   - 被擦空的 tile（真层有、替身无）收口时同步回收；
 //   - finalize（选区兜底）在替身落账**之后**跑（shape pixelMode + 选区的次序锚）。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { UndoStack } from "../src/workpiece/undo-stack.ts";
-import { PaintingWorkpiece } from "../src/workpiece/painting-workpiece.ts";
-import { PaintingView } from "../src/workpiece/painting-view.ts";
+import { UndoStack } from "../src/backend/workpiece/undo-stack.ts";
+import { PaintingWorkpiece } from "../src/backend/workpiece/painting-workpiece.ts";
+import { PaintingView } from "../src/backend/workpiece/painting-view.ts";
 import { StrokeSession } from "../src/stroke-session.ts";
 const { BrushEngine } = await import("../src/brush.ts");
 const { resolveBrush } = await import("../src/resolved-brush.ts");
-const { Selection } = await import("../src/selection.ts");
+const { Selection } = await import("../src/backend/selection.ts");
 const { LiquifyEngine } = await import("../src/plugins/liquify-engine.ts");
 
 const _rigs = [];

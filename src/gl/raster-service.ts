@@ -6,7 +6,7 @@
 import { TILE_SIZE, tilesAcross } from "../common/tile-geometry.ts";
 import type { Background } from "./gl-compositor.ts";
 import type { DocNode, DocLeaf } from "./gl-doc-bridge.ts";
-import type { LayerPixels } from "../tiles/tile-layer.ts";
+import type { LayerPixels } from "../backend/tiles/tile-layer.ts";
 import type { Stamp, StrokeShape } from "./gl-stamp.ts";
 import { buildPlan } from "../render/render-plan.ts";
 import type { PooledFBO } from "../common/gl2-port.ts";

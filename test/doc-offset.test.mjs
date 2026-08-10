@@ -6,8 +6,8 @@
 // C3：旧 PaintDoc.offsetWrap 死壳拆除——生产路径 = doc-ops → LayerTiles.offsetWrapAll →
 //   LayerPixels.offsetWrapped（本文件直测该内核，字节原生零 stub canvas）+ Selection.offsetWrapped。
 import { describe, it, assert, eq } from "./runner.mjs";
-const { LayerPixels } = await import("../src/tiles/tile-layer.ts");
-const { Selection } = await import("../src/selection.ts");
+const { LayerPixels } = await import("../src/backend/tiles/tile-layer.ts");
+const { Selection } = await import("../src/backend/selection.ts");
 
 // 生产同款归一化（layer-tiles._applyComputed）：偏移进 [0,W)/[0,H) 再交内核。
 function offsetWrap(lp, dx, dy) {

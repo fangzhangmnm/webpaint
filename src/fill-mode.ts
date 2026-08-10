@@ -24,7 +24,7 @@ import { reportError } from "./error-badge.ts";
 import { t } from "./i18n/index.ts";
 import { registerColorTarget, refreshColorDisplay } from "./color-panel.ts";
 import type { AppContext } from "./app-context.ts";
-import type { ViewLeaf } from "./workpiece/painting-view.ts";
+import type { ViewLeaf } from "./backend/workpiece/painting-view.ts";
 
 let _ctx: AppContext | null = null;
 let _lastPersistentMode = "";

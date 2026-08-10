@@ -19,10 +19,12 @@ import { Board } from "./board.ts";
 import { InputController, bindPressureDisabled } from "./input.ts";
 import { makeCurrentBrush } from "./resolved-brush.ts";   // 当前笔派生 computed + 引擎桥（手感数学在 resolveBrush，同文件）
 import { registerPanel, openExclusive, closeExclusive, getCurrentExclusive } from "./panel-state.ts";
-import { History } from "./workpiece/history.ts";
-import { LayersFace } from "./layers-face.ts";
-import { PaintingWorkpiece } from "./workpiece/painting-workpiece.ts";
-import { PaintingView } from "./workpiece/painting-view.ts";
+import { History } from "./backend/workpiece/history.ts";
+import { LayersFace } from "./backend/layers-face.ts";
+import { PaintingWorkpiece } from "./backend/workpiece/painting-workpiece.ts";
+import { PaintingView, setDeviceMemoryGB } from "./backend/workpiece/painting-view.ts";
+import { installPngDecodeFallback } from "./shell/image-io.ts";
+import { setOraLogReporter } from "./backend/ora.ts";
 import { EditMode } from "./edit-mode.ts";
 import { referenceWindow, paletteWindow, initSideWindows } from "./side-windows.ts";   // 参考/调色板浮窗（construct+wiring）
 import { initDevConsole } from "./dev-console.ts";   // window.WebPaint 调试接口
@@ -45,7 +47,7 @@ import { initFiltersAdjust } from "./filters-adjust.ts";
 import { initToolbar, RACK_PANEL_BY_TOOL, closeTransientMenus } from "./toolbar.ts";
 import { setColor, initColorPanel } from "./color-panel.ts";
 import { session, initSession, setSessionGallery } from "./session-state.ts";   // candidate 3 · 活动文档生命周期 SSoT
-import { setDocCompositor, setDocCompositorBytes } from "./doc-render.ts";
+import { setDocCompositor, setDocCompositorBytes } from "./backend/doc-render.ts";
 import { useDials, desk, snapshotShapePersp, restoreShapePersp, remapShapePersp } from "./workbench-state.ts";   // candidate 3 · 编辑器 RAM 反应式 SSoT（dial/color/压感）
 import { showFullscreenBusy, hideFullscreenBusy, withBusy } from "./fullscreen-busy.ts";
 import { initSmoothDevPanel } from "./smooth-dev-panel.ts";
@@ -101,6 +103,12 @@ const prefsReady: Promise<unknown> = Promise.all([initPreferences(), initAppStat
 // 输入 sheet 注入进去（守「无系统对话框」红线）。必须在任何 decode 之前（boot load 可能是加密作品）。
 setPasswordPrompt(({ title, message }) =>
   openInputSheet(title || t("mi.enterPassword"), "", { placeholder: t("mi.galleryPassword"), password: true, message: message || "" }));
+
+// C7 backend 纯化的三个壳注入（backend 零 DOM/navigator；同 setTilePoolLeakReporter 模式）。
+// 必须在任何 decode 之前（boot load 可能撞 iCCP PNG 回退路）。
+installPngDecodeFallback();                              // png-codec canvas 回退（安全网移壳，行为同旧）
+setOraLogReporter((m) => reportError(m, "log"));         // ora 良性告警 → error-badge funnel
+setDeviceMemoryGB((navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4);   // 层数预算
 
 // 触屏检测（iPad / iPhone / surface touchscreen）→ hand 工具隐藏（双指 pan 已足）
 if (navigator.maxTouchPoints > 0) {

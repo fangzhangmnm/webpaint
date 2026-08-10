@@ -1,5 +1,5 @@
-import { WEBPAINT_VERSION } from "./version.ts";
 // OpenRaster stack.xml 序列化 —— **纯** 图层树 ↔ XML（无 canvas / 无 zip / 无 PNG）。
+// C7：版本戳（wrote-with）改参数传入——backend 不 import src/version.ts（壳知识；bump.sh sed 目标不动）。
 //
 // 从 ora.js 抽出（batch 2）：buildStackXml / parseStackXml 只处理结构（嵌套组 + id + 属性），
 // 不碰像素。好处：① 可纯 node 测（无 OffscreenCanvas 依赖，不毒 OSC-stub 测试生态）；
@@ -126,17 +126,17 @@ function nodeToXml(node: OraNode, doc: OraDoc, indent: number): string {
   return `${pad}<layer ${attrs.join(" ")} />`;
 }
 
-export function buildStackXml(doc: OraDoc): string {
+export function buildStackXml(doc: OraDoc, wroteWithVersion = ""): string {
   // OpenRaster spec：layer 顺序 = top first（top of stack 在 XML 前）。
   // doc.layers[0] 是 bottom，所以同级倒序输出（递归在 nodeToXml 内）。
   const nodes: string[] = [];
   for (let i = doc.layers.length - 1; i >= 0; i--) {
     nodes.push(nodeToXml(doc.layers[i], doc, 2));
   }
-  // wrote-with：记录写入这份 .ora 时的 WebPaint 版本号。
+  // wrote-with：记录写入这份 .ora 时的 WebPaint 版本号（调用方传入；encodeDocToOra 必填透传）。
   // 用途：读取端若发现比自己版本高 → 警告（避免旧版客户端静默吃掉新版图层属性）
   // 论证见 conversation v71→v72。
-  const wroteWith = WEBPAINT_VERSION;
+  const wroteWith = wroteWithVersion;
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <image version="0.0.3" w="${doc.width}" h="${doc.height}" xres="72" yres="72" xmlns:webpaint="https://github.com/fangzhangmnm/webpaint/ns" webpaint:wrote-with="${escapeXml(wroteWith)}">
   <stack name="root">

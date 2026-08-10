@@ -4,10 +4,10 @@
 //   - 新 cap = 动态总驻留字节预算：预算内 → 放硬顶(64)；驻留达预算 → 冻结当前层数(≥2)。
 //   - C3 债 b 后驻留恒单份 tile 计费（物化 canvas 拆除，countMat 档消灭）。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { PaintingWorkpiece } from "../src/workpiece/painting-workpiece.ts";
-import { PaintingView, computeMaxLayers, LAYER_HARD_CEIL } from "../src/workpiece/painting-view.ts";
-import { History } from "../src/workpiece/history.ts";
-import { LayersFace } from "../src/layers-face.ts";
+import { PaintingWorkpiece } from "../src/backend/workpiece/painting-workpiece.ts";
+import { PaintingView, computeMaxLayers, LAYER_HARD_CEIL } from "../src/backend/workpiece/painting-view.ts";
+import { History } from "../src/backend/workpiece/history.ts";
+import { LayersFace } from "../src/backend/layers-face.ts";
 
 // 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏）
 const _ctxs = [];

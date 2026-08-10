@@ -37,11 +37,11 @@
 // dx 坑保护：跟 v46/v47 一样，extendStroke 拿 input.js 已过 timeStamp + 平滑
 // 管线的 (x, y)，自身不再过滤 raw。
 
-import type { ViewLeaf } from "../workpiece/painting-view.ts";
+import type { ViewLeaf } from "../backend/workpiece/painting-view.ts";
 import { prefilterToSplinePlane, sampleSplinePremult } from "../backend/algorithms/bspline.ts";
 import type { SplinePlane } from "../backend/algorithms/bspline.ts";
 import { bicubicSamplePremult } from "../backend/algorithms/resample-bytes.ts";
-import type { Selection } from "../selection.ts";
+import type { Selection } from "../backend/selection.ts";
 
 interface LiquifySettings {
   bleed?: string;

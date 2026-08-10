@@ -6,9 +6,9 @@
 //   - 恒吃 raw + 约束吸附在引擎内（45° snap 下 stamps 落在吸附轴上）。
 //   - cancel 无痕（buffered 清态；pixelMode 像素还原）；pixelMode 每帧 restore（中间几何不残留）。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { UndoStack } from "../src/workpiece/undo-stack.ts";
-import { PaintingWorkpiece } from "../src/workpiece/painting-workpiece.ts";
-import { PaintingView } from "../src/workpiece/painting-view.ts";
+import { UndoStack } from "../src/backend/workpiece/undo-stack.ts";
+import { PaintingWorkpiece } from "../src/backend/workpiece/painting-workpiece.ts";
+import { PaintingView } from "../src/backend/workpiece/painting-view.ts";
 const { ShapeBrushEngine } = await import("../src/shape-brush.ts");
 const { resolveBrush } = await import("../src/resolved-brush.ts");
 const { bresenhamEllipseRect } = await import("../src/shape-geometry.ts");
