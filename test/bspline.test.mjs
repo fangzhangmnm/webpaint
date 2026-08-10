@@ -2,7 +2,7 @@
 // 守的契约：①插值性（整数点采样逐字节还原源——identity 无损的根基）；
 // ②「多次重采样保锐」的存在理由：反复亚像素平移往返，B 样条的累积误差显著小于 Catmull-Rom。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { prefilterToSplinePlane, sampleSplinePremult, b3 } from "../src/bspline.ts";
+import { prefilterToSplinePlane, sampleSplinePremult, b3 } from "../src/backend/algorithms/bspline.ts";
 
 function pattern(w, h, semiAlpha) {
   const buf = new Uint8ClampedArray(w * h * 4);

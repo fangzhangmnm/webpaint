@@ -8,8 +8,8 @@
 // 该文件不懂论文数学（全在 src/flat-coloring/），也不懂指针/UI；供 LassoEngine 调用。
 import {
   buildLineartPartition, regionMaskAt, attachInkDepth, binarizeLuma, DEFAULT_LINEART_PARAMS,
-} from "./flat-coloring/partition.ts";
-import type { LineartPartition, LineartParams } from "./flat-coloring/partition.ts";
+} from "./backend/algorithms/flat-coloring/partition.ts";
+import type { LineartPartition, LineartParams } from "./backend/algorithms/flat-coloring/partition.ts";
 import { Selection } from "./selection.ts";
 
 /** 结构化最小依赖（≈ floodSelectFrom 的 mock 面）：node 直测不拖 doc.ts */

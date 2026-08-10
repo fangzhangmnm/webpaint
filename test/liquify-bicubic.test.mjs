@@ -2,7 +2,7 @@
 //   预乘混合（不拖暗）、越界 tap=0（不拉丝）、整数坐标退化点采样（v147 整数 march 依赖）、
 //   外加双三次特有的 α 反振铃限幅（负 lobe 不把 α 顶出邻域范围）。
 import { describe, it, assert, eq } from "./runner.mjs";
-const { bicubicSamplePremult } = await import("../src/resample-bytes.ts");
+const { bicubicSamplePremult } = await import("../src/backend/algorithms/resample-bytes.ts");
 
 const sample = (sdat, w, h, sx, sy) => {
   const d = new Uint8ClampedArray(4);

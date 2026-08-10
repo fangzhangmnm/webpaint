@@ -30,10 +30,10 @@ import type { SelectionComponent } from "./workpiece/selection-component.ts";
 import { extractFloatPixels, composeCutHole, composeIdentityWriteback, composeRigidWriteback, composeOverWriteback, applyRegionBuf } from "./workpiece/float-ops.ts";
 import type { RigidMap } from "./workpiece/float-ops.ts";
 import type { History } from "./workpiece/history.ts";
-import { prefilterToSplinePlane } from "./bspline.ts";
-import type { SplinePlane } from "./bspline.ts";
-import { rotspriteUpscale } from "./rotsprite.ts";
-import type { U8Plane } from "./rotsprite.ts";
+import { prefilterToSplinePlane } from "./backend/algorithms/bspline.ts";
+import type { SplinePlane } from "./backend/algorithms/bspline.ts";
+import { rotspriteUpscale } from "./backend/algorithms/rotsprite.ts";
+import type { U8Plane } from "./backend/algorithms/rotsprite.ts";
 
 // ---- 局部几何/数据类型（type-strip 后纯运行时无变化）----
 type Node = ViewLeaf | ViewGroup;

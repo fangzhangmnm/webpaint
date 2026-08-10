@@ -24,10 +24,10 @@ import { resolveBrush } from "../../src/resolved-brush.ts";
 import { PaintDoc } from "../../src/doc.ts";
 import { setDocCompositorBytes } from "../../src/doc-render.ts";
 import { quadWarp } from "../../src/floating-transform.ts";
-import { prefilterToSplinePlane, sampleSplinePremult } from "../../src/bspline.ts";
-import type { SplinePlane } from "../../src/bspline.ts";
-import { rotspriteUpscale } from "../../src/rotsprite.ts";
-import type { U8Plane } from "../../src/rotsprite.ts";
+import { prefilterToSplinePlane, sampleSplinePremult } from "../../src/backend/algorithms/bspline.ts";
+import type { SplinePlane } from "../../src/backend/algorithms/bspline.ts";
+import { rotspriteUpscale } from "../../src/backend/algorithms/rotsprite.ts";
+import type { U8Plane } from "../../src/backend/algorithms/rotsprite.ts";
 
 // ---- CPU warp 参照（golden 基准）：v355 从 src/floating-transform 归档进 harness（运行时单一 GPU SSoT；
 //   这份 CPU 逐像素逆单应性 + 采样器只在测试里当 GPU warp 的对照基准，不在产品路径）。verbatim 复刻原实现，

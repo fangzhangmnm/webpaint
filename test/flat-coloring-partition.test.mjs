@@ -3,12 +3,12 @@
 // 全合成图形、纯数组进出，node 直测无 DOM。
 import { describe, it, assert, eq } from "./runner.mjs";
 
-const { edtSquared } = await import("../src/flat-coloring/edt.ts");
-const { traceBorderCycles, keypointsFromBinary } = await import("../src/flat-coloring/border.ts");
-const { digitizeSpline, transitionCount, areaGuardOk } = await import("../src/flat-coloring/closing.ts");
+const { edtSquared } = await import("../src/backend/algorithms/flat-coloring/edt.ts");
+const { traceBorderCycles, keypointsFromBinary } = await import("../src/backend/algorithms/flat-coloring/border.ts");
+const { digitizeSpline, transitionCount, areaGuardOk } = await import("../src/backend/algorithms/flat-coloring/closing.ts");
 const {
   binarizeLuma, buildPartitionFromBinary, regionMaskAt, attachInkDepth, DEFAULT_LINEART_PARAMS,
-} = await import("../src/flat-coloring/partition.ts");
+} = await import("../src/backend/algorithms/flat-coloring/partition.ts");
 
 // ---- 合成图形 helpers ----
 function blank(w, h) { return new Uint8Array(w * h); }

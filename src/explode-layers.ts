@@ -6,7 +6,7 @@
 // 预览是**采样估计**（≤5 万样本，毫秒级，k 拖动即时重算）；commit 才对 bbox 全像素做
 //   最终硬分配，占比按全分辨率重数、全空簇丢弃——所以落地层数可能 < k（sheet 里如实说明）。
 
-import { clusterColors, partitionByNearest, hexOf, type ColorCluster } from "./color-cluster.ts";
+import { clusterColors, partitionByNearest, hexOf, type ColorCluster } from "./backend/algorithms/color-cluster.ts";
 import { colorNameIn, defaultCulture, namingCategories, categoryLabel } from "./color-name.ts";
 import { wireInlineSelect } from "./inline-select.ts";
 import { makeRampSlider, type RampSliderHandle } from "./ui/ramp-slider.ts";

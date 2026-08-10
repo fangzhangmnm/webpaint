@@ -15,7 +15,7 @@ import { renderNodesToBytes } from "./doc-render.ts";
 // （换语言不回译）；用 tLatin 不用 t——tok 字体门开着时 t() 会把模板转写成 UCSUR 私区码位，
 // 烘进 .ora 的名字必须是可移植 ASCII/原文。i18n 模块刻意 node-eval 安全（见 app-prefs 头注）。
 import { tLatin } from "./i18n/index.ts";
-import { resampleBytes } from "./resample-bytes.ts";
+import { resampleBytes } from "./backend/algorithms/resample-bytes.ts";
 
 export const DEFAULT_DOC_SIZE = 2048;
 

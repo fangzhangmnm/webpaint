@@ -16,7 +16,7 @@ import { resizeCropRect, resizeCropRectAspect, fitRectToBBox, cropRectToInts } f
 import { loadCanvasTemplates, fillTemplateSelect, templatePx, templateById } from "./canvas-templates.ts";
 import { desk } from "./workbench-state.ts";
 import { LayerPixels } from "./tiles/tile-layer.ts";
-import { resampleBytes } from "./resample-bytes.ts";
+import { resampleBytes } from "./backend/algorithms/resample-bytes.ts";
 import type { Selection } from "./selection.ts";
 import type { AppContext } from "./app-context.ts";
 

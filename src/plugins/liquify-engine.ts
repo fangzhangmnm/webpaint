@@ -38,9 +38,9 @@
 // 管线的 (x, y)，自身不再过滤 raw。
 
 import type { ViewLeaf } from "../workpiece/painting-view.ts";
-import { prefilterToSplinePlane, sampleSplinePremult } from "../bspline.ts";
-import type { SplinePlane } from "../bspline.ts";
-import { bicubicSamplePremult } from "../resample-bytes.ts";
+import { prefilterToSplinePlane, sampleSplinePremult } from "../backend/algorithms/bspline.ts";
+import type { SplinePlane } from "../backend/algorithms/bspline.ts";
+import { bicubicSamplePremult } from "../backend/algorithms/resample-bytes.ts";
 import type { Selection } from "../selection.ts";
 
 interface LiquifySettings {

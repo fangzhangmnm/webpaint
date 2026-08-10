@@ -1,7 +1,7 @@
 // color-cluster（按颜色拆分的数学面）：确定性 k-means + 硬分配分片。
 // 红线断言：分片互斥、∪ = 原字节（连 alpha 原样）——这是「拆完叠回去视觉不变」的全部根据。
 import { test, eq, assert } from "./runner.mjs";
-import { clusterColors, partitionByNearest, hexOf } from "../src/color-cluster.ts";
+import { clusterColors, partitionByNearest, hexOf } from "../src/backend/algorithms/color-cluster.ts";
 
 // 造一张 w×h 的 RGBA 字节图：painter(i) 返回 [r,g,b,a] 或 null（透明）。
 function makeImage(n: number, painter: (i: number) => [number, number, number, number] | null) {

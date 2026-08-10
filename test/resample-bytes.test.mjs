@@ -1,7 +1,7 @@
 // 轴对齐字节重采样（src/resample-bytes.ts）验收：面积平均整数比=严格 box、alpha 加权不拖暗、
 // 最近邻/恒等、双三次限幅。裁剪模板模式 commit 与 resize 的引擎。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { areaResampleBytes, nearestResampleBytes, bicubicResampleBytes, resampleBytes } from "../src/resample-bytes.ts";
+import { areaResampleBytes, nearestResampleBytes, bicubicResampleBytes, resampleBytes } from "../src/backend/algorithms/resample-bytes.ts";
 
 const mk = (w, h, fn) => {
   const b = new Uint8ClampedArray(w * h * 4);

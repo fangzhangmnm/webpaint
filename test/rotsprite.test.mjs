@@ -1,6 +1,6 @@
 // RotSprite（src/rotsprite.ts）EPX 数学验收：规则手算样例 + 级数预算 + 尺寸。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { epx2x, rotspriteUpscale, rotspriteLevels } from "../src/rotsprite.ts";
+import { epx2x, rotspriteUpscale, rotspriteLevels } from "../src/backend/algorithms/rotsprite.ts";
 
 const RED = [255, 0, 0, 255], WHITE = [255, 255, 255, 255];
 function img(w, h, fn) {
