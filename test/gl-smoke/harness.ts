@@ -7,21 +7,21 @@
 // 结果 → window.__SMOKE__ = { ok, checks:[{name,ok,detail}], error, newGoldens }。
 
 import { BrowserGl2Port, BrowserTileArena } from "../../src/shell/browser-gl2-port.ts";
-import { GpuTilePool, IndexTexture, GPU_TILE_BYTES } from "../../src/gl/gpu-tile-pool.ts";
+import { GpuTilePool, IndexTexture, GPU_TILE_BYTES } from "../../src/backend/gl/gpu-tile-pool.ts";
 import type { PooledFBO, Gl2Texture } from "../../src/common/gl2-port.ts";
 import { TILE_SIZE, tilesAcross } from "../../src/common/tile-geometry.ts";
-import { GLCompositor } from "../../src/gl/gl-compositor.ts";
-import { BLEND_MODES } from "../../src/gl/blend-glsl.ts";
+import { GLCompositor } from "../../src/backend/gl/gl-compositor.ts";
+import { BLEND_MODES } from "../../src/backend/gl/blend-glsl.ts";
 import { docTreeToComp, compositeTree } from "./reference-gl-compositor.ts";
-import { GlRoom } from "../../src/gl/gl-room.ts";
-import { RenderTree } from "../../src/gl/render-tree.ts";
-import { RasterService } from "../../src/gl/raster-service.ts";
+import { GlRoom } from "../../src/backend/gl/gl-room.ts";
+import { RenderTree } from "../../src/backend/gl/render-tree.ts";
+import { RasterService } from "../../src/backend/gl/raster-service.ts";
 import { LayerPixels } from "../../src/backend/tiles/tile-layer.ts";
 import { materialize, editRegion, replaceFromCanvas } from "./canvas2d-facade.ts";
-import { GLStampRasterizer } from "../../src/gl/gl-stamp.ts";
-import type { Stamp } from "../../src/gl/gl-stamp.ts";
+import { GLStampRasterizer } from "../../src/backend/gl/gl-stamp.ts";
+import type { Stamp } from "../../src/backend/gl/gl-stamp.ts";
 import { compositeLayers } from "./reference-2d.ts";
-import { BrushEngine } from "../../src/brush.ts";
+import { BrushEngine } from "../../src/backend/brush.ts";
 import { resolveBrush } from "../../src/resolved-brush.ts";
 import { PaintingWorkpiece } from "../../src/backend/workpiece/painting-workpiece.ts";
 import { PaintingView } from "../../src/backend/workpiece/painting-view.ts";

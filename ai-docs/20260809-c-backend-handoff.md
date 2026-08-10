@@ -332,10 +332,35 @@
   完成栅格/合成/**bakeStamps 笔迹烤定全链**（+14 锚：对表 throw/round-trip/wash·buildup·椭圆·
   scissor 逐位 ±1/四 blend 模式 vs W3C ±1/烤定预乘域 ±4+selMask 裁剪）。验收：tsc 0、
   **1239 绿**、build 五 lint、GL smoke PASSED。无新真机锚（软域不进用户路径）。
-  **C8 剩余（接力）**：③backend stroke/filter 档口接通（webpaint-backend 的 strokeBegin/…
-  throw 占位换真实现；inject.gl 缺省 SoftGl2Port——StrokeSession deps 的 commitStamps/
-  invalidate 屏显注入面要给 headless 变体，census §2.1 + stroke-session.ts 是情报）+
-  ④MCP server 红队（create/crop/draw/circle/undo/redo/export，user：「你多红队一点」）+
-  ⑤测试分级（npm test 快层 / npm run test:full 全量层：全量画作 round-trip、真 GPU vs
-  SwiftShader vs SoftGl2 三方 golden ±ε、mock multiplayer 双 backend）+ ⑥arena 租户配额
-  记账（等 mock multiplayer 当第二真租户）。
+  ~~**C8 剩余（接力）**：③backend stroke/filter 档口接通~~（↓ v0.8.41 stroke 档已接；filter 档
+  + ④MCP + ⑤测试分级 + ⑥arena 记账仍开放）。
+- **C8 第三棒 ✅ v0.8.41（2026-08-10）——栅格域归 backend + stroke 档口接通**：
+  ①**搬家（tsc 审计，行为不变）**：gl 消费链 9 文件 + render-plan 迁 `src/backend/gl/`（提案 §1
+  「backend = Gl2Port 消费侧」的物理达成；src/gl、src/render 目录消灭）；gl-board.ts 迁
+  `src/shell/`（屏显 facade，与 browser-gl2-port 同域）；brush.ts、stroke-session.ts 迁
+  `src/backend/`（stroke-session 的引擎 import 换结构面 `StrokeEngine` 接口——backend 不点名
+  具体引擎类，filter-brush 三参 extendStroke 可赋四参位）；ResolvedBrush 类型+resolveBrush 纯函数
+  拆 `src/common/resolved-brush.ts`（提案 §1 点名 common 住户；src/resolved-brush.ts 只剩 Vue
+  装配 makeCurrentBrush + re-export 保存量路径）；current-brush-config.ts 迁 common；
+  SMOOTH_DEFAULTS 抽 `src/common/smooth-defaults.ts`（smooth-config 留运行时可变副本+prefs）。
+  ②**stroke 档口真实现**（webpaint-backend.ts）：inject 收 `gl?: Gl2Port` 缺省懒建 SoftGl2Port
+  （闲置 backend 零付费；GlRoom 预算同壳 256MB）；strokeBegin = 快照钉细（扁平 ResolvedBrush
+  字段 + 可选 mode:"brush"|"erase"，缺字段 DEFAULT_CONFIG 兜底）+ StrokeSession 进程内升格
+  （deps = input._strokeDeps 的 headless 化身：commitStamps 走本 backend RasterService.bakeStamps
+  ——board._overlayInputFrom 语义一字不动含 selMask/lockAlpha/erase/Π-outer；invalidate/setShadow
+  无屏 no-op）；**引擎 beginStroke 迟到首点**（strokeBegin 无坐标，首个 append 点才 begin）；
+  平滑推导 = _resolveSmooth 的 backend 版（SMOOTH_DEFAULTS 常数、deadzone 单位 doc px、scale≡1）；
+  strokeEnd 计步经 History onChange rev 计数（no-op 不 push → false）。③**undo/redo 门口令牌墙**：
+  open stroke 期间 backend.undo/redo **必须在门口 throw**——放行到 History 的话 workpiece
+  beforeApply 的 throw 会被当 swap 中途失败走**不可恢复协议弃整栈**（本棒实测抓获，两层防线
+  在 backend 面的实体即此门）。④提案 §3 注入清单回写（gl 已收；clock/uuid 实勘无需求：backend
+  无时钟无随机=ADR-0009 决定论构成部分）。验收：tsc 0、**1247 绿**（+8：一笔一步 undo/redo 逐位
+  /no-op/cancel 无痕/单令牌墙三拒/决定论两 backend 逐字节同图/pixelMode livesync/erase）、
+  build 五 lint 全过、GL smoke PASSED（搬家后全链重验）。无新真机锚（档口不进浏览器用户路径；
+  壳仍走 input.ts→StrokeSession 同一实现）。**C8 剩余（接力）**：③b filter 档接通（原型 =
+  filters-adjust surrogate 升格：begin 冻结源+挂 token、setParams 纯函数重 bake、commit 落层一步
+  ——注意 Filter 本体在 src/filters.ts 尚未迁 backend，接通前先勘它的纯度/依赖）+ ④MCP server
+  红队（create/crop/draw/circle/undo/redo/export，user：「你多红队一点」）+ ⑤测试分级（npm test
+  快层 / npm run test:full 全量层：全量画作 round-trip、真 GPU vs SwiftShader vs SoftGl2 三方
+  golden ±ε、mock multiplayer 双 backend）+ ⑥arena 租户配额记账（等 mock multiplayer 当第二真
+  租户；注入共享 Port 的 backend dispose 退租也挂这）。

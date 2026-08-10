@@ -1,6 +1,6 @@
 // render-plan 分区 golden（S7b；spec :123-159）。纯逻辑：树+updated+bg → 步骤表/段/pin。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { buildPlan } from "../src/render/render-plan.ts";
+import { buildPlan } from "../src/backend/gl/render-plan.ts";
 
 // 节点构造器（mode 已按约定预归一）。
 const L = (id, o = {}) => ({

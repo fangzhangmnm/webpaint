@@ -9,7 +9,7 @@ import {
   metaPrependBuiltins, buildInitMeta, builtinBrushInitData, builtinBrushes, RACK_META_ID, DEFAULT_FOLDER,
 } from "../src/brushes.ts";
 import { resolveBrush } from "../src/resolved-brush.ts";
-import { DEFAULT_CONFIG } from "../src/current-brush-config.ts";
+import { DEFAULT_CONFIG } from "../src/common/current-brush-config.ts";
 
 // 最小假 collection：entries() + getItem(id,def)（controller 的 CollectionLike 结构子集）。
 function fakeColl(items) {

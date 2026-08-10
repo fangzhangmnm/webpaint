@@ -3,11 +3,11 @@
 // 像素正确性已由 smoke 自 diff（vs compositeLayers）证；这页是感性确认 + perf。
 
 import { BrowserGl2Port } from "../../src/shell/browser-gl2-port.ts";
-import { GlRoom, poolCapacityForBudget } from "../../src/gl/gl-room.ts";
-import { RenderTree } from "../../src/gl/render-tree.ts";
+import { GlRoom, poolCapacityForBudget } from "../../src/backend/gl/gl-room.ts";
+import { RenderTree } from "../../src/backend/gl/render-tree.ts";
 import { LayerPixels } from "../../src/backend/tiles/tile-layer.ts";
 import { replaceFromCanvas } from "./canvas2d-facade.ts";
-import type { DocNode } from "../../src/gl/gl-doc-bridge.ts";
+import type { DocNode } from "../../src/backend/gl/gl-doc-bridge.ts";
 
 const N = 1024;   // doc 尺寸（4×4 tile/满层）
 

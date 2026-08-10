@@ -1,4 +1,4 @@
-import { BrushEngine } from "./brush.ts";
+import { BrushEngine } from "./backend/brush.ts";
 import { LassoEngine } from "./lasso.ts";
 import { FilterBrushEngine } from "./filter-brush.ts";
 import { ShapeBrushEngine } from "./shape-brush.ts";
@@ -10,8 +10,8 @@ import type { History } from "./backend/workpiece/history.ts";
 import type { PaintingWorkpiece } from "./backend/workpiece/painting-workpiece.ts";
 import type { LayerTiles } from "./backend/workpiece/layer-tiles.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
-import { StrokeSession } from "./stroke-session.ts";
-import type { StrokeSessionDeps } from "./stroke-session.ts";
+import { StrokeSession } from "./backend/stroke-session.ts";
+import type { StrokeSessionDeps } from "./backend/stroke-session.ts";
 import { Selection } from "./backend/selection.ts";
 type Doc = PaintingView;
 interface FilterBrushState {

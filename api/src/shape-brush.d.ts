@@ -1,4 +1,4 @@
-import { BrushEngine } from "./brush.ts";
+import { BrushEngine } from "./backend/brush.ts";
 import type { ClipBox } from "./shape-geometry.ts";
 import type { Family, PerspConfig, Mat3 } from "./perspective-frame.ts";
 import type { ViewLeafSnap as LayerSnap } from "./backend/workpiece/painting-view.ts";

@@ -1,8 +1,8 @@
 import type { Background } from "./gl-compositor.ts";
 import type { DocNode } from "./gl-doc-bridge.ts";
-import type { LayerPixels } from "../backend/tiles/tile-layer.ts";
+import type { LayerPixels } from "../tiles/tile-layer.ts";
 import type { Stamp, StrokeShape } from "./gl-stamp.ts";
-import type { PooledFBO } from "../common/gl2-port.ts";
+import type { PooledFBO } from "../../common/gl2-port.ts";
 import type { GlRoom, OverlayInput, SurrogateInput } from "./gl-room.ts";
 export declare class RasterService {
     private _room;

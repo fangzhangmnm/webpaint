@@ -3,6 +3,7 @@ import { PaintingWorkpiece, type PaintingData, type PaintingDataNode } from "./w
 import { PaintingView } from "./workpiece/painting-view.ts";
 import type { PerspHost } from "./workpiece/persp-component.ts";
 import { LayersFace } from "./layers-face.ts";
+import type { Gl2Port } from "../common/gl2-port.ts";
 import { type DocCompositorBytesFn } from "./doc-render.ts";
 import { type RgbaPlane } from "./png-codec.ts";
 import type { WebPaintBackendInterface, BackendLayerNode, BackendDocInfo, BackendChangeEvent, BackendOpResult, BackendAddResult, ResolvedBrushSnapshot, StrokeId, FilterSessionId } from "./webpaint-backend-interface.ts";
@@ -25,6 +26,9 @@ export interface BackendInject {
     appVersion?: string;
     jpgEncoder?: (plane: RgbaPlane) => Promise<Uint8Array>;
     imageDecoder?: (bytes: Uint8Array) => Promise<RgbaPlane>;
+    /** 栅格域 Port（C8 档口）：stroke 档的 bake/merge 走它。缺省懒建 SoftGl2Port（提案 §3 注入清单
+     *  ——headless/MCP 无参即跑）；壳/embedding 可注入 BrowserGl2Port 共享真 GPU。 */
+    gl?: Gl2Port;
     /** desk persp 配置读写口（壳接 workbench-state；缺省内存 host——headless/测试）。 */
     persp?: PerspHost;
     /** per-tenant 合成注入（C7）：本 backend 的 merged 合成面（encodeOra/exportImage/mergeDown）。
@@ -51,6 +55,11 @@ export declare class WebPaintBackend implements WebPaintBackendInterface {
     private _compositor;
     private _disposed;
     private _listeners;
+    private _room;
+    private _raster;
+    private _stroke;
+    private _strokeSeq;
+    private _histRev;
     /** 进程内协作面（壳迁移期/测试直取引擎；embedding/MCP 只走接口方法——序列化墙那侧不存在这些）。 */
     get wp2(): PaintingWorkpiece;
     get view(): PaintingView;
@@ -85,14 +94,19 @@ export declare class WebPaintBackend implements WebPaintBackendInterface {
     layerSetActive(id: number): boolean;
     layerClear(id: number): BackendOpResult;
     setReferenceLayer(id: number | null): BackendOpResult;
+    private _txGuard;
     undo(): boolean;
     redo(): boolean;
     canUndo(): boolean;
     canRedo(): boolean;
-    strokeBegin(_leafId: number, _brush: ResolvedBrushSnapshot): StrokeId;
-    strokeAppend(_id: StrokeId, _points: Float32Array): void;
-    strokeEnd(_id: StrokeId): boolean;
-    strokeCancel(_id: StrokeId): void;
+    private _ensureRaster;
+    private _strokeSessionDeps;
+    private _commitStamps;
+    private _requireStroke;
+    strokeBegin(leafId: number, brush: ResolvedBrushSnapshot): StrokeId;
+    strokeAppend(id: StrokeId, points: Float32Array): void;
+    strokeEnd(id: StrokeId): boolean;
+    strokeCancel(id: StrokeId): void;
     filterBegin(_leafId: number, _filterId: string): FilterSessionId;
     filterSetParams(_id: FilterSessionId, _params: Record<string, unknown>): void;
     filterCommit(_id: FilterSessionId): boolean;

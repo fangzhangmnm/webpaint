@@ -23,17 +23,25 @@
 // commitStamps/invalidate/setShadow 是屏显侧（board）的注入——终态归 backend 自持（Gl2Port），C7/C8 收编。
 
 import type { BrushEngine } from "./brush.ts";
-import type { FilterBrushEngine } from "./filter-brush.ts";
-import type { ShapeBrushEngine } from "./shape-brush.ts";
-import type { ViewLeaf, ViewLeafSnap } from "./backend/workpiece/painting-view.ts";
-import type { WriteToken } from "./backend/workpiece/workpiece.ts";
-import type { Selection } from "./backend/selection.ts";
-import { LayerPixels, disposePixelsSnapshot } from "./backend/tiles/tile-layer.ts";
-import { TILE_SIZE } from "./common/tile-geometry.ts";
+import type { ViewLeaf, ViewLeafSnap } from "./workpiece/painting-view.ts";
+import type { WriteToken } from "./workpiece/workpiece.ts";
+import type { Selection } from "./selection.ts";
+import { LayerPixels, disposePixelsSnapshot } from "./tiles/tile-layer.ts";
+import { TILE_SIZE } from "../common/tile-geometry.ts";
 
-// 液化 = filterBrush 的 LiquifyFilter payload（v132 起无直连双轨）。
-export type StrokeEngine = BrushEngine | FilterBrushEngine | ShapeBrushEngine;
 export type StampCollect = NonNullable<ReturnType<BrushEngine["collectStamps"]>>;
+
+// 引擎的事务面（结构类型；C7 搬 backend 后不再点名具体引擎类——液化=filterBrush 的
+// LiquifyFilter payload（v132 起无直连双轨）、形状笔、BrushEngine 都满足此面）。
+// extendStroke 四参：filterBrush 三参版可赋（少参函数可赋多参位）；endStroke 只有
+// buffered 笔返 StampCollect（filterBrush/形状笔 pixelMode 返 void/null → session 视 null）。
+export interface StrokeEngine {
+  extendStroke(x: number, y: number, pressure: number, t?: number | null): void;
+  endStroke(): StampCollect | null | void;
+  cancelStroke(): void;
+  flushDirty(): [number, number, number, number] | null;
+  collectStamps?(): StampCollect | null;
+}
 
 /** 预览宿（census §3.4；见文件头）。 */
 export type StrokePreview = "overlay" | "livesync" | "shadow";

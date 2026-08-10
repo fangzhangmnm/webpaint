@@ -1,6 +1,6 @@
 // gl-doc-bridge 纯翻译测试（docTreeToComp + safeMode）。像素路径（uploadLayerToTiles）由 smoke 验。
 import { describe, it, assert } from "./runner.mjs";
-import { safeMode } from "../src/gl/gl-doc-bridge.ts";
+import { safeMode } from "../src/backend/gl/gl-doc-bridge.ts";
 import { docTreeToComp } from "./gl-smoke/reference-gl-compositor.ts";
 
 const FAKE_INDEX = { _fake: true };

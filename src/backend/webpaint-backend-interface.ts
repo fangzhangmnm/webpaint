@@ -10,8 +10,8 @@
 // dispose 时开着 → cancel 后释放（interrupt=cancel 家规）。
 //
 // C7 第一棒收编范围：生命周期 + 字节面 + 读面 + 层结构 verbs（LayersFace 穿接口衣）+ undo。
-// stroke/filter 档口**契约已 pin、进程内实现待 C8**（栅格域要 SoftGl2Port 兜底才能 headless 跑）
-// ——本棒实现体对它们响亮 throw（fail-loud，不静默）。
+// C8 档口接通：**stroke 档已接真实现**（StrokeSession 进程内升格；栅格域 = inject.gl 缺省
+// SoftGl2Port——headless/MCP 无参即画）；filter 档契约 pin、实现下一棒（响亮 throw，不静默）。
 // verbs 全清单（选区/浮层/fill/doc 几何）随后棒逐条过（§6.3 留白纪律：不提前固化）。
 
 // ---- 读面投影（JSON-able；引擎树的标量镜像）----
@@ -38,8 +38,11 @@ export type BackendAddResult = { ok: true; id: number } | { ok: false; msg?: str
 export type StrokeId = number;
 export type FilterSessionId = number;
 
-/** ResolvedBrush 快照（begin 冻结一笔；画一半动笔=下一笔生效）。C7 先按不透明 JSON-able 对象
- *  过墙（真形状 = resolved-brush.ts ResolvedBrush，全标量已满足纪律；C8 接通引擎时钉细）。 */
+/** ResolvedBrush 快照（begin 冻结一笔；画一半动笔=下一笔生效）。C8 钉细：**扁平 ResolvedBrush
+ *  字段**（common/resolved-brush.ts，全标量）+ 可选 `mode: "brush" | "erase"`（缺省 brush）；
+ *  缺字段一律 DEFAULT_CONFIG 兜底（common/current-brush-config.ts——MCP 只传 {size,color} 也出
+ *  完整可画的笔）。平滑推导在 backend 内（streamline/stabilization × SMOOTH_DEFAULTS 常数，
+ *  deadzone 单位 doc px）——同一快照+同一 (x,y,p,t) 序列 → 同一输出（ADR-0009 决定论）。 */
 export type ResolvedBrushSnapshot = Record<string, unknown>;
 
 export interface WebPaintBackendInterface {

@@ -1,6 +1,6 @@
 import type { BlendMode, SourceKind } from "./blend-glsl.ts";
 import type { IndexTexture } from "./gpu-tile-pool.ts";
-import type { Gl2Port, Gl2Texture, Gl2TexSource, Gl2TileArena, PooledFBO, FBOPrec } from "../common/gl2-port.ts";
+import type { Gl2Port, Gl2Texture, Gl2TexSource, Gl2TileArena, PooledFBO, FBOPrec } from "../../common/gl2-port.ts";
 export interface OverlayDesc {
     tex: Gl2TexSource;
     opacity: number;

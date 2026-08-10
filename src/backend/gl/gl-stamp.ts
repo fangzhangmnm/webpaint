@@ -17,7 +17,7 @@
 // C8：GL 状态/VAO/draw 全走 Gl2Port 动词（drawInstanced 契约 = loc0 单位 quad + loc1 vec4/实例）；
 //   本类只剩 shader 源 + 实例打包 + 两个 draw spec。
 
-import type { Gl2Port, PooledFBO } from "../common/gl2-port.ts";
+import type { Gl2Port, PooledFBO } from "../../common/gl2-port.ts";
 
 // 一个 stamp：doc 坐标中心 + 直径 + 该 dab 的 α（= _stampParams.stampAlpha）。
 export interface Stamp { x: number; y: number; size: number; alpha: number; }

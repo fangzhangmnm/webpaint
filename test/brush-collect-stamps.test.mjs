@@ -7,7 +7,7 @@ import { describe, it, assert, eq } from "./runner.mjs";
 import { UndoStack } from "../src/backend/workpiece/undo-stack.ts";
 import { PaintingWorkpiece } from "../src/backend/workpiece/painting-workpiece.ts";
 import { PaintingView } from "../src/backend/workpiece/painting-view.ts";
-const { BrushEngine } = await import("../src/brush.ts");
+const { BrushEngine } = await import("../src/backend/brush.ts");
 const { resolveBrush } = await import("../src/resolved-brush.ts");
 
 // 测试卫生：工件收集起来文件末尾统一释放（防 tile-pool FR 泄漏 assert 刷屏；非产品泄漏）。

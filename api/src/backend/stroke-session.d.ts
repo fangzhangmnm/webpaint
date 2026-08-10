@@ -1,12 +1,16 @@
 import type { BrushEngine } from "./brush.ts";
-import type { FilterBrushEngine } from "./filter-brush.ts";
-import type { ShapeBrushEngine } from "./shape-brush.ts";
-import type { ViewLeaf, ViewLeafSnap } from "./backend/workpiece/painting-view.ts";
-import type { WriteToken } from "./backend/workpiece/workpiece.ts";
-import type { Selection } from "./backend/selection.ts";
-import { LayerPixels } from "./backend/tiles/tile-layer.ts";
-export type StrokeEngine = BrushEngine | FilterBrushEngine | ShapeBrushEngine;
+import type { ViewLeaf, ViewLeafSnap } from "./workpiece/painting-view.ts";
+import type { WriteToken } from "./workpiece/workpiece.ts";
+import type { Selection } from "./selection.ts";
+import { LayerPixels } from "./tiles/tile-layer.ts";
 export type StampCollect = NonNullable<ReturnType<BrushEngine["collectStamps"]>>;
+export interface StrokeEngine {
+    extendStroke(x: number, y: number, pressure: number, t?: number | null): void;
+    endStroke(): StampCollect | null | void;
+    cancelStroke(): void;
+    flushDirty(): [number, number, number, number] | null;
+    collectStamps?(): StampCollect | null;
+}
 /** 预览宿（census §3.4；见文件头）。 */
 export type StrokePreview = "overlay" | "livesync" | "shadow";
 export interface StrokeSessionDeps {

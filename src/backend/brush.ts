@@ -34,9 +34,9 @@
 //   平滑核 v249 = 时间常数指数追踪（详 ai-docs/20260613-brush-procreate-smoothing.md）：smoother 给平滑中心线 C；
 //     抬笔 finish() 收尾把直线桥换成动量弧尾、钉终点。
 
-import { StrokeSmoother, PressureLPF } from "./backend/stroke-smoother.ts";
-import type { ViewLeaf } from "./backend/workpiece/painting-view.ts";
-import type { ResolvedBrush } from "./resolved-brush.ts";
+import { StrokeSmoother, PressureLPF } from "./stroke-smoother.ts";
+import type { ViewLeaf } from "./workpiece/painting-view.ts";
+import type { ResolvedBrush } from "../common/resolved-brush.ts";
 import type { Stamp, StrokeShape } from "./gl/gl-stamp.ts";
 
 interface RgbColor { r: number; g: number; b: number; }

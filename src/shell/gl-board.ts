@@ -5,17 +5,17 @@
 // C1：context 创建翻壳——壳（board.ts）造好 BrowserGl2Port 递入，本类只见 Gl2Port 契约。
 
 import type { Gl2Port } from "../common/gl2-port.ts";
-import { GlRoom } from "./gl-room.ts";
-import { RenderTree } from "./render-tree.ts";
-import { RasterService } from "./raster-service.ts";
-import type { FloatInput, OverlayInput, SurrogateInput } from "./gl-room.ts";
+import { GlRoom } from "../backend/gl/gl-room.ts";
+import { RenderTree } from "../backend/gl/render-tree.ts";
+import { RasterService } from "../backend/gl/raster-service.ts";
+import type { FloatInput, OverlayInput, SurrogateInput } from "../backend/gl/gl-room.ts";
 import type { LayerPixels } from "../backend/tiles/tile-layer.ts";
-import type { DocNode, DocLeaf } from "./gl-doc-bridge.ts";
-import type { Background } from "./gl-compositor.ts";
+import type { DocNode, DocLeaf } from "../backend/gl/gl-doc-bridge.ts";
+import type { Background } from "../backend/gl/gl-compositor.ts";
 
 export interface GLDoc { layers: DocNode[]; width: number; height: number; }
 // board live-sync 接缝用的叶类型别名（结构上 = DocLeaf，board 传活动 Layer 进来）。
-export type { DocLeaf as GLLeaf } from "./gl-doc-bridge.ts";
+export type { DocLeaf as GLLeaf } from "../backend/gl/gl-doc-bridge.ts";
 
 // "#rrggbb" → [r,g,b] in [0,1]（void 底色 clear 用）。失败回退浅灰。
 function hexToRgb(hex: string): [number, number, number] {

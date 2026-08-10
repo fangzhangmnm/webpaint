@@ -7,7 +7,7 @@ function throwsMsg(fn, re, msg) {
   try { fn(); } catch (e) { assert(re.test(e.message), `${msg}：抛的是 ${e.message}`); return; }
   throw new Error(`${msg}：应当抛错但没抛`);
 }
-import { GpuTilePool, GPU_TILE_BYTES } from "../src/gl/gpu-tile-pool.ts";
+import { GpuTilePool, GPU_TILE_BYTES } from "../src/backend/gl/gpu-tile-pool.ts";
 
 // fake backend：内存模拟 slices（可选记录调用；容量可被 recreate 改）。
 function fakeBackend(capacity = 8) {

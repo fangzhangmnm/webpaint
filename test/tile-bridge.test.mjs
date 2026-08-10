@@ -1,8 +1,8 @@
 // cpu-gpu-tile-bridge 测试（spec :178-186）：身份去重跳传/批量/purgeDead/惰性 bytes；
 //   sliceRegionToTiles 纯函数（大 FBO readback → 对齐 doc 网格切片，S8 brush commit 的消费口）。
 import { describe, it, assert } from "./runner.mjs";
-import { GpuTilePool, GPU_TILE_BYTES } from "../src/gl/gpu-tile-pool.ts";
-import { CpuGpuTileBridge, sliceRegionToTiles } from "../src/gl/tile-bridge.ts";
+import { GpuTilePool, GPU_TILE_BYTES } from "../src/backend/gl/gpu-tile-pool.ts";
+import { CpuGpuTileBridge, sliceRegionToTiles } from "../src/backend/gl/tile-bridge.ts";
 
 function fakeBackend(capacity = 32) {
   const be = {

@@ -7,12 +7,12 @@ import { describe, it } from "./runner.mjs";
 import assert from "node:assert/strict";
 import { SoftGl2Port } from "../src/backend/soft-gl2-port.ts";
 import { blendChannel } from "../src/common/blend-modes.ts";
-import { GLStampRasterizer } from "../src/gl/gl-stamp.ts";
-import { GLCompositor } from "../src/gl/gl-compositor.ts";
-import { IndexTexture } from "../src/gl/gpu-tile-pool.ts";
+import { GLStampRasterizer } from "../src/backend/gl/gl-stamp.ts";
+import { GLCompositor } from "../src/backend/gl/gl-compositor.ts";
+import { IndexTexture } from "../src/backend/gl/gpu-tile-pool.ts";
 import { TILE_SIZE } from "../src/common/tile-geometry.ts";
-import { GlRoom } from "../src/gl/gl-room.ts";
-import { RasterService } from "../src/gl/raster-service.ts";
+import { GlRoom } from "../src/backend/gl/gl-room.ts";
+import { RasterService } from "../src/backend/gl/raster-service.ts";
 import { LayerPixels } from "../src/backend/tiles/tile-layer.ts";
 import { appTilePool } from "../src/backend/tiles/app-tile-pool.ts";
 

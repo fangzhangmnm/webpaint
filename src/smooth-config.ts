@@ -9,16 +9,11 @@
 //   SMOOTH 仍是**同步读的可变对象**（手感热路径不变）；boot 门后 hydrateSmoothFromPrefs() 把 collection 值合并进来。
 
 import { syncedUserPreference, PREF_DEFAULTS } from "./app-prefs.ts";
+import { SMOOTH_DEFAULTS } from "./common/smooth-defaults.ts";
 
-export const SMOOTH_DEFAULTS = Object.freeze({
-  tauMaxMs:           500, // streamline=1 时的时间常数 tau（ms）。二阶 SmoothDamp，smoothTime=tau，吃真实 dt。
-                           //   稳态滞后≈速度×tau（与笔速/采样率/几何无关）；转角自然减速→滞后缩小→顿涌现。
-                           //   0.5→250ms；嫌拖就调小、嫌抖就调大此值。
-  tailBow:            1,   // 弧 tail 动量增益：1=自然、>1 更鼓、0=直连光标。直行段恒直线。
-  stabMaxPx:          8,   // stabilization=1 时死区半径（screen px）；半径内 raw 不拉动落点（与 tau 正交的硬阈值）
-  rawStaticSq:        0.005, // raw 静止门限（screen px²）：动得比这小的 event 跳过
-  pressureAlpha:      0.4,   // 压感 smP 一阶 EMA α（input 端传感器去尖刺）
-});
+// 出厂默认 C8 迁 src/common/smooth-defaults.ts（backend 档口的 {tau,deadzone} 推导也吃它）；
+// 这里 re-export 保存量消费者路径。
+export { SMOOTH_DEFAULTS } from "./common/smooth-defaults.ts";
 
 // 运行时可变副本（dev 面板改它，手感热路径同步读）。eval 期 = DEFAULTS；boot 门后 hydrate 合并 collection。
 export const SMOOTH: Record<keyof typeof SMOOTH_DEFAULTS, number> = { ...SMOOTH_DEFAULTS };

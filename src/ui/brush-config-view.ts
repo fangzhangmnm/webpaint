@@ -13,8 +13,8 @@
 import { createApp, defineComponent, ref } from "../../vendor/vue/vue.esm-browser.prod.js";
 import { quantizeSize } from "./brush-size.ts";
 import { t } from "../i18n/index.ts";
-import { ensureBrushConfigDefaults } from "../current-brush-config.ts";
-import type { BrushDraft } from "../current-brush-config.ts";
+import { ensureBrushConfigDefaults } from "../common/current-brush-config.ts";
+import type { BrushDraft } from "../common/current-brush-config.ts";
 
 const SECTION = "brush-settings-section";
 const TITLE = "brush-settings-section-title";

@@ -3,13 +3,13 @@
 // CompNode/clip 判定 + gl-doc-bridge.ts 的 docTreeToComp。生产零调用后集中归档在 test 域
 // （「别删对拍能力」= handoff 琐碎第 6 条）。语义与 reference-2d.ts（旧 2D 规范合成器）逐条对齐。
 
-import type { GLCompositor, Background, Acc } from "../../src/gl/gl-compositor.ts";
-import type { OverlayDesc, FloatDesc } from "../../src/gl/gl-compositor.ts";
+import type { GLCompositor, Background, Acc } from "../../src/backend/gl/gl-compositor.ts";
+import type { OverlayDesc, FloatDesc } from "../../src/backend/gl/gl-compositor.ts";
 import type { PooledFBO, Gl2TileArena } from "../../src/common/gl2-port.ts";
-import type { IndexTexture } from "../../src/gl/gpu-tile-pool.ts";
-import type { BlendMode } from "../../src/gl/blend-glsl.ts";
-import { safeMode } from "../../src/gl/gl-doc-bridge.ts";
-import type { DocLeaf, DocNode } from "../../src/gl/gl-doc-bridge.ts";
+import type { IndexTexture } from "../../src/backend/gl/gpu-tile-pool.ts";
+import type { BlendMode } from "../../src/backend/gl/blend-glsl.ts";
+import { safeMode } from "../../src/backend/gl/gl-doc-bridge.ts";
+import type { DocLeaf, DocNode } from "../../src/backend/gl/gl-doc-bridge.ts";
 
 // ---- CompNode 树（合成器输入节点）----
 export interface CompLeaf {

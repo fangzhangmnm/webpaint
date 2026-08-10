@@ -36,8 +36,11 @@ export type BackendAddResult = {
 };
 export type StrokeId = number;
 export type FilterSessionId = number;
-/** ResolvedBrush 快照（begin 冻结一笔；画一半动笔=下一笔生效）。C7 先按不透明 JSON-able 对象
- *  过墙（真形状 = resolved-brush.ts ResolvedBrush，全标量已满足纪律；C8 接通引擎时钉细）。 */
+/** ResolvedBrush 快照（begin 冻结一笔；画一半动笔=下一笔生效）。C8 钉细：**扁平 ResolvedBrush
+ *  字段**（common/resolved-brush.ts，全标量）+ 可选 `mode: "brush" | "erase"`（缺省 brush）；
+ *  缺字段一律 DEFAULT_CONFIG 兜底（common/current-brush-config.ts——MCP 只传 {size,color} 也出
+ *  完整可画的笔）。平滑推导在 backend 内（streamline/stabilization × SMOOTH_DEFAULTS 常数，
+ *  deadzone 单位 doc px）——同一快照+同一 (x,y,p,t) 序列 → 同一输出（ADR-0009 决定论）。 */
 export type ResolvedBrushSnapshot = Record<string, unknown>;
 export interface WebPaintBackendInterface {
     dispose(): void;

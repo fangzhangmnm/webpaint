@@ -1,6 +1,6 @@
 // 笔设置 draft 补缺测试（UI 深化 candidate 1）。
 import { describe, it, eq, assert } from "./runner.mjs";
-import { ensureBrushConfigDefaults } from "../src/current-brush-config.ts";
+import { ensureBrushConfigDefaults } from "../src/common/current-brush-config.ts";
 
 describe("ensureBrushConfigDefaults", () => {
   it("空 draft 补齐全部字段（模板可无脑 v-model）", () => {

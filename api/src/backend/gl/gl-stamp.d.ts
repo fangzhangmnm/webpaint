@@ -1,4 +1,4 @@
-import type { Gl2Port, PooledFBO } from "../common/gl2-port.ts";
+import type { Gl2Port, PooledFBO } from "../../common/gl2-port.ts";
 export interface Stamp {
     x: number;
     y: number;

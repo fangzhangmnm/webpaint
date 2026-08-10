@@ -3,15 +3,15 @@ import { sourceWarpMatrix, sourceDestQuad, integerRigidOf } from "./floating-tra
 import type { WarpBakeFn } from "./floating-transform.ts";
 import { PREF_DEFAULTS } from "./app-prefs.ts";   // pixel-grid 默认值 SSoT（别在本文件硬编码第二份）
 import { reportError } from "./error-badge.ts";
-import { GLBoard } from "./gl/gl-board.ts";
+import { GLBoard } from "./shell/gl-board.ts";
 import { BrowserGl2Port } from "./shell/browser-gl2-port.ts";
-import { poolCapacityForBudget } from "./gl/gl-room.ts";
-import type { FloatInput, StampOverlayInput, FillOverlayInput, OverlayInput, SurrogateInput } from "./gl/gl-room.ts";
-import type { Stamp, StrokeShape } from "./gl/gl-stamp.ts";
+import { poolCapacityForBudget } from "./backend/gl/gl-room.ts";
+import type { FloatInput, StampOverlayInput, FillOverlayInput, OverlayInput, SurrogateInput } from "./backend/gl/gl-room.ts";
+import type { Stamp, StrokeShape } from "./backend/gl/gl-stamp.ts";
 
 // brush.collectStamps() 的返回形（board 不 import BrushEngine，结构化接）。
 type StampCollect = { stamps: Stamp[]; shape: StrokeShape; layer: ViewLeaf; mode: string; opacity: number; blendMode: string; bx: number; by: number; bw: number; bh: number } | null;
-import type { GLDoc, GLLeaf } from "./gl/gl-board.ts";
+import type { GLDoc, GLLeaf } from "./shell/gl-board.ts";
 import type { PaintingView, ViewLeaf } from "./backend/workpiece/painting-view.ts";
 import { layerByteBudget } from "./backend/workpiece/painting-view.ts";
 import { eachViewLeaf } from "./backend/workpiece/painting-view.ts";

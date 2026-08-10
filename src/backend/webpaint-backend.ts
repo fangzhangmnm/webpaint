@@ -15,9 +15,18 @@
 
 import { History } from "./workpiece/history.ts";
 import { PaintingWorkpiece, type PaintingData, type PaintingDataNode } from "./workpiece/painting-workpiece.ts";
-import { PaintingView } from "./workpiece/painting-view.ts";
+import { PaintingView, findViewNodeById, type ViewLeaf } from "./workpiece/painting-view.ts";
 import type { PerspHost } from "./workpiece/persp-component.ts";
 import { LayersFace } from "./layers-face.ts";
+import { StrokeSession, type StampCollect, type StrokeSessionDeps } from "./stroke-session.ts";
+import { BrushEngine } from "./brush.ts";
+import { DEFAULT_CONFIG } from "../common/current-brush-config.ts";
+import type { ResolvedBrush } from "../common/resolved-brush.ts";
+import { SMOOTH_DEFAULTS } from "../common/smooth-defaults.ts";
+import { SoftGl2Port } from "./soft-gl2-port.ts";
+import { GlRoom, poolCapacityForBudget } from "./gl/gl-room.ts";
+import { RasterService } from "./gl/raster-service.ts";
+import type { Gl2Port } from "../common/gl2-port.ts";
 import { renderNodesToBytes, type DocCompositorBytesFn } from "./doc-render.ts";
 import { encodeDocToOra, decodeOraToPainting, paintingDataToEncodeDoc, type DecodedPainting } from "./ora.ts";
 import { encodePngFromBytes, decodePngToBytes, type RgbaPlane } from "./png-codec.ts";
@@ -46,6 +55,9 @@ export interface BackendInject {
   appVersion?: string;
   jpgEncoder?: (plane: RgbaPlane) => Promise<Uint8Array>;
   imageDecoder?: (bytes: Uint8Array) => Promise<RgbaPlane>;
+  /** 栅格域 Port（C8 档口）：stroke 档的 bake/merge 走它。缺省懒建 SoftGl2Port（提案 §3 注入清单
+   *  ——headless/MCP 无参即跑）；壳/embedding 可注入 BrowserGl2Port 共享真 GPU。 */
+  gl?: Gl2Port;
   /** desk persp 配置读写口（壳接 workbench-state；缺省内存 host——headless/测试）。 */
   persp?: PerspHost;
   /** per-tenant 合成注入（C7）：本 backend 的 merged 合成面（encodeOra/exportImage/mergeDown）。
@@ -97,6 +109,18 @@ export class WebPaintBackend implements WebPaintBackendInterface {
   private _compositor: DocCompositorBytesFn;
   private _disposed = false;
   private _listeners = new Set<(ev: BackendChangeEvent) => void>();
+  // ---- 栅格域（C8 档口）：懒建——纯结构/codec 用途的 backend 不付 GL/软 arena 钱 ----
+  private _room: GlRoom | null = null;
+  private _raster: RasterService | null = null;
+  // ---- stroke 档口状态（单令牌墙：同时最多一个 open stroke）----
+  private _stroke: {
+    id: StrokeId; session: StrokeSession; engine: BrushEngine;
+    settings: ResolvedBrush; mode: string;
+    smooth: { tau?: number; deadzone?: number; tailBow?: number };
+    begun: boolean;   // 引擎 beginStroke 迟到首点（strokeBegin 无坐标，首个 append 点才 begin）
+  } | null = null;
+  private _strokeSeq = 0;
+  private _histRev = 0;   // History onChange 计数（strokeEnd 判「真落了一步」用；no-op 不 push 不动它）
 
   /** 进程内协作面（壳迁移期/测试直取引擎；embedding/MCP 只走接口方法——序列化墙那侧不存在这些）。 */
   get wp2(): PaintingWorkpiece { return this._wp2; }
@@ -112,7 +136,7 @@ export class WebPaintBackend implements WebPaintBackendInterface {
       maxQuotaBytes: UNDO_QUOTA_BYTES,
       // 不可恢复协议：壳钩子接 error banner + 全量重绘；栈已重置这一事实同时经 onChange 广播。
       onUnrecoverable: (e) => { hooks?.onUnrecoverable?.(e); this._emit(); },
-      onChange: () => { hooks?.onHistChange?.(this._history.canUndo(), this._history.canRedo()); this._emit(); },
+      onChange: () => { this._histRev++; hooks?.onHistChange?.(this._history.canUndo(), this._history.canRedo()); this._emit(); },
       onApplied: (info) => { hooks?.onApplied?.(info); },   // 屏显刷新是壳的事（headless 无耗）
     });
     // born 出生形：1×1 脚手架树——仅存在于本构造函数内（load 立即换根），外界不可观测。
@@ -168,7 +192,10 @@ export class WebPaintBackend implements WebPaintBackendInterface {
   dispose(): void {
     if (this._disposed) return;
     this._disposed = true;
-    // interrupt=cancel 家规：open transaction → 先取消（档口未接进程内实现前恒无；防御性断言留门）。
+    // interrupt=cancel 家规：open stroke → 先取消（令牌收口、无痕）再释放。
+    if (this._stroke) { const st = this._stroke; this._stroke = null; st.session.cancel(); }
+    // GPU/软 arena：SoftGl2Port 随 backend GC；注入共享 Port 的租户配额退租随 C8 arena 记账批
+    //（接口形状与 mock multiplayer 第二真租户同批定，§6.3 不提前固化）。
     // 换 1×1 空根释放当前 doc 全部 tileset → 清栈释放 undo 持有 → 观察者退租。
     this._wp2.load(blankData({ width: 1, height: 1 }));
     this._history.clear();
@@ -254,21 +281,125 @@ export class WebPaintBackend implements WebPaintBackendInterface {
   layerClear(id: number): BackendOpResult { this._guard(); return this._layers.clearLayer(id); }
   setReferenceLayer(id: number | null): BackendOpResult { this._guard(); return this._layers.setReferenceLayer(id); }
 
-  // ── undo ──
+  // ── undo（open transaction 期间响亮拒绝——不能放行到 History：workpiece beforeApply 的 throw
+  //    会被 History 当 swap 中途失败走不可恢复协议弃整栈，所以令牌墙必须在本门口挡）──
 
-  undo(): boolean { this._guard(); return this._history.undo(); }
-  redo(): boolean { this._guard(); return this._history.redo(); }
+  private _txGuard(op: string): void {
+    if (this._stroke) throw new Error(`${op}: open stroke 事务中（单令牌墙——先 strokeEnd/strokeCancel）`);
+  }
+
+  undo(): boolean { this._guard(); this._txGuard("undo"); return this._history.undo(); }
+  redo(): boolean { this._guard(); this._txGuard("redo"); return this._history.redo(); }
   canUndo(): boolean { this._guard(); return this._history.canUndo(); }
   canRedo(): boolean { this._guard(); return this._history.canRedo(); }
 
-  // ── 多步事务档口（契约 pin；进程内实现随 C8 SoftGl2Port 收编栅格域后落地）──
+  // ── 多步事务档口 · stroke 档（C8 接通：StrokeSession 进程内升格，栅格域 = inject.gl 缺省 SoftGl2Port）──
 
-  strokeBegin(_leafId: number, _brush: ResolvedBrushSnapshot): StrokeId {
-    throw new Error("strokeBegin: 进程内档口未接（C8——栅格域需 Gl2Port/SoftGl2Port）；浏览器壳期请走 input.ts→StrokeSession");
+  // 栅格域懒建：预算与浏览器壳同款 256MB（软 arena 初始 64 slice 按需长，闲置 backend 零付费）。
+  private _ensureRaster(): RasterService {
+    if (!this._raster) {
+      const port = this._inject.gl ?? new SoftGl2Port();
+      this._room = new GlRoom(port, poolCapacityForBudget(256 * 1024 * 1024));
+      this._raster = new RasterService(this._room);
+    }
+    return this._raster;
   }
-  strokeAppend(_id: StrokeId, _points: Float32Array): void { throw new Error("strokeAppend: 档口未接（C8）"); }
-  strokeEnd(_id: StrokeId): boolean { throw new Error("strokeEnd: 档口未接（C8）"); }
-  strokeCancel(_id: StrokeId): void { throw new Error("strokeCancel: 档口未接（C8）"); }
+
+  // StrokeSession 的注入面（input.ts _strokeDeps 的 headless 化身）：屏显三口（commitStamps 走本
+  // backend 的栅格域、invalidate/setShadow 无屏 no-op——brush/eraser 档口只用 overlay/livesync 宿）。
+  private _strokeSessionDeps(): StrokeSessionDeps {
+    return {
+      begin: (label) => this._wp2.begin(label),
+      tokenChanged: (layerId) => this._wp2.layerTiles.tokenChanged(layerId),
+      tokenBeforeImage: (layerId) => this._wp2.layerTiles.tokenBeforeImage(layerId),
+      getSelection: () => this._view.selection,
+      commitStamps: (cs) => this._commitStamps(cs),
+      invalidate: () => {},
+      setShadow: () => {},
+    };
+  }
+
+  // board._overlayInputFrom + commitBrushStroke 的 headless 同构（SSoT 语义一字不动：
+  // selection/lockAlpha/erase/blendMode/Π-outer opacity 全在 shader，bake = live 同一管线）。
+  private _commitStamps(cs: StampCollect): boolean {
+    const layer = cs.layer;
+    const sel = this._view.selection;
+    const m = sel ? sel.bboxMask() : null;
+    return this._ensureRaster().bakeStamps(layer.id, layer.pixels, {
+      stamps: cs.stamps, shape: cs.shape, bx: cs.bx, by: cs.by, bw: cs.bw, bh: cs.bh,
+      layerId: layer.id, opacity: cs.opacity, erase: cs.mode === "erase", blendMode: cs.blendMode,
+      lockAlpha: !!layer.lockAlpha,
+      selMask: m ? { data: m.data, ox: m.x, oy: m.y, ow: m.w, oh: m.h } : null,
+    }, this._view.width, this._view.height,
+    (px, x, y, w, h) => layer.applyRegionDiff(x, y, w, h, px));
+  }
+
+  private _requireStroke(id: StrokeId) {
+    const st = this._stroke;
+    if (!st || st.id !== id) throw new Error(`stroke 档口：无此 open stroke（id=${id}）`);
+    return st;
+  }
+
+  strokeBegin(leafId: number, brush: ResolvedBrushSnapshot): StrokeId {
+    this._guard();
+    if (this._stroke) throw new Error("strokeBegin: 已有 open stroke——先 End/Cancel（单令牌墙，响亮拒绝不排队）");
+    const node = findViewNodeById(this._view.layers, leafId);
+    if (!node || node.isGroup) throw new Error(`strokeBegin: 叶不存在或是组（id=${leafId}）`);
+    const layer = node as ViewLeaf;
+    // 快照钉细（接口文件 §snapshot）：扁平 ResolvedBrush 字段 + 可选 mode；缺字段 DEFAULT_CONFIG 兜底
+    //（user mental model：console 设一下工具也能画——MCP 只传 {size,color} 也出完整可画的笔）。
+    const settings = Object.freeze({ ...DEFAULT_CONFIG, ...brush }) as ResolvedBrush;
+    const mode = (brush as { mode?: unknown }).mode === "erase" ? "erase" : "brush";
+    const clamp01 = (v: unknown) => Math.max(0, Math.min(1, typeof v === "number" ? v : 0));
+    // 平滑推导 = input._resolveSmooth 的 backend 版：常数吃 SMOOTH_DEFAULTS（headless 无 prefs，
+    // 决定论要求常数固定）；deadzone 单位 = doc px（无 viewport，scale≡1）。pixelMode 无平滑（同壳）。
+    const smooth = settings.pixelMode ? {} : {
+      tau: clamp01(settings.streamline) * SMOOTH_DEFAULTS.tauMaxMs,
+      deadzone: clamp01(settings.stabilization) * SMOOTH_DEFAULTS.stabMaxPx,
+      tailBow: SMOOTH_DEFAULTS.tailBow,
+    };
+    const engine = new BrushEngine();
+    // 预览宿（census §3.4）：buffered=overlay（headless 下即「无」——描边活在 smoother，零 substrate 写）；
+    // pixelMode=livesync（stroke 档合法的令牌内真层写）。session 构造即 wp2.begin 开令牌（fail-loud）。
+    const session = new StrokeSession(this._strokeSessionDeps(), engine, layer,
+      { historyType: "stroke", finalize: true }, settings.pixelMode ? "livesync" : "overlay");
+    const id = ++this._strokeSeq;
+    this._stroke = { id, session, engine, settings, mode, smooth, begun: false };
+    return id;
+  }
+
+  strokeAppend(id: StrokeId, points: Float32Array): void {
+    this._guard();
+    const st = this._requireStroke(id);
+    if (points.length % 4 !== 0) throw new Error("strokeAppend: points 必须是 stride=4 的 (x,y,p,t) 序列");
+    for (let i = 0; i < points.length; i += 4) {
+      const x = points[i], y = points[i + 1], p = points[i + 2], t = points[i + 3];
+      const tt = Number.isFinite(t) ? t : null;
+      if (!st.begun) {
+        // 引擎 begin 迟到首点（strokeBegin 无坐标）；t = 事件钟起点锚（压感 LPF/平滑同一口钟，ADR-0009）。
+        st.engine.beginStroke(st.session.target, st.settings, x, y, p, st.mode, st.smooth, tt);
+        st.begun = true;
+      } else {
+        st.session.extend(x, y, p, tt);
+      }
+    }
+  }
+
+  strokeEnd(id: StrokeId): boolean {
+    this._guard();
+    const st = this._requireStroke(id);
+    this._stroke = null;
+    const before = this._histRev;
+    st.session.end();   // GPU/软 bake + 选区 finalize + 令牌 commit（S8 语义，StrokeSession SSoT）
+    return this._histRev > before;   // no-op 笔画（collector 空）不 push → false
+  }
+
+  strokeCancel(id: StrokeId): void {
+    this._guard();
+    const st = this._requireStroke(id);
+    this._stroke = null;
+    st.session.cancel();   // 引擎丢状态 + 令牌 cancel（livesync 时 collector 倒序回滚），无痕
+  }
   filterBegin(_leafId: number, _filterId: string): FilterSessionId {
     throw new Error("filterBegin: 进程内档口未接（C8）；浏览器壳期请走 filters-adjust surrogate 流");
   }

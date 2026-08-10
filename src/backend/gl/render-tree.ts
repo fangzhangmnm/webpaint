@@ -15,12 +15,12 @@
 //   overlay（烤进叶 pass）三个旧 ad-hoc 注入口 → planner 输入的三面旗。
 
 import { IndexTexture } from "./gpu-tile-pool.ts";
-import { TILE_SIZE, tilesAcross, tilesDown, tileCoord } from "../common/tile-geometry.ts";
+import { TILE_SIZE, tilesAcross, tilesDown, tileCoord } from "../../common/tile-geometry.ts";
 import type { Background } from "./gl-compositor.ts";
 import type { DocNode, DocLeaf } from "./gl-doc-bridge.ts";
-import { buildPlan } from "../render/render-plan.ts";
-import type { Plan, PlanStep, SegBuild, BgKind } from "../render/render-plan.ts";
-import type { PooledFBO } from "../common/gl2-port.ts";
+import { buildPlan } from "./render-plan.ts";
+import type { Plan, PlanStep, SegBuild, BgKind } from "./render-plan.ts";
+import type { PooledFBO } from "../../common/gl2-port.ts";
 import type { GlRoom, FloatInput, OverlayInput, SurrogateInput } from "./gl-room.ts";
 
 // 段缓存：合成结果切 tile + 寻址（内容 straight，与叶同一条 sampleTiled 路径）。

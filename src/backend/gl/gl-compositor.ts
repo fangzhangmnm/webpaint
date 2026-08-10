@@ -11,7 +11,7 @@
 import { COMPOSITE_VERT, compositeFragSource, compositeProgramKey } from "./blend-glsl.ts";
 import type { BlendMode, SourceKind } from "./blend-glsl.ts";
 import type { IndexTexture } from "./gpu-tile-pool.ts";
-import type { Gl2Port, Gl2Texture, Gl2TexSource, Gl2TileArena, PooledFBO, FBOPrec } from "../common/gl2-port.ts";
+import type { Gl2Port, Gl2Texture, Gl2TexSource, Gl2TileArena, PooledFBO, FBOPrec } from "../../common/gl2-port.ts";
 
 // live 描边 overlay（活动叶层叠加）：直值纹理 + doc 坐标 bbox + 不透明度/擦除/锁α/选区蒙版。
 export interface OverlayDesc {

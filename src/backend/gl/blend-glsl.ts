@@ -10,9 +10,9 @@
 
 // 我们支持的 12 个 canvas blend mode（值即 globalCompositeOperation / layer.mode）。
 // C8 起枚举+CPU 公式住 common/blend-modes.ts（SoftGl2Port 共用）；此处 re-export 保住既有消费面。
-import type { BlendMode } from "../common/blend-modes.ts";
-export { BLEND_MODES } from "../common/blend-modes.ts";
-export type { BlendMode } from "../common/blend-modes.ts";
+import type { BlendMode } from "../../common/blend-modes.ts";
+export { BLEND_MODES } from "../../common/blend-modes.ts";
+export type { BlendMode } from "../../common/blend-modes.ts";
 
 // 每模式：bfn(float Cb, float Cs) 的**函数体**（return 一个 float）。W3C §10.1 逐条。
 const BLEND_BODY: Record<BlendMode, string> = {

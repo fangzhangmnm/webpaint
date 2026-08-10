@@ -1,6 +1,6 @@
 // blend-glsl 生成的纯逻辑测试（GLSL 字符串组装）。像素正确性由 smoke 自 diff 验；这里防漏模式/串公式。
 import { describe, it, assert } from "./runner.mjs";
-import { BLEND_MODES, compositeFragSource, compositeProgramKey, COMPOSITE_VERT } from "../src/gl/blend-glsl.ts";
+import { BLEND_MODES, compositeFragSource, compositeProgramKey, COMPOSITE_VERT } from "../src/backend/gl/blend-glsl.ts";
 
 // 与 UI 可选列表（layers-panel.ts:71 LAYER_MODE_LABEL）严格一致。
 const UI_MODES = [

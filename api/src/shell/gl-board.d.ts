@@ -1,14 +1,14 @@
 import type { Gl2Port } from "../common/gl2-port.ts";
-import { RasterService } from "./raster-service.ts";
-import type { FloatInput, OverlayInput, SurrogateInput } from "./gl-room.ts";
+import { RasterService } from "../backend/gl/raster-service.ts";
+import type { FloatInput, OverlayInput, SurrogateInput } from "../backend/gl/gl-room.ts";
 import type { LayerPixels } from "../backend/tiles/tile-layer.ts";
-import type { DocNode, DocLeaf } from "./gl-doc-bridge.ts";
+import type { DocNode, DocLeaf } from "../backend/gl/gl-doc-bridge.ts";
 export interface GLDoc {
     layers: DocNode[];
     width: number;
     height: number;
 }
-export type { DocLeaf as GLLeaf } from "./gl-doc-bridge.ts";
+export type { DocLeaf as GLLeaf } from "../backend/gl/gl-doc-bridge.ts";
 export declare class GLBoard {
     private _glctx;
     private _room;

@@ -132,7 +132,9 @@ export interface WebPaintBackendInterface {
 > 壳迁移 = C7 后棒）。形状对本节的偏离（均已 pin 进接口文件）：① `undo()/redo()` 返 boolean（非 void）；
 > ② `open(bytes, inject)` 返 `{ backend, sidecar }`——sidecar（editor-state/reference.png/wroteWith）
 > 解包随 open 交壳，encodeOra(opts) 收 `editorSidecar`/`referencePng` 原样携带（§sidecar 注入槽的落地形）；
-> ③ 注入清单现值 = { appVersion, jpgEncoder, imageDecoder }（gl/clock/uuid 待 C8 档口接通再收）；
+> ③ 注入清单现值 = { appVersion, jpgEncoder, imageDecoder, gl }（gl 随 C8 档口接通收编：缺省懒建
+>   SoftGl2Port——headless/MCP 无参即画；clock/uuid 实勘无需求未收——backend 无时钟无随机是 ADR-0009
+>   决定论的构成部分，MCP 时间戳走 strokeAppend 的 (x,y,p,t) 事件 t）；
 > ④ **决定论 encode**：ora zip entry 时间戳钉死 1980 epoch——同内容 → 同字节（round-trip 锚/云 diff 友好）。
 > 已验收：node 无 GL open→指令→undo→encode **逐字节** round-trip + 双 backend 并发（tile 换手观察者
 > 单槽→多播 + tileset 所有权戳）+ dispose/onChange，12 锚。未接（响亮 throw 占位）：stroke/filter

@@ -1,4 +1,4 @@
-import type { Gl2Port, Gl2Texture, PooledFBO } from "../common/gl2-port.ts";
+import type { Gl2Port, Gl2Texture, PooledFBO } from "../../common/gl2-port.ts";
 export declare const GPU_TILE_BYTES: number;
 export interface GpuTileBackend {
     readonly capacity: number;

@@ -9,9 +9,9 @@ import { describe, it, assert, eq } from "./runner.mjs";
 import { UndoStack } from "../src/backend/workpiece/undo-stack.ts";
 import { PaintingWorkpiece } from "../src/backend/workpiece/painting-workpiece.ts";
 import { PaintingView } from "../src/backend/workpiece/painting-view.ts";
-import { StrokeSession } from "../src/stroke-session.ts";
+import { StrokeSession } from "../src/backend/stroke-session.ts";
 import { PressureLPF } from "../src/backend/stroke-smoother.ts";
-const { BrushEngine } = await import("../src/brush.ts");
+const { BrushEngine } = await import("../src/backend/brush.ts");
 const { resolveBrush } = await import("../src/resolved-brush.ts");
 const { Selection } = await import("../src/backend/selection.ts");
 

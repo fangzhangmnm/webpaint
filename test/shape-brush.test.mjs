@@ -12,7 +12,7 @@ import { PaintingView } from "../src/backend/workpiece/painting-view.ts";
 const { ShapeBrushEngine } = await import("../src/shape-brush.ts");
 const { resolveBrush } = await import("../src/resolved-brush.ts");
 const { bresenhamEllipseRect } = await import("../src/shape-geometry.ts");
-const { BrushEngine } = await import("../src/brush.ts");
+const { BrushEngine } = await import("../src/backend/brush.ts");
 
 // v0.6.14 测试卫生：本文件建的工件收集起来，文件末尾统一释放——否则 tile 句柄随 doc 被 GC，
 //   触发池的 FR 泄漏 assert（[tile-pool] GC'd without release），糊满 npm test 尾部。非产品泄漏。

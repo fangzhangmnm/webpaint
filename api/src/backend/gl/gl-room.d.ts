@@ -3,11 +3,11 @@ import { CpuGpuTileBridge } from "./tile-bridge.ts";
 import { GLCompositor } from "./gl-compositor.ts";
 import type { Acc, OverlayDesc, FloatDesc } from "./gl-compositor.ts";
 import type { DocNode, DocLeaf } from "./gl-doc-bridge.ts";
-import { LayerPixels } from "../backend/tiles/tile-layer.ts";
+import { LayerPixels } from "../tiles/tile-layer.ts";
 import { GLStampRasterizer } from "./gl-stamp.ts";
 import type { Stamp, StrokeShape } from "./gl-stamp.ts";
-import type { PlanNode, PlanStep, SegBuild } from "../render/render-plan.ts";
-import type { PooledFBO, FBOPrec, Gl2Port, Gl2TexSource, Gl2TileArena } from "../common/gl2-port.ts";
+import type { PlanNode, PlanStep, SegBuild } from "./render-plan.ts";
+import type { PooledFBO, FBOPrec, Gl2Port, Gl2TexSource, Gl2TileArena } from "../../common/gl2-port.ts";
 export interface SurrogatePlaneInput {
     layerId: number;
     bytes: {
