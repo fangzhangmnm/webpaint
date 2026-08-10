@@ -39,8 +39,9 @@ import type { EditMode } from "./edit-mode.ts";
 import type { History } from "./workpiece/history.ts";
 import type { PaintingWorkpiece } from "./workpiece/painting-workpiece.ts";
 import type { LayerTiles } from "./workpiece/layer-tiles.ts";
-import type { WriteToken } from "./workpiece/workpiece.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
+import { StrokeSession } from "./stroke-session.ts";
+import type { StrokeSessionDeps } from "./stroke-session.ts";
 import { Selection } from "./selection.ts";
 import { selPenSettingsFrom, stampsToBinaryGray8 } from "./sel-pen.ts";
 
@@ -51,14 +52,9 @@ type Doc = PaintingView;
 //   beginStroke 调用点再断言到引擎签名；这里 Filter/params 对 input 不透明 → unknown。
 interface FilterBrushState { Filter: unknown; params: unknown; }
 
-// 活动笔画（brush / filterBrush 共享 begin/extend/end/cancel 协议；液化 = filterBrush 的
-//   LiquifyFilter payload，v132 user：「液化先 migrate 到 filter brush」——S8 删掉了残留的直连双轨）。
-type StrokeEngine = BrushEngine | FilterBrushEngine | ShapeBrushEngine;
-// inPlace = 描边中原地改 layer 像素（liquify/filterBrush/pixelMode brush），非 overlay 预览。
-//   GL 模式下这类笔的 live 预览要靠 board 每帧把活动层重传 GPU（buffered brush 走 GPU stamp overlay，不算）。
-// v2（T2）：tx → token+layer。像素写不再拍整层快照——描边期写 layer.pixels 被 LayerTiles collector
-//   写时扣押；commit 打包一步 / cancel 倒序回滚。
-interface ActiveStroke { engine: StrokeEngine; token: WriteToken; layer: ViewLeaf; finalize: boolean; inPlace: boolean; }
+// 活动笔画 = StrokeSession（C5：事务生命周期迁 stroke-session.ts——令牌开合/GPU commit/选区
+//   finalize/记账编排都在 session；input 只做手势路由 + 投喂 (x,y,p,t)。液化 = filterBrush 的
+//   LiquifyFilter payload，v132 起无直连双轨）。
 
 // 选区变化 entry（lasso.endPath/setSelection 产 → _pushSelEntry 走 SelectionComponent 记账）。
 //   （LassoEntry 已死 v0.4.7：accept/reject 的 operator 编排收进 FloatingTransform。）
@@ -347,7 +343,17 @@ export class InputController {
   history: History | null;
   wp2: PaintingWorkpiece | null;
   layerTiles: LayerTiles | null;
-  _activeStroke: ActiveStroke | null = null;
+  _activeStroke: StrokeSession | null = null;
+  // StrokeSession 的注入面（六个点 = 原 _endStroke/_abortStroke 摸过的全部外部接触面）。
+  //   闭包读 this.*（wp2/layerTiles 构造时可能还没接线，begin 时才解引用）。
+  _strokeDeps: StrokeSessionDeps = {
+    begin: (label) => this.wp2!.begin(label),
+    tokenChanged: (layerId) => this.layerTiles!.tokenChanged(layerId),
+    tokenBeforeImage: (layerId) => this.layerTiles!.tokenBeforeImage(layerId),
+    getSelection: () => this.doc.selection,
+    commitStamps: (cs) => this.board.commitBrushStroke(cs),
+    invalidate: () => this.board.invalidateAll(),
+  };
 
   constructor(board: Board, doc: Doc, opts: InputOpts = {}) {
     this.board = board;
@@ -711,10 +717,10 @@ export class InputController {
         // 活动 engine 统一接口：liquify/filterBrush/像素 忽略多余的 pressure/时间戳参数
         //   ev.timeStamp 给主笔刷时间常数平滑用（dt 取真实事件间隔，含 coalesced）
         const pressure = effectivePressureFor(rec, ev);
-        this._activeStroke?.engine.extendStroke(dx, dy, pressure, ev.timeStamp);
+        this._activeStroke?.extend(dx, dy, pressure, ev.timeStamp);
       }
       // 把活动 engine 累的 dirty bbox 送进 board
-      const bbox = this._activeStroke?.engine.flushDirty();
+      const bbox = this._activeStroke?.flushDirty();
       if (bbox) this.board.markDocDirty(bbox[0], bbox[1], bbox[2], bbox[3]);
       this.board.requestRender();
     } else if (rec.role === "lasso") {
@@ -887,8 +893,8 @@ export class InputController {
     const spec = pixelStrokeSpec(rec.role as string)!;   // draw / erase / shapeBrush → 同 stroke 事务 + finalize
     // engineKey 查表（registry 注释的本意）：draw/erase → brush；shapeBrush → 形状笔。签名一致。
     const eng = this[spec.engineKey as "brush" | "shapeBrush"];
-    const token = this.wp2!.begin(spec.historyType);
-    this._activeStroke = { engine: eng, token, layer, finalize: spec.finalize, inPlace: !!settings.pixelMode };
+    // C5：session 构造 = wp2.begin 开令牌（stroke 档口；单令牌墙在 workpiece 侧 fail-loud）
+    this._activeStroke = new StrokeSession(this._strokeDeps, eng, layer, spec, !!settings.pixelMode);
 
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX!, rec.smY!);
     const pressure = effectivePressureFor(rec, e);
@@ -905,43 +911,20 @@ export class InputController {
     if (bbox) this.board.markDocDirty(bbox[0], bbox[1], bbox[2], bbox[3]);
     this.board.requestRender();
   }
-  // brush / liquify / filterBrush 共享 begin/extend/end/cancel 协议；活动笔画存进 _activeStroke，
-  // end / abort / extend / flushDirty 不再按 role 重新分支挑 engine。
-  // finalize=true → 有选区时 stroke 只在选区内生效（finalize 里 per-pixel revert outside mask 到 pre）。
-  // filterBrush 在 begin 时已吃 selection，finalize=false。
+  // brush / liquify / filterBrush 共享 begin/extend/end/cancel 协议；活动笔画存进 _activeStroke。
+  // 抬笔收口（GPU commit / 选区 finalize / 令牌 commit）与取消回滚全在 StrokeSession（C5 迁出），
+  // 这里只剩「取下活动 session、调收口」的手势侧转发。
   _endStroke() {
     const as = this._activeStroke;
     if (!as) return;
     this._activeStroke = null;
-    // S8：buffered brush 的落层 = board.commitBrushStroke（GPU merge，live 同一 shader → 选区/锁α/
-    //   blendMode/opacity 全在 shader，live 即 commit 所见）。其它引擎（liquify/filterBrush/pixel）
-    //   在描边中已 in-place 落层，endStroke 只清状态。
-    let gpuCommitted = false;
-    // endStroke 返 StampCollect（brush/形状笔的 buffered 路径）→ GPU commit；
-    //   liquify/filterBrush/pixelMode 返 null/undefined（描边中已 in-place 落层）→ 只清状态。
-    const cs = as.engine.endStroke() ?? null;
-    if (cs && cs.stamps.length) gpuCommitted = this.board.commitBrushStroke(cs);
-    // finalize（applyMaskPostStroke CPU 兜选区）只兜没走 GPU commit 的路径（pixel 笔/液化）：
-    //   GPU commit 的选区已由 shader 裁（与 live 一致），再兜是重复劳动 + 一次整层物化。
-    //   v2：pre 图从 collector 现算（tokenBeforeImage）——只有真动过层且带选区才付物化钱；
-    //   兜出来的回写仍在令牌内（首捕获已在，undo 包不变）。no-op 笔画 = collector 空 = commit 不占步。
-    const sel = (as.finalize && !gpuCommitted && this.layerTiles!.tokenChanged(as.layer.id)) ? this.doc.selection : null;
-    if (sel) {
-      sel.applyMaskPostStroke(
-        as.layer as unknown as Parameters<Selection["applyMaskPostStroke"]>[0],
-        this.layerTiles!.tokenBeforeImage(as.layer.id));
-    }
-    as.token.commit();
-    // 抬笔 commit：像素已落 layer → invalidateAll 触发重渲 + GL markContentDirty。
-    this.board.invalidateAll();
+    as.end();
   }
   _abortStroke() {
     const as = this._activeStroke;
     if (!as) return;
     this._activeStroke = null;
-    as.engine.cancelStroke();
-    as.token.cancel();   // collector 倒序回滚（取代旧整层快照 restore）
-    this.board.invalidateAll();
+    as.cancel();   // 引擎丢状态 + collector 倒序回滚，无痕
   }
   // 任一像素笔画进行中（brush / 像素笔 / liquify / filterBrush / 形状笔 都设 _activeStroke）。
   // board._strokeActiveHint 用它判 livePreview（描边中走直接合成 / GL 门控），含像素笔/liquify/filterBrush。
@@ -954,8 +937,7 @@ export class InputController {
       const cs = this.brush.collectStamps();
       return cs ? (Object.assign(cs, { selPenBand: true }) as typeof cs) : null;
     }
-    const eng = this._activeStroke?.engine as { collectStamps?: () => ReturnType<BrushEngine["collectStamps"]> } | undefined;
-    return eng?.collectStamps?.() ?? null;
+    return this._activeStroke?.collectStamps() ?? null;
   }
   // 公开取消口（toolbar 描边中切形状笔子工具 = cancel 不进 undo，同画一半被手势接管）
   abortActiveStroke() { this._abortStroke(); }
@@ -981,9 +963,8 @@ export class InputController {
     }
     const layer = this.doc.activeLayer as ViewLeaf;   // 组已被上游硬拒，此处确为叶
     const spec = pixelStrokeSpec(rec.role as string)!;   // filterBrush → "stroke" 事务，finalize:false
-    const token = this.wp2!.begin(spec.historyType);
     // filterBrush 在 beginStroke 时已吃了 selection，stamp 内 mask 外保留 pre → 无需 post-stroke finalize（spec.finalize=false）
-    this._activeStroke = { engine: this.filterBrush, token, layer, finalize: spec.finalize, inPlace: true };
+    this._activeStroke = new StrokeSession(this._strokeDeps, this.filterBrush, layer, spec, true);
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX!, rec.smY!);
     const pressure = effectivePressureFor(rec, { pressure: rec.lastP ?? 1 });
     try {
@@ -991,8 +972,9 @@ export class InputController {
       this.filterBrush.beginStroke(layer, fbState.Filter as Parameters<FilterBrushEngine["beginStroke"]>[1], fbState.params, brushSettings, this.doc.selection, dx, dy, pressure);
     } catch (e) {
       reportError(new Error("[filter brush] begin failed: " + String(e)), "log");
-      token.cancel();   // 令牌必须收口，否则后续 begin 全被单令牌门挡死
+      const s = this._activeStroke;
       this._activeStroke = null;
+      s.cancel();   // 令牌必须收口，否则后续 begin 全被单令牌门挡死（引擎 begin 半途抛，cancelStroke 清残态无害）
       rec.role = null;
       this.status?.(`filter brush 出错：${(e as { message?: unknown })?.message || e}`);
       return;

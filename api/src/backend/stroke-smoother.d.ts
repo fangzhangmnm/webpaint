@@ -30,4 +30,11 @@ export declare class StrokeSmoother {
     frozenIndex(): number;
     update(): void;
 }
+export declare class PressureLPF {
+    private tau;
+    private p;
+    private lastT;
+    constructor(tau: number, p0: number, t0?: number | null);
+    step(pressure: number, t?: number | null): number;
+}
 export {};

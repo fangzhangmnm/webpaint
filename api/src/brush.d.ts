@@ -1,4 +1,4 @@
-import { StrokeSmoother } from "./stroke-smoother.ts";
+import { StrokeSmoother, PressureLPF } from "./backend/stroke-smoother.ts";
 import type { ViewLeaf } from "./workpiece/painting-view.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
 import type { Stamp, StrokeShape } from "./gl/gl-stamp.ts";
@@ -22,8 +22,7 @@ interface StrokeState {
     lastX: number;
     lastY: number;
     lastP: number;
-    pLPF: number;
-    lastEventTime: number;
+    pLPF: PressureLPF;
     accumDist: number;
     strokeDist: number;
     dirty: Rect | null;
@@ -41,7 +40,6 @@ export declare class BrushEngine {
         deadzone?: number;
         tailBow?: number;
     }, t?: number | null): void;
-    _pressureLPF(pressure: number): number;
     extendStroke(x: number, y: number, pressure: number, t?: number | null): void;
     _extendImmediate(x: number, y: number, pEff: number): void;
     _extendBuffered(x: number, y: number, pEff: number, t?: number | null): void;

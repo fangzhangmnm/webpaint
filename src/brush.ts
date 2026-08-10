@@ -34,7 +34,7 @@
 //   平滑核 v249 = 时间常数指数追踪（详 ai-docs/20260613-brush-procreate-smoothing.md）：smoother 给平滑中心线 C；
 //     抬笔 finish() 收尾把直线桥换成动量弧尾、钉终点。
 
-import { StrokeSmoother } from "./stroke-smoother.ts";
+import { StrokeSmoother, PressureLPF } from "./backend/stroke-smoother.ts";
 import type { ViewLeaf } from "./workpiece/painting-view.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
 import type { Stamp, StrokeShape } from "./gl/gl-stamp.ts";
@@ -63,8 +63,7 @@ interface StrokeState {
   lastX: number;
   lastY: number;
   lastP: number;
-  pLPF: number;
-  lastEventTime: number;
+  pLPF: PressureLPF;
   accumDist: number;
   strokeDist: number;
   dirty: Rect | null;
@@ -113,8 +112,8 @@ export class BrushEngine {
       layer, settings, mode,
       buffered,
       lastX: x, lastY: y, lastP: pLPF0,
-      pLPF: pLPF0,                              // 当前 LPF 态
-      lastEventTime: performance.now(),
+      // 压感 LPF（backend 手感数学，C5）：事件钟，起点锚在 down 事件的 t
+      pLPF: new PressureLPF(settings.pressureLPF || 0, pLPF0, t),
       accumDist: 0,
       strokeDist: 0,
       dirty: null,
@@ -132,24 +131,13 @@ export class BrushEngine {
     }
   }
 
-  // 压感时间域 LPF（v102）：一阶 IIR，α = dt/(dt+τ)；τ=0 → 直传 raw
-  _pressureLPF(pressure: number) {
-    const st = this._stroke!;
-    const tau = st.settings.pressureLPF || 0;
-    const now = performance.now();
-    const dt = Math.max(1, now - st.lastEventTime);
-    st.lastEventTime = now;
-    if (tau > 0) { st.pLPF += (dt / (dt + tau)) * (pressure - st.pLPF); }
-    else { st.pLPF = pressure; }
-    return st.pLPF;
-  }
-
   extendStroke(x: number, y: number, pressure: number, t: number | null = null) {
     const st = this._stroke;
     if (!st) return;
     // NaN/inf 护栏：甩太快 / 坏事件可能传入非有限坐标 → 跳过
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-    const pEff = this._pressureLPF(pressure);
+    // 压感 LPF：dt 取事件 t 差（与位置平滑同一口钟；壁钟已拔除——backend/stroke-smoother.ts）
+    const pEff = st.pLPF.step(pressure, t);
     if (st.buffered) this._extendBuffered(x, y, pEff, t);
     else this._extendImmediate(x, y, pEff);
   }

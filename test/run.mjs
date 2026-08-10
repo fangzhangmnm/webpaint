@@ -87,6 +87,7 @@ import "./brush-rack-reactive.test.mjs";   // ★笔架↔collection 绑定回�
 import "./pointer-route.test.mjs";
 import "./stroke-input-smooth.test.mjs";
 import "./stroke-smoother.test.mjs";
+import "./stroke-session.test.mjs";
 import "./selection-morph.test.mjs";
 import "./selection-tiles.test.mjs";       // S5：gray8 tile 选区底座（布尔/所有权/ants/SelectionComponent）
 import "./pending-fill.test.mjs";         // T4c：PendingFill 组件（预览换色可撤/笔刷色不被 undo 碰）

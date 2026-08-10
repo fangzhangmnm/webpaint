@@ -1,3 +1,7 @@
+// 笔画手感平滑数学（backend，C5 迁入）：位置平滑 StrokeSmoother + 压感 PressureLPF。
+// 两者都吃**事件时间戳 t**（不是壁钟）——backend 决定论：同一 (x,y,p,t) 序列 → 同一输出
+// （ADR-0009；C8 SoftGl2/MCP 回放的前提）。无 t（形状笔合成/测试直喂）→ FALLBACK_DT。
+//
 // 位置平滑 — 时间制二阶临界阻尼 SmoothDamp（时间缓冲）+ 动量弧 tail。详 ai-docs/20260613-brush-procreate-smoothing.md。
 //
 // 两层：
@@ -122,6 +126,32 @@ export class StrokeSmoother {
 
   frozenIndex() { return this._committed - 1; }
   update() {}
+}
+
+// 压感时间域 LPF（v102 立；C5 壁钟→事件 t）：一阶 IIR，α = dt/(dt+τ)；τ=0 → 直传 raw。
+// dt = 事件 timeStamp 差（原 brush.ts 用 performance.now()——处理时刻钟：coalesced 整批同刻到达
+// 时 dt 被压成 1ms 下限，与位置平滑的事件钟「同一笔两套时钟」；census §2.1 记账的顺手账在此收）。
+export class PressureLPF {
+  private tau: number;
+  private p: number;
+  private lastT: number | null;
+
+  constructor(tau: number, p0: number, t0: number | null = null) {
+    this.tau = tau > 0 ? tau : 0;
+    this.p = p0;
+    this.lastT = t0;
+  }
+
+  step(pressure: number, t: number | null = null): number {
+    if (this.tau > 0) {
+      const dt = (t != null && this.lastT != null) ? Math.max(1, t - this.lastT) : FALLBACK_DT;
+      this.p += (dt / (dt + this.tau)) * (pressure - this.p);
+    } else {
+      this.p = pressure;
+    }
+    if (t != null) this.lastT = t;
+    return this.p;
+  }
 }
 
 // 时间制 SmoothDamp（临界阻尼，Game Programming Gems 4 有理近似）。smoothTime 与 dt 同量纲(ms)。

@@ -9,21 +9,14 @@ import type { EditMode } from "./edit-mode.ts";
 import type { History } from "./workpiece/history.ts";
 import type { PaintingWorkpiece } from "./workpiece/painting-workpiece.ts";
 import type { LayerTiles } from "./workpiece/layer-tiles.ts";
-import type { WriteToken } from "./workpiece/workpiece.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
+import { StrokeSession } from "./stroke-session.ts";
+import type { StrokeSessionDeps } from "./stroke-session.ts";
 import { Selection } from "./selection.ts";
 type Doc = PaintingView;
 interface FilterBrushState {
     Filter: unknown;
     params: unknown;
-}
-type StrokeEngine = BrushEngine | FilterBrushEngine | ShapeBrushEngine;
-interface ActiveStroke {
-    engine: StrokeEngine;
-    token: WriteToken;
-    layer: ViewLeaf;
-    finalize: boolean;
-    inPlace: boolean;
 }
 interface SelectionChangeEntry {
     before?: Selection | null;
@@ -131,7 +124,8 @@ export declare class InputController {
     history: History | null;
     wp2: PaintingWorkpiece | null;
     layerTiles: LayerTiles | null;
-    _activeStroke: ActiveStroke | null;
+    _activeStroke: StrokeSession | null;
+    _strokeDeps: StrokeSessionDeps;
     constructor(board: Board, doc: Doc, opts?: InputOpts);
     _bind(): void;
     _updateCursorPreview(e: PointerEvent): void;
