@@ -239,3 +239,26 @@
   cancel UI 入口留人类拍板（UX）。**下一片 = C7 装配**（app-context 39 键 backend 瘦版 + B2
   store 窄接口 + 多 tab 租户 dispose + 接口文件两份 + sidecar 槽；census 普查新账「无令牌像素
   写静默不记账」的 throw 硬化也排 C7，见 §7/新发现节）。
+- **C7 第一棒 ✅ v0.8.33（2026-08-10）——substrate 搬家 + WebPaintBackend 装配**：
+  ①**backend 物理搬家**：workpiece/、tiles/、selection.ts、doc-render.ts、layers-face.ts、zip.ts、
+  ora-stack-xml.ts、png-codec.ts、ora.ts 全部迁 `src/backend/`（~130 文件 import 路径 tsc 审计）；
+  四处纯化手术（行为均不变）：ora-stack-xml 版本戳改参数（encodeDocToOra `opts.wroteWith` 必填，
+  壳传 WEBPAINT_VERSION）、ora reportError 改注入槽 `setOraLogReporter`（app.ts boot 接 error-badge
+  funnel，tiles 泄漏上报同款）、png-codec canvas 回退路移壳 `shell/image-io.installPngDecodeFallback`
+  （headless 无回退 → UPNG 硬解兜底）、painting-view `navigator.deviceMemory` 改 `setDeviceMemoryGB`
+  注入、zip.ts window→globalThis（node shim 同挂）。②**C2 lint 升格 node 真路径解析**
+  （scripts/lint-dirs.mjs；旧 grep 分不清 backend 子目录互引和逃逸，且**仓路径带空格时 URL.pathname
+  %20 会静默扫空假绿**——用 fileURLToPath + 自检；负测试两类咬人重验）。③**观察者多租化**：
+  tile 换手观察者全局单槽→**多播注册表**（旧单槽第二个 LayerTiles 静默偷钩 = 双 backend 坏账）+
+  tileset **所有权戳**过滤（无主临时件如 StrokeShadow 沿旧「谁令牌开谁扣押、seal 作废」语义）；
+  LayerTiles.dispose() 退租。④**装配**：接口 `backend/webpaint-backend-interface.ts`（.h，纯标量墙）
+  + `backend/webpaint-backend.ts`（born-loaded 工厂 blank/open 魔数嗅探 PK/8BPS/PNG/位图、dispose、
+  encodeOra（sidecar 原样携带）、exportImage（GL 缺席响亮失败）、层结构 verbs=LayersFace 穿衣、
+  undo/redo、onChange；stroke/filter 档口契约 pin、进程内实现响亮 throw 占位等 C8）。
+  ⑤**决定论 encode**：ora zip entry 时间戳钉死 1980 epoch（同内容→同字节；提案 §3 已回写）。
+  验收：tsc 0、**1221 绿**（+12：工厂 3/逐字节 round-trip 3+sidecar/exportImage 响亮失败 2/双 backend
+  并发 2/dispose/onChange）、build 全 lint、GL smoke PASSED。无新真机锚（搬家+新增面，无 UI 行为
+  变化；「iCCP PNG 导入照常」由回退移壳覆盖，属既有导入锚）。**C7 剩余（后棒）**：app.ts 壳迁移
+  消费 WebPaintBackend（app-context 39 键瘦版落点）、B2 store 窄接口、多 tab GPU tile arena 归 Port
+  + per-tenant 合成注入、psd open 路由（psd.ts 移 backend）、无令牌像素写 throw 硬化（census §3.6）、
+  frontend toolkit .h、filter 档口 wire 细节。

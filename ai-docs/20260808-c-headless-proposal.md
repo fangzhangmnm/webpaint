@@ -120,6 +120,17 @@ export interface WebPaintBackendInterface {
 // workpiece/history/组件 = backend 自建，不注入。
 ```
 
+> **C7 第一棒落地回写（v0.8.33）**：接口落 `src/backend/webpaint-backend-interface.ts`、装配根落
+> `src/backend/webpaint-backend.ts`（第二组合根：headless/MCP/embedding 面；app.ts 仍自装配同套件，
+> 壳迁移 = C7 后棒）。形状对本节的偏离（均已 pin 进接口文件）：① `undo()/redo()` 返 boolean（非 void）；
+> ② `open(bytes, inject)` 返 `{ backend, sidecar }`——sidecar（editor-state/reference.png/wroteWith）
+> 解包随 open 交壳，encodeOra(opts) 收 `editorSidecar`/`referencePng` 原样携带（§sidecar 注入槽的落地形）；
+> ③ 注入清单现值 = { appVersion, jpgEncoder, imageDecoder }（gl/clock/uuid 待 C8 档口接通再收）；
+> ④ **决定论 encode**：ora zip entry 时间戳钉死 1980 epoch——同内容 → 同字节（round-trip 锚/云 diff 友好）。
+> 已验收：node 无 GL open→指令→undo→encode **逐字节** round-trip + 双 backend 并发（tile 换手观察者
+> 单槽→多播 + tileset 所有权戳）+ dispose/onChange，12 锚。未接（响亮 throw 占位）：stroke/filter
+> 进程内档口（C8 栅格域）、psd open 路由、per-tenant 合成注入 + GPU tile arena 归 Port（C7 后棒）。
+
 - **brush rack 全库失踪 backend 照跑**：backend 只认 ResolvedBrush 快照；rack/设置/云同步 =
   frontend+store 的事。（笔刷试笔 = blank + 固定点序列 + stroke + readback，零新机制。）
 - **手感在 backend**：StrokeSmoother/压感 LPF 随 StrokeSession 迁入（壁钟 dt→事件 t 顺手账同片）；
