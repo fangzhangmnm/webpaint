@@ -70,7 +70,16 @@ const _asm = storeAbsent
   : _assembleReal();
 export const provider = _asm.provider;
 const _auth = _asm.auth;
-export const store = _asm.store;
+
+// ============ B2 窄接口（C7 裁定落地，2026-08-10）============
+// app 消费的 store 面**只有四个**：file / files / collection / encryption（全仓实测，其余 grep 命中皆旧注释）。
+// 裁定：全量手写镜像**不做**——「物理删除仍编译」的极端目标无受益方（headless 分层 = WebPaintBackend，
+// 零 store 依赖；运行时缺席已由 null-store 达成），而镜像是 drift 源（维护成本 > 收益，
+// epoch-handoff §B2 的怀疑成立）。收敛形 = **派生窄 Port**（Pick 自库类型 SSoT，零镜像零 drift）：
+// 面收窄在此单点声明；app 若碰四面之外的成员 = 编译错。类型 import 也收拢本接缝（下方 re-export）。
+export type AppStorePort = Pick<Store, "file" | "files" | "collection" | "encryption">;
+export const store: AppStorePort = _asm.store;
+export type { Collection, EncryptedBlob } from "./store/index.ts";   // app 侧仅剩的两个库类型，经接缝转口
 
 // ============ 设置/状态 collection（4 个）注入 ============
 // app-prefs/app-state **不 import 本文件**（防 i18n→app-store→store-ui→i18n 成环）；由此处建好 store 后惰性注入。

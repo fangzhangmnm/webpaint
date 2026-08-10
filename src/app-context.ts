@@ -116,7 +116,7 @@ export interface AppContext {
   rack: RackHandle;
 
   // 同步存储 / HUD
-  store: typeof import("./app-store.ts").store;     // app-store.js re-export store/** 的真 store（类型穿 .js 存活，batch 4 验证）
+  store: import("./app-store.ts").AppStorePort;     // B2 窄 Port（file/files/collection/encryption 四面；面收窄声明在接缝 app-store.ts）
   setStatus: (text: string, persist?: boolean) => void;
   withBusy: <T>(label: string, fn: () => Promise<T> | T) => Promise<T>;
   leftDial: LeftDialHandle;

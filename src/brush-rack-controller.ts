@@ -33,7 +33,7 @@ import { exportBrush, exportRackFolder, buildRackCode, shareOrDownloadJSON } fro
 import type { Brush, BrushRackData } from "./brush-types.ts";
 import type { EditorRuntimeState, DialReactive, ToolDial } from "./app-context.ts";
 import type { EditMode } from "./edit-mode.ts";
-import type { Collection } from "./store/index.ts";
+import type { Collection } from "./app-store.ts";   // B2：类型经接缝转口
 import { t } from "./i18n/index.ts";
 import { reportError } from "./error-badge.ts";
 

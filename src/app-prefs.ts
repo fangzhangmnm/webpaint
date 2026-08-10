@@ -9,7 +9,7 @@
 //   boot：`initPreferences()` 返 promise（内部先 hydrate 本地、快、离线 OK），app.ts 存成 `prefsReady`。
 //   v409 起**不再是 TLA 门**：lang/theme 走 localStorage boot 快照（src/boot-snapshot.ts）解决 eval 期/pre-paint,
 //   其余消费方各自 await prefsReady（app.ts 的 fixup 相）。（历史注释说的 "dynamic import app-main" 那个模块从未存在。）
-import type { Collection } from "./store/index.ts";
+import type { Collection } from "./app-store.ts";   // B2：类型经接缝转口（type-only 构建期擦除，不成 i18n 运行时环——「不 import app-store」钉子的 why 只关运行时）
 
 // ── DEFAULTS SSoT（唯一处；getItem 缺省从这里取，别处不 inline）───────────────────────────
 export const PREF_DEFAULTS = {

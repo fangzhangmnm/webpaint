@@ -97,7 +97,7 @@ export interface AppContext {
     wp2: PaintingWorkpiece;
     layerTiles: LayerTiles;
     rack: RackHandle;
-    store: typeof import("./app-store.ts").store;
+    store: import("./app-store.ts").AppStorePort;
     setStatus: (text: string, persist?: boolean) => void;
     withBusy: <T>(label: string, fn: () => Promise<T> | T) => Promise<T>;
     leftDial: LeftDialHandle;

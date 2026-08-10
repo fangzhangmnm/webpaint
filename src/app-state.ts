@@ -10,7 +10,7 @@
 //
 // ⚠**刻意不 import app-store**（防成环，同 app-prefs）：collection 由 app-store 建好后惰性注入（wireAppState）；
 //   注入前读返 DEFAULTS（boot 安全）。boot 门 `await initAppState()`（内部 hydrate 快、离线 OK）。
-import type { Collection } from "./store/index.ts";
+import type { Collection } from "./app-store.ts";   // B2：类型经接缝转口（type-only 擦除，无运行时环）
 
 // ── DEFAULTS SSoT（唯一处；getItem 缺省从这里取，别处不 inline）───────────────────────────
 export const APP_STATE_DEFAULTS = {

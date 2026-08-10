@@ -19,7 +19,7 @@ import { encodeDocToOra, decodeOraToPainting, paintingDataToEncodeDoc, parseAppV
 import { flattenViewLeaves } from "./backend/workpiece/painting-view.ts";
 import { tLatin } from "./i18n/index.ts";
 import { isSignedIn, store as _store } from "./app-store.ts";
-import type { EncryptedBlob } from "./store/index.ts";   // 密文 at-rest 字节（branded：明文流不进只收密文的 sink）
+import type { EncryptedBlob } from "./app-store.ts";   // 密文 at-rest 字节（branded）；B2：类型经接缝转口
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { pathFolder } from "./gallery/gallery-path.ts";
 import { sessionFileName, sessionBareName } from "./config.ts";

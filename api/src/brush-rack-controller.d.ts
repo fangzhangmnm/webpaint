@@ -3,7 +3,7 @@ import { mountBrushSettings } from "./ui/brush-config-view.ts";
 import type { Brush, BrushRackData } from "./brush-types.ts";
 import type { EditorRuntimeState, DialReactive, ToolDial } from "./app-context.ts";
 import type { EditMode } from "./edit-mode.ts";
-import type { Collection } from "./store/index.ts";
+import type { Collection } from "./app-store.ts";
 export interface BrushRackDeps {
     collection: Collection;
     state: EditorRuntimeState;

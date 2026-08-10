@@ -1,4 +1,4 @@
-import type { Collection } from "./store/index.ts";
+import type { Collection } from "./app-store.ts";
 export declare const APP_STATE_DEFAULTS: {
     readonly "current-directory": string;
     readonly "current-file": string | null;

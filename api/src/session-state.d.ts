@@ -1,5 +1,5 @@
 import { type DecodedPainting } from "./backend/ora.ts";
-import type { EncryptedBlob } from "./store/index.ts";
+import type { EncryptedBlob } from "./app-store.ts";
 import type { AppContext } from "./app-context.ts";
 import type { GalleryItem } from "./gallery/gallery-model.ts";
 type LoadedDoc = DecodedPainting;

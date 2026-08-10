@@ -1,4 +1,4 @@
-import type { Collection } from "./store/index.ts";
+import type { Collection } from "./app-store.ts";
 export declare const PREF_DEFAULTS: {
     readonly "color-theme": string;
     readonly "menu-tab": string;

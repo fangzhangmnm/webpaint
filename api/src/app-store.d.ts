@@ -1,3 +1,4 @@
+import type { Store } from "./store/index.ts";
 export declare const storeAbsent: boolean;
 export declare const provider: import("./store/types.ts").CloudProvider | null;
 declare const _auth: {
@@ -12,55 +13,9 @@ declare const _auth: {
     onAuthChanged: typeof import("./store/providers/auth.ts").onAuthChanged;
     getAuthState: typeof import("./store/providers/auth.ts").getAuthState;
 };
-export declare const store: {
-    file: {
-        (name: string, opts: {
-            isZip: true;
-            mode: "new" | "existing";
-        }): import("./store/create-store.ts").ZipFile;
-        (name: string, opts: {
-            isZip: false;
-            mode: "new" | "existing";
-        }): import("./store/create-store.ts").RawFile;
-        (name: string, opts: {
-            isZip: boolean;
-            mode: "new" | "existing";
-        }): import("./store/create-store.ts").RawFile | import("./store/create-store.ts").ZipFile;
-    };
-    collection: (name: string, opts?: {
-        manual?: boolean;
-        local?: boolean;
-        getInitData?: import("./store/collection.ts").CollectionConfig["getInitData"];
-    }) => import("./store/collection.ts").Collection;
-    files: {
-        nameOccupied: (name: string) => Promise<boolean>;
-        watchFolder: (folder: string, cb: (s: import("./store/listing.ts").FolderSnapshot) => void) => () => void;
-        usage: () => Promise<{
-            bytes: number;
-            count: number;
-        }>;
-        ensureFolder: (path: string) => Promise<void>;
-        newFolder: (path: string) => Promise<void>;
-        deleteFolder: (path: string) => Promise<void>;
-        drainOfflineQueue: () => Promise<void>;
-        listTrash: () => Promise<import("./store/trash-merge.ts").TrashItem[]>;
-        listBackup: () => Promise<import("./store/trash-merge.ts").TrashItem[]>;
-        restoreTrash: (opts?: import("./store/trash.ts").RestoreOpts | undefined) => Promise<import("./store/trash.ts").TrashResult>;
-        purgeTrash: (opts?: import("./store/trash.ts").PurgeOpts | undefined) => Promise<import("./store/trash.ts").TrashResult>;
-        emptyTrash: (opts?: import("./store/trash.ts").EmptyTrashOpts | undefined) => Promise<import("./store/trash.ts").TrashResult>;
-        emptyBackup: (opts?: import("./store/trash.ts").EmptyTrashOpts | undefined) => Promise<import("./store/trash.ts").TrashResult>;
-        reconcileAll: (opts?: {
-            activeFileName?: string;
-        }) => Promise<{
-            demoted: string[];
-        }>;
-    };
-    encryption: {
-        isEncryptedBlob: (blob: Blob | Uint8Array) => Promise<boolean>;
-        tryDecryptEncryptedBlob: (blob: Blob, pw: string) => Promise<Blob | null>;
-        isEncryptedPeekBlob: (blob: Blob | null | undefined) => boolean;
-    };
-};
+export type AppStorePort = Pick<Store, "file" | "files" | "collection" | "encryption">;
+export declare const store: AppStorePort;
+export type { Collection, EncryptedBlob } from "./store/index.ts";
 export declare const isAuthConfigured: () => boolean;
 export declare const initAuth: () => Promise<import("./store/index.ts").AuthState>;
 export declare const signIn: () => Promise<unknown>;
@@ -113,5 +68,4 @@ export declare const listGalleryTrash: () => Promise<{
         id: string;
     } | null;
 }[]>;
-export declare const brushRackCollection: import("./store/collection.ts").Collection;
-export {};
+export declare const brushRackCollection: import("./app-store.ts").Collection;
