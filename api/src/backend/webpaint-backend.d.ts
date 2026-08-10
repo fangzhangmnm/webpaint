@@ -1,13 +1,32 @@
 import { History } from "./workpiece/history.ts";
 import { PaintingWorkpiece, type PaintingData, type PaintingDataNode } from "./workpiece/painting-workpiece.ts";
 import { PaintingView } from "./workpiece/painting-view.ts";
+import type { PerspHost } from "./workpiece/persp-component.ts";
 import { LayersFace } from "./layers-face.ts";
 import { type RgbaPlane } from "./png-codec.ts";
 import type { WebPaintBackendInterface, BackendLayerNode, BackendDocInfo, BackendChangeEvent, BackendOpResult, BackendAddResult, ResolvedBrushSnapshot, StrokeId, FilterSessionId } from "./webpaint-backend-interface.ts";
+/** 壳侧编排钩子（进程内壳专用；headless 缺省 no-op。MCP/embedding 面走 onChange 事件——
+ *  序列化墙那侧不存在这组细粒度钩子，它们是浏览器壳「同步刷新面板/画面」的过渡协作面）。 */
+export interface BackendShellHooks {
+    /** 栈形状变化（push/undo/redo/clear/evict）。壳接 wp:histchange 派发。 */
+    onHistChange?: (canUndo: boolean, canRedo: boolean) => void;
+    /** 某步被应用（undo/redo，按 step entries 逐组件报）。壳接面板/画面刷新。 */
+    onApplied?: (info: {
+        kind: string;
+        dir: "undo" | "redo";
+    }) => void;
+    /** 不可恢复失败（栈已被弃）。壳接 error banner + 全量重绘；headless 经 onChange 广播。 */
+    onUnrecoverable?: (e: unknown) => void;
+    /** LayersFace statuses hint（undo/redo 状态栏文案；非权威附注）。 */
+    status?: (msg: string) => void;
+}
 export interface BackendInject {
     appVersion?: string;
     jpgEncoder?: (plane: RgbaPlane) => Promise<Uint8Array>;
     imageDecoder?: (bytes: Uint8Array) => Promise<RgbaPlane>;
+    /** desk persp 配置读写口（壳接 workbench-state；缺省内存 host——headless/测试）。 */
+    persp?: PerspHost;
+    hooks?: BackendShellHooks;
 }
 export interface BackendOpenResult {
     backend: WebPaintBackend;

@@ -16,6 +16,7 @@
 import { History } from "./workpiece/history.ts";
 import { PaintingWorkpiece, type PaintingData, type PaintingDataNode } from "./workpiece/painting-workpiece.ts";
 import { PaintingView } from "./workpiece/painting-view.ts";
+import type { PerspHost } from "./workpiece/persp-component.ts";
 import { LayersFace } from "./layers-face.ts";
 import { renderNodesToBytes } from "./doc-render.ts";
 import { encodeDocToOra, decodeOraToPainting, paintingDataToEncodeDoc, type DecodedPainting } from "./ora.ts";
@@ -28,10 +29,26 @@ import type {
 
 const UNDO_QUOTA_BYTES = 128 * 1024 * 1024;   // app.ts 同款配额
 
+/** 壳侧编排钩子（进程内壳专用；headless 缺省 no-op。MCP/embedding 面走 onChange 事件——
+ *  序列化墙那侧不存在这组细粒度钩子，它们是浏览器壳「同步刷新面板/画面」的过渡协作面）。 */
+export interface BackendShellHooks {
+  /** 栈形状变化（push/undo/redo/clear/evict）。壳接 wp:histchange 派发。 */
+  onHistChange?: (canUndo: boolean, canRedo: boolean) => void;
+  /** 某步被应用（undo/redo，按 step entries 逐组件报）。壳接面板/画面刷新。 */
+  onApplied?: (info: { kind: string; dir: "undo" | "redo" }) => void;
+  /** 不可恢复失败（栈已被弃）。壳接 error banner + 全量重绘；headless 经 onChange 广播。 */
+  onUnrecoverable?: (e: unknown) => void;
+  /** LayersFace statuses hint（undo/redo 状态栏文案；非权威附注）。 */
+  status?: (msg: string) => void;
+}
+
 export interface BackendInject {
   appVersion?: string;
   jpgEncoder?: (plane: RgbaPlane) => Promise<Uint8Array>;
   imageDecoder?: (bytes: Uint8Array) => Promise<RgbaPlane>;
+  /** desk persp 配置读写口（壳接 workbench-state；缺省内存 host——headless/测试）。 */
+  persp?: PerspHost;
+  hooks?: BackendShellHooks;
 }
 
 export interface BackendOpenResult {
@@ -85,21 +102,23 @@ export class WebPaintBackend implements WebPaintBackendInterface {
 
   private constructor(data: PaintingData, inject: BackendInject) {
     this._inject = inject;
+    const hooks = inject.hooks;
     this._history = new History({
       maxQuotaBytes: UNDO_QUOTA_BYTES,
-      // headless 无 banner/重绘——不可恢复协议：栈已重置这一事实经 onChange 广播，壳自己渲。
-      onUnrecoverable: () => { this._emit(); },
-      onChange: () => this._emit(),
-      onApplied: () => { /* 屏显刷新是壳的事（board 订 onChange） */ },
+      // 不可恢复协议：壳钩子接 error banner + 全量重绘；栈已重置这一事实同时经 onChange 广播。
+      onUnrecoverable: (e) => { hooks?.onUnrecoverable?.(e); this._emit(); },
+      onChange: () => { hooks?.onHistChange?.(this._history.canUndo(), this._history.canRedo()); this._emit(); },
+      onApplied: (info) => { hooks?.onApplied?.(info); },   // 屏显刷新是壳的事（headless 无耗）
     });
     // born 出生形：1×1 脚手架树——仅存在于本构造函数内（load 立即换根），外界不可观测。
     this._wp2 = new PaintingWorkpiece({
       undo: this._history.stack,
       tree: { width: 1, height: 1, maxLeaves: (): number => this._view.maxLayers },
+      persp: inject.persp,
     });
     this._view = new PaintingView(this._wp2);
     this._history.attach(this._wp2);
-    this._layers = new LayersFace({ history: this._history, tree: this._wp2.layerTree!, tiles: this._wp2.layerTiles, port: this._view });
+    this._layers = new LayersFace({ history: this._history, tree: this._wp2.layerTree!, tiles: this._wp2.layerTiles, port: this._view, status: hooks?.status });
     this._wp2.load(data);   // 令牌灌入 + 清栈 + markSaved（born-loaded 达成）
     this._wp2.onChange(() => this._emit());
   }

@@ -1,4 +1,5 @@
 import type { PaintingView } from "./backend/workpiece/painting-view.ts";
+import type { WebPaintBackend } from "./backend/webpaint-backend.ts";
 import type { Board } from "./board.ts";
 import type { InputController } from "./input.ts";
 import type { EditMode } from "./edit-mode.ts";
@@ -86,6 +87,7 @@ export interface AppContext {
     state: EditorRuntimeState;
     dialReactive: DialReactive;
     currentBrush: CurrentBrushRef;
+    backend: WebPaintBackend;
     editMode: EditMode;
     doc: PaintingView;
     board: Board;

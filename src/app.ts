@@ -19,10 +19,8 @@ import { Board } from "./board.ts";
 import { InputController, bindPressureDisabled } from "./input.ts";
 import { makeCurrentBrush } from "./resolved-brush.ts";   // 当前笔派生 computed + 引擎桥（手感数学在 resolveBrush，同文件）
 import { registerPanel, openExclusive, closeExclusive, getCurrentExclusive } from "./panel-state.ts";
-import { History } from "./backend/workpiece/history.ts";
-import { LayersFace } from "./backend/layers-face.ts";
-import { PaintingWorkpiece } from "./backend/workpiece/painting-workpiece.ts";
-import { PaintingView, setDeviceMemoryGB } from "./backend/workpiece/painting-view.ts";
+import { WebPaintBackend } from "./backend/webpaint-backend.ts";
+import { type PaintingView, setDeviceMemoryGB } from "./backend/workpiece/painting-view.ts";
 import { installPngDecodeFallback } from "./shell/image-io.ts";
 import { setOraLogReporter } from "./backend/ora.ts";
 import { EditMode } from "./edit-mode.ts";
@@ -115,31 +113,31 @@ if (navigator.maxTouchPoints > 0) {
   document.body.dataset.inputTouchscreen = "1";
 }
 initI18n();   // 本地化 boot：设 <html lang> + 填静态 HTML data-i18n（早于任何 JS 设标签/首帧）
-// ============ v2 纪元核心装配（T3b-2 cutover；T5 起纯 v2——桥/operator 流已拆）============
-// 树模式 PaintingWorkpiece = 文档 SSoT（LayerTree json + LayerTiles tileset 注册表）；
-// doc = PaintingView 端口（旧 DocView 同形读面 + 选区过渡宿）——PaintDoc 已出局。
-// 唯一 undo 权威 = v2 UndoStack（History 编排器持有）；history 先建（wp2 ctor 要 stack）。
-const UNDO_QUOTA_BYTES = 128 * 1024 * 1024;   // undo 配额（tile 压缩前记 0，压缩后计入；整步驱逐）
-const history = new History({
-  maxQuotaBytes: UNDO_QUOTA_BYTES,
-  // 不可恢复（swap 中途失败 / 回滚自身失败）：栈已弃 → 从当前文档态重建画面 + error banner。
-  onUnrecoverable: (e) => {
-    reportError(new Error("[undo] 不可恢复的 undo 异常，撤销历史已重置（画面已从当前文档态重建）：" + String(e)), "error");
-    renderLayersPanel(); board.invalidateAll(); board.requestRender();
-  },
-  // 栈形状变化 → wp:histchange（session-state 编辑门 / topbar undo 按钮态 都吃这个事件，契约不变）。
-  onChange: () => window.dispatchEvent(new CustomEvent("wp:histchange", { detail: { canUndo: history.canUndo(), canRedo: history.canRedo() } })),
-  // undo/redo 应用后统一刷新（旧 handler 里散落的 _afterDocChange 收拢到这一处；
-  // 状态栏文案走 step.hint（o.statuses），不再经 onApplied）。
-  onApplied: () => { renderLayersPanel(); board.invalidateAll(); board.requestRender(); },
-});
-const wp2: PaintingWorkpiece = new PaintingWorkpiece({
-  undo: history.stack,
-  tree: { width: 2048, height: 2048, maxLeaves: (): number => doc.maxLayers },   // thunk：端口在下方 const（惰性求值，TDZ 安全）
-  // T4d：desk persp 配置的读写口（doc 变换 remap 记账用；VP 编辑仍 desk 直写不进栈）
+// ============ v2 纪元核心装配（C7 后棒：app.ts 消费 WebPaintBackend）============
+// 组合根不再自装配 history/wp2/view/layers——WebPaintBackend 是唯一装配根（headless/MCP 同一套件，
+// undo 配额也归它）。壳编排（error banner/面板刷新/wp:histchange/状态栏）经 inject.hooks 注入；
+// 换文档仍走 wp2.load（进程内协作面；tab 管理器「弃旧建新」= embedding 纪元的事）。
+const backend = WebPaintBackend.blank({ width: 2048, height: 2048 }, {
+  appVersion: WEBPAINT_VERSION,
+  // T4d：desk persp 配置的读写口（doc 变换 remap 记账用；VP 编辑经 PerspComponent 收口，v0.8.29）
   persp: { snapshot: snapshotShapePersp, restore: restoreShapePersp, remap: remapShapePersp },
+  hooks: {
+    // 不可恢复（swap 中途失败 / 回滚自身失败）：栈已弃 → 从当前文档态重建画面 + error banner。
+    onUnrecoverable: (e) => {
+      reportError(new Error("[undo] 不可恢复的 undo 异常，撤销历史已重置（画面已从当前文档态重建）：" + String(e)), "error");
+      renderLayersPanel(); board.invalidateAll(); board.requestRender();
+    },
+    // 栈形状变化 → wp:histchange（session-state 编辑门 / topbar undo 按钮态 都吃这个事件，契约不变）。
+    onHistChange: (canUndo, canRedo) => window.dispatchEvent(new CustomEvent("wp:histchange", { detail: { canUndo, canRedo } })),
+    // undo/redo 应用后统一刷新（旧 handler 里散落的 _afterDocChange 收拢到这一处；
+    // 状态栏文案走 step.hint（o.statuses），不再经 onApplied）。
+    onApplied: () => { renderLayersPanel(); board.invalidateAll(); board.requestRender(); },
+    status: (m) => setStatus(m),
+  },
 });
-const doc: PaintingView = new PaintingView(wp2);
+const history = backend.history;
+const wp2 = backend.wp2;
+const doc: PaintingView = backend.view;
 const board = new Board(els.board as HTMLCanvasElement, doc);
 els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
 els.versionLabel.textContent = t("menu.version", { v: WEBPAINT_VERSION || "?" });   // 挪到「强制更新」旁的菜单信息行
@@ -224,11 +222,9 @@ setDocCompositorBytes((nodes, w, h) => board.compositeNodesToBytes(nodes, w, h))
 // 当前笔（ResolvedBrush）派生 + 引擎桥 = resolved-brush.ts makeCurrentBrush，input 前构造（见下）。手感数学全在 resolveBrush。
 
 
-// undo 编排器装配（T5：v1 聚合根/legacy 桥已拆——纯 v2 令牌流）。
-// history/wp2/doc(端口) 已在上方装配（boot 早期，board 依赖端口）。
-history.attach(wp2);
-// 结构类写面门面（ctx.layers：layers-panel/import/explode/blender-sync 的图层结构入口）。
-const layers = new LayersFace({ history, tree: wp2.layerTree!, tiles: wp2.layerTiles, port: doc, status: setStatus });
+// undo 编排器/结构门面已随 backend 装配（history.attach、LayersFace status 钩子都在 backend ctor 内）。
+// ctx.layers：layers-panel/import/explode/blender-sync 的图层结构入口。
+const layers = backend.layersFace;
 // 「裸写不可能」由令牌墙（_componentWrite throw）结构性给出（write-gate 已拆）。
 const _afterDocChange = () => { renderLayersPanel(); board.invalidateAll(); board.requestRender(); };
 // EditMode：独占编辑状态机，当前编辑模式（工具/transient）的 SSoT（取代旧 state.tool）。见 edit-mode.js / CONTEXT.md。
@@ -319,6 +315,7 @@ const isMidOperation = () =>
   input.isStrokeActive() || input.lasso.hasFloating() || editMode.hasPendingTransient();
 
 const ctx: AppContext = freezeCtx({
+  backend,
   state, dialReactive, currentBrush, editMode, doc, board, input, history, layers, wp2, layerTiles: wp2.layerTiles, isMidOperation,
   rack, store: _store, setStatus, withBusy, leftDial,
   updateSaveStatus, updateZoomLabel, updateNewerBanner, pullSettingsAndState,
