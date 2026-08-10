@@ -20,7 +20,7 @@ import type { Background } from "./gl-compositor.ts";
 import type { DocNode, DocLeaf } from "./gl-doc-bridge.ts";
 import { buildPlan } from "../render/render-plan.ts";
 import type { Plan, PlanStep, SegBuild, BgKind } from "../render/render-plan.ts";
-import type { PooledFBO } from "./gl-context.ts";
+import type { PooledFBO } from "../common/gl2-port.ts";
 import type { GlRoom, FloatInput, OverlayInput, SurrogateInput } from "./gl-room.ts";
 
 // 段缓存：合成结果切 tile + 寻址（内容 straight，与叶同一条 sampleTiled 路径）。

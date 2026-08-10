@@ -1,4 +1,4 @@
-import type { GLContext, PooledFBO } from "./gl-context.ts";
+import type { Gl2Port, PooledFBO } from "../common/gl2-port.ts";
 export interface Stamp {
     x: number;
     y: number;
@@ -18,7 +18,7 @@ export declare class GLStampRasterizer {
     private _instBuf;
     private _vaoGen;
     private _instData;
-    constructor(glctx: GLContext);
+    constructor(glctx: Gl2Port);
     private _ensureVAO;
     rasterize(stamps: Stamp[], shape: StrokeShape, ox: number, oy: number, ow: number, oh: number, scissor?: {
         x: number;

@@ -4,6 +4,7 @@ import type { WarpBakeFn } from "./floating-transform.ts";
 import { PREF_DEFAULTS } from "./app-prefs.ts";   // pixel-grid 默认值 SSoT（别在本文件硬编码第二份）
 import { reportError } from "./error-badge.ts";
 import { GLBoard } from "./gl/gl-board.ts";
+import { BrowserGl2Port } from "./shell/browser-gl2-port.ts";
 import { poolCapacityForBudget } from "./gl/gl-room.ts";
 import type { FloatInput, StampOverlayInput, FillOverlayInput, OverlayInput, SurrogateInput } from "./gl/gl-room.ts";
 import type { Stamp, StrokeShape } from "./gl/gl-stamp.ts";
@@ -241,7 +242,8 @@ export class Board {
       gl.width = this.canvas.width; gl.height = this.canvas.height;
       this.canvas.parentNode?.insertBefore(gl, this.canvas);
       this._glCanvas = gl;
-      this._glBoard = new GLBoard(gl, poolCapacityForBudget(256 * 1024 * 1024));
+      // C1（ADR-0009）：壳侧唯一 getContext 创建点——造好 BrowserGl2Port 递入，GL 域只见 Gl2Port。
+      this._glBoard = new GLBoard(new BrowserGl2Port(gl), poolCapacityForBudget(256 * 1024 * 1024));
     } catch (e) {
       reportError(new Error("[board] GL 初始化失败（无 WebGL2）→ 显「需 WebGL2」：" + String(e)), "log");
       if (this._glCanvas) { this._glCanvas.remove(); this._glCanvas = null; }
@@ -836,9 +838,13 @@ export class Board {
       || this._fillProvider?.());
   }
   // S9 导出/缩略图/mergedimage/镜像的合成面（doc-render.setDocCompositor 的后端）：透明底。
+  //   C1：GL 域只吐字节（src/gl 零 canvas）；canvas 包装（屏显域）在壳侧这里做。
   compositeNodesToCanvas(nodes: readonly unknown[], docW: number, docH: number): HTMLCanvasElement | null {
-    if (!this._glBoard) return null;
-    return this._glBoard.compositeToCanvas(nodes as unknown as Parameters<GLBoard["compositeToCanvas"]>[0], docW, docH);
+    const b = this.compositeNodesToBytes(nodes, docW, docH);
+    if (!b) return null;
+    const canvas = document.createElement("canvas"); canvas.width = b.w; canvas.height = b.h;
+    canvas.getContext("2d")!.putImageData(new ImageData(b.data, b.w, b.h), 0, 0);
+    return canvas;
   }
   // 字节合成面（doc-render.setDocCompositorBytes 的后端；merge-down 等字节 op 用）。
   compositeNodesToBytes(nodes: readonly unknown[], docW: number, docH: number): { data: Uint8ClampedArray; w: number; h: number } | null {

@@ -2,7 +2,7 @@
 // 显 fps + tile/内存。用来在桌面/iPad **肉眼看 GL 渲染 + 量真机性能**（尤其 clip 层 60fps 这个核心痛点）。
 // 像素正确性已由 smoke 自 diff（vs compositeLayers）证；这页是感性确认 + perf。
 
-import { GLContext } from "../../src/gl/gl-context.ts";
+import { BrowserGl2Port } from "../../src/shell/browser-gl2-port.ts";
 import { GlRoom, poolCapacityForBudget } from "../../src/gl/gl-room.ts";
 import { RenderTree } from "../../src/gl/render-tree.ts";
 import { LayerPixels, replaceFromCanvas } from "../../src/tiles/tile-layer.ts";
@@ -49,7 +49,7 @@ const hud = document.getElementById("hud") as HTMLDivElement;
 
 let room: GlRoom; let tree: RenderTree;
 try {
-  const glctx = new GLContext(canvas);
+  const glctx = new BrowserGl2Port(canvas);
   room = new GlRoom(glctx, poolCapacityForBudget(256 * 1024 * 1024));   // 256MB quota
   tree = new RenderTree(room);
 } catch (e) {

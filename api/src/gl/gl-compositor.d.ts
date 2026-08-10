@@ -1,6 +1,6 @@
 import type { BlendMode, SourceKind } from "./blend-glsl.ts";
 import type { IndexTexture } from "./gpu-tile-pool.ts";
-import type { GLContext, PooledFBO, FBOPrec } from "./gl-context.ts";
+import type { Gl2Port, PooledFBO, FBOPrec } from "../common/gl2-port.ts";
 export interface OverlayDesc {
     tex: WebGLTexture;
     opacity: number;
@@ -38,7 +38,7 @@ export declare class GLCompositor {
         passes: number;
         floatPasses: number;
     };
-    constructor(glctx: GLContext, accumPrec?: FBOPrec);
+    constructor(glctx: Gl2Port, accumPrec?: FBOPrec);
     private _program;
     begin(docW: number, docH: number, resetStats?: boolean): void;
     end(): void;
@@ -65,11 +65,6 @@ export declare class GLCompositor {
         data: Uint8ClampedArray;
         w: number;
         h: number;
-        dstX: number;
-        dstY: number;
-    } | null;
-    warpToCanvas(src: Parameters<GLCompositor["warpToBytes"]>[0], srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number): {
-        canvas: HTMLCanvasElement;
         dstX: number;
         dstY: number;
     } | null;

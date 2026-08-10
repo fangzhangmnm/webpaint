@@ -7,7 +7,7 @@ import { LayerPixels } from "../tiles/tile-layer.ts";
 import { GLStampRasterizer } from "./gl-stamp.ts";
 import type { Stamp, StrokeShape } from "./gl-stamp.ts";
 import type { PlanNode, PlanStep, SegBuild } from "../render/render-plan.ts";
-import type { PooledFBO, FBOPrec, GLContext } from "./gl-context.ts";
+import type { PooledFBO, FBOPrec, Gl2Port } from "../common/gl2-port.ts";
 export interface SurrogateInput {
     layerId: number;
     bytes: {
@@ -84,7 +84,7 @@ export interface LeafRec {
     gen: number;
 }
 export declare class GlRoom {
-    readonly glctx: GLContext;
+    readonly glctx: Gl2Port;
     readonly backend: GLGpuTileBackend;
     readonly pool: GpuTilePool;
     readonly bridge: CpuGpuTileBridge;
@@ -101,7 +101,7 @@ export declare class GlRoom {
     private _floats;
     private _liveMergedClip;
     private _invalidateListeners;
-    constructor(glctx: GLContext, maxSlices: number, accumPrec?: FBOPrec);
+    constructor(glctx: Gl2Port, maxSlices: number, accumPrec?: FBOPrec);
     get memory(): {
         usedTiles: number;
         capacity: number;

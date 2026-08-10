@@ -38,7 +38,7 @@ const BLEND_BODY: Record<BlendMode, string> = {
   "exclusion": `return Cb + Cs - 2.0*Cb*Cs;`,
 };
 
-// 全屏 quad 顶点（attr location 0 = [0,1]² 位置即 uv；GLContext.quadVAO 提供该 buffer）。
+// 全屏 quad 顶点（attr location 0 = [0,1]² 位置即 uv；Gl2Port.quadVAO 提供该 buffer）。
 export const COMPOSITE_VERT = `#version 300 es
 layout(location=0) in vec2 a_pos;
 out vec2 v_uv;
@@ -150,7 +150,7 @@ void main(){
 }`;
 }
 
-// program 缓存键（GLContext.program 用）。
+// program 缓存键（Gl2Port.program 用）。
 export function compositeProgramKey(mode: BlendMode, src: SourceKind = "tiled", overlayMode: BlendMode = "source-over"): string {
   return src === "overlay" ? `composite:${mode}:${src}:${overlayMode}` : `composite:${mode}:${src}`;
 }

@@ -2,7 +2,7 @@ import type { Background } from "./gl-compositor.ts";
 import type { DocNode } from "./gl-doc-bridge.ts";
 import type { LayerPixels } from "../tiles/tile-layer.ts";
 import type { Stamp, StrokeShape } from "./gl-stamp.ts";
-import type { PooledFBO } from "./gl-context.ts";
+import type { PooledFBO } from "../common/gl2-port.ts";
 import type { GlRoom, OverlayInput, SurrogateInput } from "./gl-room.ts";
 export declare class RasterService {
     private _room;
@@ -33,6 +33,5 @@ export declare class RasterService {
         w: number;
         h: number;
     };
-    compositeToCanvas(nodes: DocNode[], docW: number, docH: number): HTMLCanvasElement;
     pickColor(nodes: DocNode[], docW: number, docH: number, bg: Background | undefined, x: number, y: number, surrogate?: SurrogateInput | null, overlay?: OverlayInput | null): [number, number, number, number];
 }

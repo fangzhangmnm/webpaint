@@ -9,7 +9,7 @@
 import { COMPOSITE_VERT, compositeFragSource, compositeProgramKey } from "./blend-glsl.ts";
 import type { BlendMode, SourceKind } from "./blend-glsl.ts";
 import type { IndexTexture } from "./gpu-tile-pool.ts";
-import type { GLContext, PooledFBO, FBOPrec } from "./gl-context.ts";
+import type { Gl2Port, PooledFBO, FBOPrec } from "../common/gl2-port.ts";
 
 // live 描边 overlay（活动叶层叠加）：直值纹理 + doc 坐标 bbox + 不透明度/擦除/锁α/选区蒙版。
 export interface OverlayDesc {
@@ -249,12 +249,12 @@ void main(){
 }`;
 
 export class GLCompositor {
-  private _glctx: GLContext;
+  private _glctx: Gl2Port;
   private _prec: FBOPrec;
   // 性能计数（dev HUD 用，零成本——只在 _pass/_floatPass 自增整数）。composite() 入口清零，调用方读 stats。
   //   passes = blend pass 数（≈ 可见层/组单元数，§2 layer-count 假说的直读量）；floatPasses = 浮层 warp pass 数。
   readonly stats = { passes: 0, floatPasses: 0 };
-  constructor(glctx: GLContext, accumPrec: FBOPrec = "u8") {
+  constructor(glctx: Gl2Port, accumPrec: FBOPrec = "u8") {
     this._glctx = glctx;
     this._prec = accumPrec;
   }
@@ -501,15 +501,6 @@ export class GLCompositor {
     this._glctx.returnFBO(fbo);
     gl.deleteTexture(tex);
     return { data: new Uint8ClampedArray(px.buffer), w: bw, h: bh, dstX: bx, dstY: by };
-  }
-
-  // canvas 包装（gl-smoke 对拍参照用；产品路径走 warpToBytes 直落 typed array）。
-  warpToCanvas(src: Parameters<GLCompositor["warpToBytes"]>[0], srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number): { canvas: HTMLCanvasElement; dstX: number; dstY: number } | null {
-    const r = this.warpToBytes(src, srcW, srcH, hinv, mode, bx, by, bw, bh);
-    if (!r) return null;
-    const canvas = document.createElement("canvas"); canvas.width = r.w; canvas.height = r.h;
-    canvas.getContext("2d")!.putImageData(new ImageData(r.data, r.w, r.h), 0, 0);
-    return { canvas, dstX: r.dstX, dstY: r.dstY };
   }
 
   private _clear(f: PooledFBO, bg?: [number, number, number, number]): void {

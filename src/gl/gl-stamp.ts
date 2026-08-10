@@ -14,7 +14,7 @@
 // 椭圆 stamp：fragment 对 doc 偏移做旋转(-rotation)+1/aspect 逆变换再算 dist（逐位匹配 _washMaxInto:838-856）；
 //   圆形 = aspect=1/rotation=0 的退化（同一路径）。quad 用 radius·max(1,aspect) 外接盒 over-cover，frag discard 出界。
 
-import type { GLContext, PooledFBO } from "./gl-context.ts";
+import type { Gl2Port, PooledFBO } from "../common/gl2-port.ts";
 
 // 一个 stamp：doc 坐标中心 + 直径 + 该 dab 的 α（= _stampParams.stampAlpha）。
 export interface Stamp { x: number; y: number; size: number; alpha: number; }
@@ -97,16 +97,16 @@ out vec4 o;
 void main() { float a = texture(u_accum, v_uv).a; o = vec4(u_color * a, a); }`;
 
 export class GLStampRasterizer {
-  private _glctx: GLContext;
+  private _glctx: Gl2Port;
   // 持久 instanced VAO：单位 quad（loc0，static）+ 每 stamp 实例属性缓冲（loc1，每帧重填）。
   //   按 context generation 缓存——restore 后旧句柄失效，_gen 不等即重建。
   private _vao: WebGLVertexArrayObject | null = null;
   private _instBuf: WebGLBuffer | null = null;
   private _vaoGen = -1;
   private _instData = new Float32Array(0);   // 复用，按 stamp 数增长（不每帧新分配）
-  constructor(glctx: GLContext) { this._glctx = glctx; }
+  constructor(glctx: Gl2Port) { this._glctx = glctx; }
 
-  // 取（或按代际重建）instanced VAO；返回实例属性缓冲。单位 quad = GLContext.quadVAO 同布局（6 顶点）。
+  // 取（或按代际重建）instanced VAO；返回实例属性缓冲。单位 quad = Gl2Port.quadVAO 同布局（6 顶点）。
   private _ensureVAO(): WebGLVertexArrayObject {
     const gl = this._glctx.gl;
     if (this._vao && this._vaoGen === this._glctx.generation) return this._vao;

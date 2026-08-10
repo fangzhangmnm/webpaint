@@ -1,32 +1,19 @@
-export type FBOPrec = "u8" | "f16" | "f32";
-export interface GLCaps {
-    maxTextureSize: number;
-    maxArrayLayers: number;
-    maxTextureUnits: number;
-    floatColorBuffer: boolean;
-}
-export interface PooledFBO {
-    fbo: WebGLFramebuffer;
-    tex: WebGLTexture;
-    w: number;
-    h: number;
-    prec: FBOPrec;
-}
-export declare class GLContext {
+import type { Gl2Port, Gl2Caps, FBOPrec, PooledFBO } from "../common/gl2-port.ts";
+export declare class BrowserGl2Port implements Gl2Port {
     readonly canvas: HTMLCanvasElement | OffscreenCanvas;
     readonly gl: WebGL2RenderingContext;
-    readonly caps: GLCaps;
+    readonly caps: Gl2Caps;
     private _programs;
     private _programSrc;
     private _fboPool;
     private _quad;
-    onLost: (() => void) | null;
-    onRestored: (() => void) | null;
+    private _invalidated;
     private _lost;
     private _gen;
     constructor(canvas: HTMLCanvasElement | OffscreenCanvas);
     get isLost(): boolean;
     get generation(): number;
+    onInvalidated(cb: () => void): void;
     program(name: string, vert?: string, frag?: string): WebGLProgram;
     private _compile;
     private _shader;

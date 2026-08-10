@@ -90,3 +90,14 @@
   undo 步；笔刷色全程不动（T4c 锚不变）。测试 1233 绿（+1 行为锚 fill-mode.test.mjs）。
   **真机锚（追加进真机批）**：进 fill→（无选区时）色窗换色→点选区，预览色 = 色窗色；✓ 连续填
   下一块色不丢；出 fill 色窗回笔刷色。
+- **C1 ✅ v0.8.25（2026-08-10）**：①契约落 `src/common/gl2-port.ts`（Gl2Caps/FBOPrec/PooledFBO/
+  Gl2Port——isLost/generation/onInvalidated 多播 + program 按名 + FBO 借还 + quadVAO；`gl` 裸口
+  **显式标注过渡负债**，C5/C8 收编、SoftGl2Port 前清零——终态契约没有它）；②实现体落
+  `src/shell/browser-gl2-port.ts`（GLContext 现体改名翻入，getContext 唯一创建点在 board.ts
+  `_setupGLBoard` 壳侧造好递入；onLost/onRestored 单槽回调删除，gl-board 唯一订户改 onInvalidated，
+  行为不变）；③src/gl 零 getContext 达成：gl-context.ts 删除、全 gl/ 文件改持 Gl2Port 类型
+  （import 方向 gl→common）；RasterService.compositeToCanvas / GLCompositor.warpToCanvas 两个
+  canvas 包装撤出（唯一消费者 board.ts:compositeNodesToCanvas / smoke harness warpToCanvasVia
+  本地自包字节→canvas）。④GPU tile arena 归 Port（多 tab 记账）**未动**——排 C7。验收：tsc 0、
+  1233 绿、build lint 全过、GL smoke PASSED。无新真机锚（行为不变纯搬家；context-loss 自愈路径
+  真机批已有旧锚覆盖）。

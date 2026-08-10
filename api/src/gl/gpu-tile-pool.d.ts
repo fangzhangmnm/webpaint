@@ -1,4 +1,4 @@
-import type { GLContext } from "./gl-context.ts";
+import type { Gl2Port } from "../common/gl2-port.ts";
 export declare const GPU_TILE_BYTES: number;
 export interface GpuTileBackend {
     readonly capacity: number;
@@ -60,7 +60,7 @@ export declare class GLGpuTileBackend implements GpuTileBackend {
     private _glctx;
     private _tex;
     private _capacity;
-    constructor(glctx: GLContext, initialSlices: number);
+    constructor(glctx: Gl2Port, initialSlices: number);
     get capacity(): number;
     get texture(): WebGLTexture;
     private _alloc;
@@ -74,7 +74,7 @@ export declare class IndexTexture {
     readonly across: number;
     readonly down: number;
     private _data;
-    constructor(glctx: GLContext, docW: number, docH: number);
+    constructor(glctx: Gl2Port, docW: number, docH: number);
     rebuild(byKey: Map<number, number>, pool: GpuTilePool): void;
     setSlice(tx: number, ty: number, slice: number): void;
     dispose(): void;

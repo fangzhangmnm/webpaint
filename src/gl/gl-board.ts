@@ -1,9 +1,10 @@
 // GLBoard —— board.ts 的 GL 渲染接缝（薄壳）。T6 起内部 = GlRoom（机房五件套 + 共享台面）上的
 // 双 facade：RenderTree（tree composite：脏跟踪/段缓存/display 快路径）+ RasterService（一次性
-// 算像素：烤定/导出/吸管/warp）。本类只管 canvas/context 生命周期 + 输入翻译。板级契约不变：
-// markContentDirty = 内容/结构变了；pan/zoom 帧自动走「只 present」快路径；context-loss 自愈。
+// 算像素：烤定/导出/吸管/warp）。板级契约不变：markContentDirty = 内容/结构变了；pan/zoom 帧
+// 自动走「只 present」快路径；context-loss 自愈。
+// C1：context 创建翻壳——壳（board.ts）造好 BrowserGl2Port 递入，本类只见 Gl2Port 契约。
 
-import { GLContext } from "./gl-context.ts";
+import type { Gl2Port } from "../common/gl2-port.ts";
 import { GlRoom } from "./gl-room.ts";
 import { RenderTree } from "./render-tree.ts";
 import { RasterService } from "./raster-service.ts";
@@ -24,20 +25,19 @@ function hexToRgb(hex: string): [number, number, number] {
 }
 
 export class GLBoard {
-  readonly canvas: HTMLCanvasElement;
-  private _glctx: GLContext;
+  private _glctx: Gl2Port;
   private _room: GlRoom;
   private _tree: RenderTree;
   private _raster: RasterService;
 
-  constructor(canvas: HTMLCanvasElement, maxSlices: number) {
-    this.canvas = canvas;
-    this._glctx = new GLContext(canvas);
+  constructor(glctx: Gl2Port, maxSlices: number) {
+    this._glctx = glctx;
     this._room = new GlRoom(this._glctx, maxSlices);
     this._tree = new RenderTree(this._room);
     this._raster = new RasterService(this._room);
-    // context-loss：底层纹理/FBO 全没了 → 机房+执行器全量作废，下帧从 CPU SSoT 重建（CPU 恒驻留）。
-    this._glctx.onRestored = () => { this._tree.handleContextRestored(); };
+    // context-loss（Port onInvalidated 广播：结构已重建/generation 已 ++）：底层纹理/FBO 全没了
+    //   → 机房+执行器全量作废，下帧从 CPU SSoT 重建（CPU 恒驻留）。
+    this._glctx.onInvalidated(() => { this._tree.handleContextRestored(); });
   }
 
   get memory() { return this._room.memory; }
@@ -66,12 +66,8 @@ export class GLBoard {
     return this._raster.rasterizeStampsToBytes(stamps, shape, bx, by, bw, bh);
   }
 
-  // S9 导出/缩略图合成面：一次性合成 → canvas（透明底）。GL lost → null（调用方兜）。
-  compositeToCanvas(nodes: DocNode[], docW: number, docH: number): HTMLCanvasElement | null {
-    if (this._glctx.isLost) return null;
-    return this._raster.compositeToCanvas(nodes, docW, docH);
-  }
-  // 字节合成面（v0.6.39）：merge-down/collapse 等字节 op 用；GL lost → null。
+  // 字节合成面（v0.6.39）：merge-down/collapse/导出等字节 op 用；GL lost → null。
+  //   （C1：canvas 包装面 compositeToCanvas 撤出 src/gl——屏显域 canvas 归壳，board.ts 自包字节。）
   compositeToBytes(nodes: DocNode[], docW: number, docH: number): { data: Uint8ClampedArray; w: number; h: number } | null {
     if (this._glctx.isLost) return null;
     return this._raster.compositeToBytes(nodes, docW, docH);

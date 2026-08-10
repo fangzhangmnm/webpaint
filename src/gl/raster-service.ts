@@ -9,7 +9,7 @@ import type { DocNode, DocLeaf } from "./gl-doc-bridge.ts";
 import type { LayerPixels } from "../tiles/tile-layer.ts";
 import type { Stamp, StrokeShape } from "./gl-stamp.ts";
 import { buildPlan } from "../render/render-plan.ts";
-import type { PooledFBO } from "./gl-context.ts";
+import type { PooledFBO } from "../common/gl2-port.ts";
 import type { GlRoom, OverlayInput, SurrogateInput } from "./gl-room.ts";
 import { overlayEmpty } from "./gl-room.ts";
 
@@ -148,14 +148,6 @@ export class RasterService {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     this._room.glctx.returnFBO(fbo);
     return { data: new Uint8ClampedArray(px.buffer), w: docW, h: docH };
-  }
-
-  // S9 导出/缩略图/mergedimage 合成面：字节 → canvas 包装（消费方要 drawImage/toBlob 的场合）。
-  compositeToCanvas(nodes: DocNode[], docW: number, docH: number): HTMLCanvasElement {
-    const b = this.compositeToBytes(nodes, docW, docH);
-    const canvas = document.createElement("canvas"); canvas.width = docW; canvas.height = docH;
-    canvas.getContext("2d")!.putImageData(new ImageData(b.data, docW, docH), 0, 0);
-    return canvas;
   }
 
   // S8 吸管（spec:243-244）：一次性合成 + 单像素 readPixels（合成组无 CPU tile → 必须走 GPU 读）。

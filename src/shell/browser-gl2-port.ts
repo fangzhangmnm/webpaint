@@ -1,54 +1,38 @@
-// GLContext —— 单持久 WebGL2 上下文的封装（ai-docs/20260614-perf-webgl-memory-clip.md §3 模块 1）。
+// BrowserGl2Port —— Gl2Port 的真 WebGL2 实现体（壳侧；原 src/gl/gl-context.ts GLContext 改造，C1）。
+// getContext 全仓唯一创建点在此（造 context 需要 DOM/OffscreenCanvas；用 gl 对象不需要）——
+// WebGL2 quirk 一律不出壳（ADR-0009）。壳造好递入 backend，backend 只见 Gl2Port。
 //
 // 职责（窄接口后面藏掉的脏活）：
-//   - 取 WebGL2 context（无则响亮失败，由 caller 给「需要 WebGL2」提示——§3 定调不留 2D 回退）。
+//   - 取 WebGL2 context（无则响亮失败，由 caller 给「需要 WebGL2」提示——不留 2D 回退）。
 //   - 能力探测：max texture size / max array layers / float 颜色缓冲 / 纹理单元数。
 //   - shader program 编译 + 缓存（按 name 复用，避免重复编译）。
 //   - FBO 池：按尺寸借/还离屏渲染目标（合成 ping-pong / 笔刷 stroke FBO 复用）。
 //   - 单位 quad VAO（纹理 quad / 全屏 pass 共用）。
-//   - **context-loss 生命周期**：listen lost(preventDefault)+restored(重编 program/重建 FBO/
-//     fire onRestored → 下帧 syncAll 从 CPU tile 池全量重传)。iOS Safari/PWA 后台必丢 → 这是命门。
+//   - **context-loss 生命周期（结构自愈契约）**：listen lost(preventDefault)+restored(重编 program/
+//     重建 FBO 池/generation++ → onInvalidated 广播 → backend 下帧从 CPU tile 池全量重传)。
+//     iOS Safari/PWA 后台必丢 → 这是命门。
 //
 // 验证边界：本模块全是 gl.* 调用，node DOM-shim 下是 no-op → **node 测不了，真机批验证**。
 //   故刻意只放标准、可读、无分支魔法的 GL 样板；易错点（FBO 完整性 / float 目标 params）逐行注释。
 
-// 渲染目标精度档：u8=RGBA8（present/屏显），f16=RGBA16F（合成累积，§7 banding bonus），
-//   f32=RGBA32F（精度验证/陡 blend 模式；比 f16 多一倍 transient，仅累积器一张、不乘层数）。
-export type FBOPrec = "u8" | "f16" | "f32";
+import type { Gl2Port, Gl2Caps, FBOPrec, PooledFBO } from "../common/gl2-port.ts";
 
 // FBO 池上界（防泄露）。count 主防"许多不同尺寸的一次性 FBO"（commit/warp 每笔一张）累积；
 //   bytes 是兜底显存天花板。doc 尺寸热 FBO 每帧复用、是 MRU，不会被驱逐 → 不抖。
 const FBO_POOL_MAX_COUNT = 48;
 const FBO_POOL_BUDGET_BYTES = 384 * 1024 * 1024;
 
-export interface GLCaps {
-  maxTextureSize: number;        // MAX_TEXTURE_SIZE（iPad Apple GPU ≥ 16384）
-  maxArrayLayers: number;        // MAX_ARRAY_TEXTURE_LAYERS（tile 池深度上界）
-  maxTextureUnits: number;       // MAX_TEXTURE_IMAGE_UNITS（≥16；用不到那么多，ping-pong 逐层叠）
-  floatColorBuffer: boolean;     // 能否渲到 RGBA16F/32F（EXT_color_buffer_float）
-}
-
-// 池化的离屏渲染目标：framebuffer + 它的颜色纹理。
-export interface PooledFBO {
-  fbo: WebGLFramebuffer;
-  tex: WebGLTexture;
-  w: number;
-  h: number;
-  prec: FBOPrec;
-}
-
-export class GLContext {
+export class BrowserGl2Port implements Gl2Port {
   readonly canvas: HTMLCanvasElement | OffscreenCanvas;
   readonly gl: WebGL2RenderingContext;
-  readonly caps: GLCaps;
+  readonly caps: Gl2Caps;
 
   private _programs = new Map<string, WebGLProgram>();
   private _programSrc = new Map<string, { vert: string; frag: string }>();   // 重建用
   private _fboPool: PooledFBO[] = [];      // 已归还、待复用
   private _quad: WebGLVertexArrayObject | null = null;
 
-  onLost: (() => void) | null = null;
-  onRestored: (() => void) | null = null;
+  private _invalidated: (() => void)[] = [];
   private _lost = false;
   private _gen = 0;   // restore 代际：每次 context 恢复 +1。持久 GL 对象（如 stamp 实例 VAO）按此判失效重建。
 
@@ -83,18 +67,20 @@ export class GLContext {
     el.addEventListener?.("webglcontextlost", (e: Event) => {
       e.preventDefault();
       this._lost = true;
-      this.onLost?.();
     });
     el.addEventListener?.("webglcontextrestored", () => {
       this._lost = false;
       this._rebuildAfterRestore();
-      this.onRestored?.();   // gl-board 在此重建后端并标脏 → 下帧从 CPU tile 池重传
+      // 广播失效（结构已重建、generation 已 ++）→ backend 标脏，下帧从 CPU tile 池重传。
+      for (const cb of this._invalidated) cb();
     });
   }
 
   get isLost(): boolean { return this._lost; }
   // 持久 GL 对象的失效令牌：caller 缓存创建时的 generation，与此不等即重建（restore 后旧句柄已废）。
   get generation(): number { return this._gen; }
+
+  onInvalidated(cb: () => void): void { this._invalidated.push(cb); }
 
   // ---- shader program 缓存 ----
   // 按 name 取已编译 program；首次需给源。源被记下，context restored 后自动重编。
@@ -232,7 +218,7 @@ export class GLContext {
   }
 
   // context restored 后：旧 GL 对象句柄全失效 → 重编所有 program、清空 FBO 池（按需重建）、丢 quad。
-  // tile 纹理由 onRestored 回调链重传（gl-board 标脏 → syncAll 从 CPU tile 池；本模块不持 tile）。
+  // tile 纹理由 onInvalidated 回调链重传（backend 标脏 → syncAll 从 CPU tile 池；本模块不持 tile）。
   private _rebuildAfterRestore(): void {
     this._gen++;   // 旧 program/FBO/VAO 句柄全废 → 代际 +1，持久对象 holder 据此重建
     this._programs.clear();

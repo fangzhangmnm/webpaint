@@ -65,6 +65,14 @@ export interface Gl2Port {
 }
 ```
 
+- **C1 落地回写（v0.8.25）**：接口落 `src/common/gl2-port.ts`，实现体落 `src/shell/browser-gl2-port.ts`
+  （原 GLContext 改名 BrowserGl2Port，board.ts 壳侧唯一 getContext 创建点造好递入）；src/gl 零
+  getContext/零 canvas（compositeToCanvas/warpToCanvas 两个 canvas 包装面撤壳：board.ts / smoke
+  harness 本地自包）。已收编动词：program 按名（restore 自动重编）/FBO 借还+clearPool/quadVAO/
+  isLost/generation/onInvalidated（多播，替 onLost·onRestored 单槽）。**过渡负债（显式记账）**：
+  接口暂留 `gl` 裸口 = 未收编的调用面（合成 pass uniform/纹理绑定、instanced draw、readPixels），
+  随 C5/C8 收编，SoftGl2Port 进场前清零；GPU tile arena（GLGpuTileBackend）尚在 Port 外，
+  归 Port 的多 tab 记账排 C7 装配片。
 - **`BrowserGl2Port`**（shell 侧）：getContext 唯一创建点从 gl-context.ts:68 翻入；context-loss
   检测/program·FBO·VAO 重建/generation++ 全在此（现 GLContext 改造为其实现体）；WebGL2 quirk
   一律不出壳。**`SoftGl2Port`**（backend 可见的测试/MCP 兜底）：迂腐语义模拟——照 GL 规范公式
@@ -147,7 +155,8 @@ export interface WebPaintBackendInterface {
 
 - transaction 协议细节（filter/transform 档口签名、互斥拒绝语义）——等 C4 普查。
 - EditMode 归属（倾向：backend 令牌互斥 + frontend 交互仲裁）——等 C4。
-- Gl2Port 动词面精确签名——等 C1 落地回写。
+- Gl2Port 动词面：C1 已回写第一刀（§2「C1 落地回写」——lifecycle/program/FBO/quad 已收编，
+  `gl` 裸口过渡）；**全量收编签名**（pass/instanced/readPixels 动词化）等 C5/C8 逐片回写。
 - backend interface 的 verbs 全清单——等 C7 逐条过（workpiece v2 现有面 api 化）。
 
 ## 7. 测试与纪律

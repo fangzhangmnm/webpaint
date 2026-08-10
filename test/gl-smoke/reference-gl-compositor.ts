@@ -5,7 +5,7 @@
 
 import type { GLCompositor, Background, Acc } from "../../src/gl/gl-compositor.ts";
 import type { OverlayDesc, FloatDesc } from "../../src/gl/gl-compositor.ts";
-import type { PooledFBO } from "../../src/gl/gl-context.ts";
+import type { PooledFBO } from "../../src/common/gl2-port.ts";
 import type { IndexTexture } from "../../src/gl/gpu-tile-pool.ts";
 import type { BlendMode } from "../../src/gl/blend-glsl.ts";
 import { safeMode } from "../../src/gl/gl-doc-bridge.ts";

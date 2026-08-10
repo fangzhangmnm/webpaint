@@ -1,5 +1,5 @@
 // GlRoom —— GL 机房引用包 + 双 facade 的共享基座（T6，ADR-0008 / 提案 .h「render 侧拆分」）。
-// 机房五件套（GLContext / GpuTilePool / CpuGpuTileBridge / GLCompositor / GLStampRasterizer）
+// 机房五件套（Gl2Port / GpuTilePool / CpuGpuTileBridge / GLCompositor / GLStampRasterizer）
 // **唯一实例**在此；RenderTree（tree composite）与 RasterService（一次性算像素）各拿同一个 room。
 // 共享的不止五件套——还有两 facade 都要坐的「台面」：
 //   - 叶 GPU 驻留台账（leaves + sync）：bakeStamps 搭 renderFrame 的 base-tile 便车
@@ -20,7 +20,7 @@ import { LayerPixels } from "../tiles/tile-layer.ts";
 import { GLStampRasterizer } from "./gl-stamp.ts";
 import type { Stamp, StrokeShape } from "./gl-stamp.ts";
 import type { Plan, PlanNode, PlanStep, SegBuild } from "../render/render-plan.ts";
-import type { PooledFBO, FBOPrec, GLContext } from "./gl-context.ts";
+import type { PooledFBO, FBOPrec, Gl2Port } from "../common/gl2-port.ts";
 import type { BlendMode } from "./blend-glsl.ts";
 
 // ---- board 输入（原 render-tree-gl 同名接口原样迁入） ----
@@ -70,7 +70,7 @@ export function overlayEmpty(ov: OverlayInput): boolean {
 export interface LeafRec { index: IndexTexture; byKey: Map<number, number>; src: LayerPixels | null; cpuVersion: number; gen: number }
 
 export class GlRoom {
-  readonly glctx: GLContext;
+  readonly glctx: Gl2Port;
   readonly backend: GLGpuTileBackend;
   readonly pool: GpuTilePool;
   readonly bridge: CpuGpuTileBridge;
@@ -96,7 +96,7 @@ export class GlRoom {
   // 内容失效信号：RasterService.bakeStamps 落了新像素 → RenderTree 置脏重算树（facade 互不知晓）。
   private _invalidateListeners: (() => void)[] = [];
 
-  constructor(glctx: GLContext, maxSlices: number, accumPrec: FBOPrec = "u8") {
+  constructor(glctx: Gl2Port, maxSlices: number, accumPrec: FBOPrec = "u8") {
     this.glctx = glctx;
     this.backend = new GLGpuTileBackend(glctx, Math.min(64, maxSlices));
     this.pool = new GpuTilePool(this.backend, maxSlices);

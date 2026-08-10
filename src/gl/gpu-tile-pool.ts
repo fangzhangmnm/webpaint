@@ -18,7 +18,7 @@
 //   合成 shader 按 doc 坐标查它拿 slice（-1=透明），再进 array 池采像素。
 
 import { TILE_SIZE, tilesAcross, tilesDown } from "../tiles/tile-geometry.ts";
-import type { GLContext } from "./gl-context.ts";
+import type { Gl2Port } from "../common/gl2-port.ts";
 
 export const GPU_TILE_BYTES = TILE_SIZE * TILE_SIZE * 4;
 
@@ -206,11 +206,11 @@ export class GpuTilePool {
 // ---- 真 GL backend（TEXTURE_2D_ARRAY；node 下不构造） ----
 
 export class GLGpuTileBackend implements GpuTileBackend {
-  private _glctx: GLContext;
+  private _glctx: Gl2Port;
   private _tex: WebGLTexture | null = null;
   private _capacity: number;
 
-  constructor(glctx: GLContext, initialSlices: number) {
+  constructor(glctx: Gl2Port, initialSlices: number) {
     this._glctx = glctx;
     this._capacity = initialSlices;
     this._alloc();
@@ -270,7 +270,7 @@ export class IndexTexture {
   readonly down: number;
   private _data: Float32Array;
 
-  constructor(glctx: GLContext, docW: number, docH: number) {
+  constructor(glctx: Gl2Port, docW: number, docH: number) {
     const gl = glctx.gl;
     this._gl = gl;
     this.across = tilesAcross(docW);
