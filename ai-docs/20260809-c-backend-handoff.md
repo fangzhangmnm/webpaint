@@ -177,3 +177,23 @@
   拖动记账/no-op 不占步）。**真机锚（追加真机批）**：fill 换色→切工具，落地色=预览色；
   ✓ 连续填两块不同色各自正确、undo 逐步回；persp 编辑拖 VP→ctrl-z 回拖前、连拖三次撤三次、
   重置/锁切换也各占一步、undo 中手柄跟着跳。
+- **C5 ✅ v0.8.30（2026-08-10）**：①**StrokeSession 落 `src/stroke-session.ts`**：
+  input._beginStroke/_endStroke/_abortStroke/_beginFilterBrush 里的令牌开合/GPU commit/选区
+  finalize/记账编排物理迁出（input 只剩手势路由 + 投喂 (x,y,p,t) + 「取下 session 调收口」的
+  转发）；session 对象 = 令牌句柄（backend `strokeBegin→StrokeId` 的进程内化身，全部笔类共用
+  一个档口，C7 api 化时逐字升格）；deps 全函数面六个点（begin/tokenChanged/tokenBeforeImage/
+  getSelection/commitStamps/invalidate——后两个是屏显侧（board）注入，终态归 backend 自持，
+  C7/C8 收编）。filterBrush begin 失败路径改 session.cancel() 收口（原 token.cancel 语义不变，
+  多一次无害 invalidate）。②**手感数学迁 backend**：stroke-smoother.ts →
+  `src/backend/stroke-smoother.ts`（纯数学零依赖，过 C2 格律）；压感 LPF 从 brush.ts 析出成
+  `PressureLPF` 类同住。③**壁钟→事件 t（census §2.1 排的顺手账）**：_pressureLPF 的
+  performance.now() 拔除，dt = 事件 timeStamp 差（无 t → FALLBACK_DT=16，同 StrokeSmoother
+  惯例；「同一笔两套时钟」收成一套事件钟）——backend 决定论：同一 (x,y,p,t) 序列 → 同一输出
+  （ADR-0009；C8 SoftGl2/MCP 回放前提）。gl-smoke golden 在 ±ε 内未移位，无需重录。
+  验收：tsc 0、**1201 绿**（+10：session 5 锚=一笔一步/cancel 无痕/单令牌墙 throw/GPU 委托跳
+  finalize/选区 finalize 兜底；PressureLPF 5 锚=直传/事件钟/兜底/决定论）、build 五 lint 全过、
+  GL smoke PASSED。**真机锚（追加真机批）**：压感笔刷（pressureLPF>0 的笔）快甩起伏一笔——
+  粗细跟压感的响应比 v0.8.29 略更跟手（coalesced 批的 dt 不再被处理时刻钟压扁），无尖刺无断笔。
+  **Gl2Port 动词面全量收编（§6.3 点名 C5/C8）本片未动**——C5 没碰 gl/，排 C8。
+  **下一片 = C6 违规户迁移**（液化第一户笔内替身化 → 魔棒拖选、形状笔 pixelMode 跟上；
+  census §6 施工单是现成情报，行为锚先迁后拆）。
