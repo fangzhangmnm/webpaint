@@ -38,10 +38,14 @@ src/frontend/  UX 资产。可 import common + backend（读面/指令）。
 src/shell/     platform 胶水（store 接缝、editor-session、分享/剪贴板/PWA、Port 装配、
                decoder/encoder 注入）。可 import 全部。capability 契约：只有
                「unavailable / 承诺托底」两态，exception 壳内消化，app 只见 failure+reason。
-src/gallery/   本轮检疫堆场：gallery 相关文件物理挪入（行为不变），**每个文件夹 = 一个 component
-               或一个背景进程**（user 2026-08-09 更正：粒度是文件夹不是文件）；双向依赖
-               （gallery↔session 10 处）文件头记账不动刀（E 骑士开工清单）。
+src/gallery/   本轮检疫堆场：gallery 相关文件物理挪入（行为不变），内部不细分（不定义控件类，
+               除非真有价值——user 判「一般没有」）；双向依赖（gallery↔session 10 处）
+               文件头记账不动刀（E 骑士开工清单）。
 ```
+
+**顶层粒度语义（user 2026-08-09 二次更正）**：五个顶层目录各自是「webcomponent / 背景进程 /
+代码库」之一的量级——gallery=未来 webcomponent、backend/frontend/common=代码库、shell=胶水库
++背景进程；组织规则到这一层为止，目录内部不往下套。
 
 搬家纪律：新代码即日按目录落；存量随切片搬（C0 改名表 = 搬家地图）；不搞一次性大爆炸。
 

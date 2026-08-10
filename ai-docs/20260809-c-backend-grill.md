@@ -26,8 +26,10 @@
 
 - 五目录：`src/common/`（纯类型+纯几何，零依赖）、`src/backend/`（算法/合成/codec/workpiece，
   含 `backend/algorithms/`）、`src/frontend/`（UX 资产，含 `frontend/toolkit/`）、`src/shell/`
-  （platform 胶水）、`src/gallery/`（**本轮检疫堆场**——「所有的gallery屎本轮先堆过去，未来慢慢理」，
-  **每个文件夹**=一个 component 或一个背景进程——user 2026-08-09 更正：粒度是文件夹不是文件）。
+  （platform 胶水）、`src/gallery/`（**本轮检疫堆场**——「所有的gallery屎本轮先堆过去，未来慢慢理」）。
+  **粒度语义（user 2026-08-09 二次更正）**：「src目录的五个是webcomponent或者背景进程或者代码库」
+  ——组织规则到五个顶层目录为止，目录内部「不用分的那么细，除非你觉得定义控件类有价值，
+  不过我觉得一般」。
 - 依赖格律单向：common 不 import 任何人；backend 只 import common；frontend 可 import
   common+backend；shell 都可；lint 按目录钉死。紧耦合共享物（几何/类型/Selection 值对象）进 common
   ——「紧耦合的方便的代价可能就是后来不敢动->屎山」，反屎山靠单向格律不靠消灭共享。
