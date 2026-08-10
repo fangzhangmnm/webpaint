@@ -17,6 +17,8 @@ function mk(width = 512, height = 512) {
   const doc = new PaintingView(wp2);
   h.attach(wp2);
   const lt = new LayersFace({ history: h, tree: wp2.layerTree, tiles: wp2.layerTiles, port: doc, status: () => {} });
+  // 像素只当预算底料、不测像素记账——rig 声明 scratch 域（C7 无令牌写硬化白名单态；树记账不受影响）。
+  wp2.layerTiles._suspendCollect(true);
   _ctxs.push({ h, wp2 });
   return { doc, wp2, lt };
 }

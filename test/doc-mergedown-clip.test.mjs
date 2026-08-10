@@ -5,6 +5,7 @@
 // C3：从旧 PaintDoc.mergeDownLayer 迁 **LayersFace.mergeDown**（v2 真生产路径：renderNodesToBytes
 // 同一注入 seam + layer-tree.mergeDown verb——旧注「mergeDown 走 GL node 不可测」已不成立）。
 import { describe, it, assert, eq } from "./runner.mjs";
+import { seedWrite } from "./helpers.mjs";
 import { PaintingWorkpiece } from "../src/backend/workpiece/painting-workpiece.ts";
 import { PaintingView, flattenViewLeaves, countViewLeaves } from "../src/backend/workpiece/painting-view.ts";
 import { History } from "../src/backend/workpiece/history.ts";
@@ -53,7 +54,7 @@ function mk() {
 function fillLayer(L, w, h, r, g, b, a) {
   const d = new Uint8ClampedArray(w * h * 4);
   for (let i = 0; i < w * h; i++) { d[i * 4] = r; d[i * 4 + 1] = g; d[i * 4 + 2] = b; d[i * 4 + 3] = a; }
-  L.putImageData(0, 0, { width: w, height: h, data: d });
+  seedWrite(L, () => L.putImageData(0, 0, { width: w, height: h, data: d }));   // 令牌外种子（C7 硬化显式态）
 }
 // 让 under 只有左半 alpha（右半透明），用于验剪裁
 function fillLeftHalf(L, w, h, r, g, b) {
@@ -62,7 +63,7 @@ function fillLeftHalf(L, w, h, r, g, b) {
     const i = (y * w + x) * 4;
     d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = (x < w / 2) ? 255 : 0;
   }
-  L.putImageData(0, 0, { width: w, height: h, data: d });
+  seedWrite(L, () => L.putImageData(0, 0, { width: w, height: h, data: d }));   // 令牌外种子
 }
 const px = (L, x, y) => [...L.sampleAt(x, y)];
 

@@ -7,6 +7,7 @@
 //   - 被擦空的 tile（真层有、替身无）收口时同步回收；
 //   - finalize（选区兜底）在替身落账**之后**跑（shape pixelMode + 选区的次序锚）。
 import { describe, it, assert, eq } from "./runner.mjs";
+import { seedWrite } from "./helpers.mjs";
 import { UndoStack } from "../src/backend/workpiece/undo-stack.ts";
 import { PaintingWorkpiece } from "../src/backend/workpiece/painting-workpiece.ts";
 import { PaintingView } from "../src/backend/workpiece/painting-view.ts";
@@ -38,11 +39,11 @@ const SPEC = { historyType: "stroke", finalize: true };
 const SPEC_FB = { historyType: "stroke", finalize: false };   // filterBrush：begin 已吃 selection
 const pixelBrush = () => resolveBrush({ size: 4, color: "#ff0000", spacing: 0.5, preset: { pixelMode: true } });
 
-// 无令牌 fixture 灌入（观察者 tokenOpen gate → 静默不记账，测试专用底料）
+// 无令牌 fixture 灌入：C7 硬化后必须走显式声明态（seedWrite = collector suspend 窗）。
 function fill(layer, x, y, w, h, rgba) {
   const img = new ImageData(w, h);
   for (let i = 0; i < w * h; i++) img.data.set(rgba, i * 4);
-  layer.putImageData(x, y, img);
+  seedWrite(layer, () => layer.putImageData(x, y, img));
 }
 
 describe("stroke-shadow · 替身叶生命周期（真层描边期零写）", () => {

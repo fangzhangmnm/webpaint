@@ -10,6 +10,7 @@
 //   - statuses → step.hint（undo/redo 状态栏文案）；装配纪律 throw。
 // mergeDown 走 GL 合成，node 不可测（归 gl-smoke/真机批，同旧注）。
 import { describe, it, assert, eq } from "./runner.mjs";
+import { seedWrite } from "./helpers.mjs";
 import { PaintingWorkpiece } from "../src/backend/workpiece/painting-workpiece.ts";
 import { PaintingView, flattenViewLeaves, countViewLeaves } from "../src/backend/workpiece/painting-view.ts";
 import { History } from "../src/backend/workpiece/history.ts";
@@ -86,7 +87,7 @@ describe("workpiece-layer-tree · duplicateLayer", () => {
   it("复制含像素 → undo/redo 往返", () => {
     const { doc, h, lt } = mk();
     const src = doc.activeLayer;
-    src.pixels.putRegion(3, 3, 1, 1, px(1, 2, 3, 255));   // 基线内容（history 之前，无令牌=不入 undo）
+    seedWrite(src, () => src.pixels.putRegion(3, 3, 1, 1, px(1, 2, 3, 255)));   // 基线内容（种子，不入 undo——C7 硬化后走显式态）
     const a = lt.duplicateLayer(src.id);
     assert(a.ok, "duplicate ok");
     eq(readPx(a.layer, 3, 3), "1,2,3,255", "像素已复制");
@@ -156,7 +157,7 @@ describe("workpiece-layer-tree · 组合动词 + hint 文案", () => {
   it("explodeLayer：叶同位替换成 n 叶，undo 原叶回来", () => {
     const { doc, h, lt } = mk();
     const src = doc.activeLayer;
-    src.pixels.putRegion(0, 0, 1, 1, px(200, 0, 0, 255));
+    seedWrite(src, () => src.pixels.putRegion(0, 0, 1, 1, px(200, 0, 0, 255)));
     const parts = [
       { data: new Uint8ClampedArray([200, 0, 0, 255]), name: "红" },
       { data: new Uint8ClampedArray([0, 0, 0, 0]), name: "空" },
@@ -207,7 +208,7 @@ describe("workpiece-layer-tree · setLayerProp / clearLayer / moveLayer", () => 
   it("clearLayer：undo 像素还原", () => {
     const { doc, h, lt } = mk();
     const L = doc.activeLayer;
-    L.pixels.putRegion(5, 5, 1, 1, px(4, 5, 6, 255));
+    seedWrite(L, () => L.pixels.putRegion(5, 5, 1, 1, px(4, 5, 6, 255)));
     assert(lt.clearLayer(L.id).ok, "清空 ok");
     eq(readPx(L, 5, 5).split(",")[3], "0", "已清");
     h.undo();

@@ -1192,7 +1192,10 @@ function mergeDownParity(glctx: BrowserGl2Port, add: Add): void {
   const fill = (L: { putImageData: (x: number, y: number, img: unknown) => void }, fn: (x: number, y: number) => number[]) => {
     const d = new Uint8ClampedArray(N * N * 4);
     for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) d.set(fn(x, y), (y * N + x) * 4);
-    L.putImageData(0, 0, { width: N, height: N, data: d });
+    // 令牌外种子（C7 无令牌写硬化后走显式声明态：collector suspend 窗）
+    rig.wp2.layerTiles._suspendCollect(true);
+    try { L.putImageData(0, 0, { width: N, height: N, data: d }); }
+    finally { rig.wp2.layerTiles._suspendCollect(false); }
   };
   fill(base as never, (x, y) => [200, 150, (x * 3) % 256, x < N / 2 ? 255 : ((y * 2) % 200)]);   // 左实右渐变 alpha
   const a = rig.face.addLayer("上");

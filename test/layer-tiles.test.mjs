@@ -214,3 +214,42 @@ describe("LayerTiles · computed 白名单", () => {
     host.dispose(); undo.clear();
   });
 });
+
+// ── C7 硬化（census §3.6）：无令牌 substrate 写 → throw；无主临时件/装载/驱逐路照旧 ──
+import { WebPaintBackend } from "../src/backend/webpaint-backend.ts";
+
+describe("LayerTiles · 无令牌像素写硬化（C7）", () => {
+  it("有主 substrate 在令牌墙外换手 → 响亮 throw；令牌内照常记账", () => {
+    const backend = WebPaintBackend.blank({ width: 64, height: 64 });
+    const wp2 = backend.wp2;
+    const leaf = wp2.layerTree.view().nodes[0];
+    const lp = wp2.layerTiles.tilesetPixels(leaf.pixelsRef);
+    let threw = false;
+    try { lp.putRegion(0, 0, 4, 4, solid(4, 4, 99)); } catch (e) { threw = /无令牌像素写/.test(String(e)); }
+    assert(threw, "无令牌直写 substrate → throw（不再静默不记账）");
+    const t = wp2.begin("stroke");
+    lp.putRegion(0, 0, 4, 4, solid(4, 4, 120));
+    t.commit();
+    eq(backend.history.canUndo(), true, "令牌内写照常一步入栈");
+    backend.undo();
+    backend.dispose();   // 换根/清栈/驱逐（dispose 前摘戳路径）全程不炸
+  });
+
+  it("无主临时件（scratch/替身同形）在令牌外写 → 放行不炸", () => {
+    const backend = WebPaintBackend.blank({ width: 64, height: 64 });   // 有 collector 在册（多播观察者活着）
+    const scratch = new LayerPixels(64, 64);
+    scratch.putRegion(0, 0, 8, 8, solid(8, 8, 42));   // 令牌外写游离实例：合法（非 substrate）
+    eq(scratch.sampleAt(1, 1)[0], 42);
+    scratch.dispose();
+    backend.dispose();
+  });
+
+  it("load 灌入 / 换文档清栈（record 驱逐）在令牌外释放 → 不误伤", () => {
+    const backend = WebPaintBackend.blank({ width: 32, height: 32 });
+    const r = backend.layerAdd("A");
+    assert(r.ok, "加层");
+    backend.wp2.load({ width: 16, height: 16, nodes: [{ name: "L", visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false, pixels: null }] });
+    eq(backend.docInfo().width, 16, "换根成功（旧根 tileset 释放走摘戳路）");
+    backend.dispose();
+  });
+});

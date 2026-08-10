@@ -40,3 +40,13 @@ export function graphFromProvider(provider) {
 export async function blobText(blob) {
   return new TextDecoder().decode(new Uint8Array(await blob.arrayBuffer()));
 }
+
+// C7 无令牌像素写硬化（census §3.6）后的测试种子口：灌「不进 undo 的初态」必须走显式声明态
+// （collector suspend 窗——与 load 灌入同一白名单）。接受 ViewLeaf 或 LayerPixels。
+// ⚠ 只准在令牌外用（令牌内包它会吞掉写时扣押的记账）。
+export function seedWrite(leafOrLp, fn) {
+  const lp = leafOrLp.pixels ?? leafOrLp;
+  const owner = lp._collectorOwner;   // LayerTiles 所有权戳（无主 scratch 本就放行，owner 为空是合法态）
+  owner?._suspendCollect(true);
+  try { return fn(); } finally { owner?._suspendCollect(false); }
+}

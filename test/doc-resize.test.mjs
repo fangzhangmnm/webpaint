@@ -2,6 +2,7 @@
 // crop/cropResample/resample 的实例交换记账：exchange record（undo 包 = 另一侧实例，自反互换）
 // + 树尺寸 setTreeProp 同 step 同向翻 + 双捕获断言 + 所有权收支（清栈/换文档后池归零）。
 import { describe, it, assert, eq } from "./runner.mjs";
+import { seedWrite } from "./helpers.mjs";
 import { UndoStack } from "../src/backend/workpiece/undo-stack.ts";
 import { PaintingWorkpiece } from "../src/backend/workpiece/painting-workpiece.ts";
 import { PaintingView } from "../src/backend/workpiece/painting-view.ts";
@@ -21,7 +22,7 @@ describe("doc-resize · 像素事务（token + 写时扣押，v2 基座）", () 
   it("令牌内画一笔 → undo 回原态 → redo 回新态（像素逐点验证）", () => {
     const { undo, doc, wp2 } = mk();
     const L = doc.activeLayer;
-    L.pixels.putRegion(10, 10, 1, 1, px(1, 2, 3, 255));      // 底色（令牌外直写，不进 undo 的初态）
+    seedWrite(L, () => L.pixels.putRegion(10, 10, 1, 1, px(1, 2, 3, 255)));      // 底色（令牌外种子，不进 undo 的初态——C7 硬化后走显式态）
     const t = wp2.begin("stroke");
     L.pixels.putRegion(10, 10, 1, 1, px(9, 9, 9, 255));      // 引擎改动（写时扣押）
     L.pixels.putRegion(300, 300, 1, 1, px(5, 5, 5, 255));
@@ -41,8 +42,10 @@ describe("doc-resize · exchange record（crop/resample 的实例交换 + 树尺
   it("crop 形（一个 token：resizeAllLeaves + setTreeProp）→ undo 回原尺寸与像素 → redo 回裁后", () => {
     const { undo, doc, wp2 } = mk();
     const L = doc.activeLayer;
-    L.pixels.putRegion(400, 400, 1, 1, px(4, 4, 4, 255));
-    L.pixels.putRegion(8, 8, 1, 1, px(2, 2, 2, 255));
+    seedWrite(L, () => {
+      L.pixels.putRegion(400, 400, 1, 1, px(4, 4, 4, 255));
+      L.pixels.putRegion(8, 8, 1, 1, px(2, 2, 2, 255));
+    });
     const t = wp2.begin("crop");
     wp2.layerTiles.resizeAllLeaves((_id, lp) => lp.cropped(0, 0, 256, 256));
     wp2.layerTree.setTreeProp("width", 256);
@@ -74,7 +77,7 @@ describe("doc-resize · exchange record（crop/resample 的实例交换 + 树尺
   it("token.cancel：实例交换回滚无痕（尺寸与像素都回原态，栈不长）", () => {
     const { undo, doc, wp2 } = mk();
     const L = doc.activeLayer;
-    L.pixels.putRegion(400, 400, 1, 1, px(4, 4, 4, 255));
+    seedWrite(L, () => L.pixels.putRegion(400, 400, 1, 1, px(4, 4, 4, 255)));
     const d0 = undo.depth();
     const t = wp2.begin("crop");
     wp2.layerTiles.resizeAllLeaves((_id, lp) => lp.cropped(0, 0, 256, 256));
@@ -92,7 +95,7 @@ describe("doc-resize · 所有权收支（清栈+换文档后池不留本套件�
     const before = appTilePool().stats().count;
     const { undo, doc, wp2 } = mk();
     const L = doc.activeLayer;
-    L.pixels.putRegion(0, 0, 2, 2, new Uint8ClampedArray(16).fill(9));
+    seedWrite(L, () => L.pixels.putRegion(0, 0, 2, 2, new Uint8ClampedArray(16).fill(9)));
     const t = wp2.begin("stroke");
     L.pixels.putRegion(64, 64, 2, 2, new Uint8ClampedArray(16).fill(7));
     t.commit();

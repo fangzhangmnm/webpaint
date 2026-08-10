@@ -14,6 +14,7 @@
 // （旧锚「源层被外力删掉 → 不可恢复」在 v2 下结构上不可能——树只能经 recorded verb 改，
 //   栈序保证 undo lift 前层必在；桥的不可恢复协议锚在 legacy-bridge.test.mjs。）
 import { describe, it, assert, eq } from "./runner.mjs";
+import { seedWrite } from "./helpers.mjs";
 import { Selection } from "../src/backend/selection.ts";
 import { PaintingWorkpiece } from "../src/backend/workpiece/painting-workpiece.ts";
 import { PaintingView, flattenViewLeaves } from "../src/backend/workpiece/painting-view.ts";
@@ -40,7 +41,7 @@ const px = (r, g, b, a) => new Uint8ClampedArray([r, g, b, a]);
 function paintRect(L, x0, y0, w, h) {
   const buf = new Uint8ClampedArray(w * h * 4);
   for (let i = 0; i < buf.length; i += 4) { buf[i] = 10; buf[i + 1] = 20; buf[i + 2] = 30; buf[i + 3] = 255; }
-  L.pixels.putRegion(x0, y0, w, h, buf);
+  seedWrite(L, () => L.pixels.putRegion(x0, y0, w, h, buf));   // 令牌外初态种子（C7 硬化显式态）
 }
 // binary 全选一个矩形
 const rectSel = (x0, y0, w, h) => Selection.full(w, h, x0, y0);
@@ -319,7 +320,7 @@ describe("S6 · commit 整数平移快路（不旋转时 pixel perfect）", () =
       buf[i] = (x * 7 + y * 13) % 256; buf[i + 1] = (x * 31 + 9) % 256; buf[i + 2] = (y * 17 + 3) % 256;
       buf[i + 3] = semiAlpha ? 55 + ((x + y * 3) % 200) : 255;
     }
-    L.pixels.putRegion(x0, y0, w, h, buf);
+    seedWrite(L, () => L.pixels.putRegion(x0, y0, w, h, buf));   // 令牌外初态种子
   }
 
   it("identity commit（半透明花纹）：逐字节复原（洞上写回，任意 alpha 精确）", () => {
@@ -402,7 +403,7 @@ describe("S6 · commit 整数平移快路（不旋转时 pixel perfect）", () =
     const { doc, ft } = mk();
     const L = doc.activeLayer;
     paintPattern(L, 20, 20, 40, 40, false);
-    L.pixels.putRegion(30, 30, 1, 1, px(1, 2, 3, 255));   // TL 标记像素
+    seedWrite(L, () => L.pixels.putRegion(30, 30, 1, 1, px(1, 2, 3, 255)));   // TL 标记像素（种子）
     doc.selection = rectSel(30, 30, 15, 12);
     ft.lift(L);
     ft.rotate90CCW();
@@ -420,7 +421,7 @@ describe("S6 · commit 整数平移快路（不旋转时 pixel perfect）", () =
     const { doc, ft } = mk();
     const L = doc.activeLayer;
     paintPattern(L, 20, 20, 40, 40, false);
-    L.pixels.putRegion(30, 30, 1, 1, px(1, 2, 3, 255));
+    seedWrite(L, () => L.pixels.putRegion(30, 30, 1, 1, px(1, 2, 3, 255)));
     doc.selection = rectSel(30, 30, 15, 12);
     ft.lift(L);
     ft.flipHorizontal();
@@ -436,7 +437,7 @@ describe("v0.7.37 · resetToCenterOriginal（复位：原始尺寸 + 画布居�
     const { doc, h, ft, float } = mk();
     const L = doc.activeLayer;
     paintRect(L, 20, 20, 40, 40);
-    L.pixels.putRegion(25, 30, 1, 1, px(1, 2, 3, 255));   // 标记像素（相对 float 原点 +5,+10）
+    seedWrite(L, () => L.pixels.putRegion(25, 30, 1, 1, px(1, 2, 3, 255)));   // 标记像素（相对 float 原点 +5,+10；种子）
     doc.selection = rectSel(20, 20, 40, 40);
     eq(ft.lift(L), true);
     ft.rotate90CCW();

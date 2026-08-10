@@ -49,6 +49,9 @@ export declare class LayerTiles implements CollectorComponent {
     private _tilesets;
     private _nextTilesetId;
     private _stampOwner;
+    /** 有主实例离世（refs 归零/换血/record 驱逐）：先摘戳再 dispose——dispose 的逐格 notify
+     *  发生在令牌外（record 驱逐/换文档清栈），摘了戳走「无主放行」路，不触发无令牌写硬化。 */
+    private _disposeOwned;
     /** 新 tileset 入册，refs=1 归调用方（json 收养 +1 后调用方 release——净移交）。 */
     createTileset(lp: LayerPixels): number;
     /** 零拷贝复制（句柄共享快照）：duplicateLayer 用。refs=1 归调用方。 */

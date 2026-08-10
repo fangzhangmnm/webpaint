@@ -22,6 +22,8 @@ const mkDoc = () => {
   const undo = new UndoStack({ maxQuotaBytes: 1 << 30 });
   const wp2 = new PaintingWorkpiece({ undo, tree: { width: 512, height: 512 }, onTokenLeak: () => {} });
   const d = new PaintingView(wp2);
+  // 本文件直驱引擎不开令牌、不测记账——整 rig 声明 scratch 域（C7 无令牌写硬化的显式白名单态）。
+  wp2.layerTiles._suspendCollect(true);
   _ctxs.push({ undo, wp2 });
   return d;
 };

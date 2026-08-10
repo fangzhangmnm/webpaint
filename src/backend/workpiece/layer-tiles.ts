@@ -84,6 +84,12 @@ export class LayerTiles implements CollectorComponent {
   private _stampOwner(lp: LayerPixels): void {
     (lp as LayerPixels & { _collectorOwner?: LayerTiles })._collectorOwner = this;
   }
+  /** 有主实例离世（refs 归零/换血/record 驱逐）：先摘戳再 dispose——dispose 的逐格 notify
+   *  发生在令牌外（record 驱逐/换文档清栈），摘了戳走「无主放行」路，不触发无令牌写硬化。 */
+  private _disposeOwned(lp: LayerPixels): void {
+    (lp as LayerPixels & { _collectorOwner?: LayerTiles })._collectorOwner = undefined;
+    lp.dispose();
+  }
 
   /** 新 tileset 入册，refs=1 归调用方（json 收养 +1 后调用方 release——净移交）。 */
   createTileset(lp: LayerPixels): number {
@@ -117,7 +123,7 @@ export class LayerTiles implements CollectorComponent {
     if (!e) throw new Error(`LayerTiles: release 不存在的 tileset（${id}——双释放?）`);
     if (--e.refs <= 0) {
       this._tilesets.delete(id);
-      e.lp.dispose();
+      this._disposeOwned(e.lp);
     }
   }
   tilesetPixels(id: number): LayerPixels | null { return this._tilesets.get(id)?.lp ?? null; }
@@ -125,7 +131,7 @@ export class LayerTiles implements CollectorComponent {
   swapTilesetPixels(id: number, np: LayerPixels): void {
     const e = this._tilesets.get(id);
     if (!e) throw new Error(`LayerTiles: swap 不存在的 tileset（${id}）`);
-    e.lp.dispose();
+    this._disposeOwned(e.lp);
     e.lp = np;
     this._stampOwner(np);
   }
@@ -350,7 +356,7 @@ export class LayerTiles implements CollectorComponent {
   disposeRecord(data: RecordData): void {
     const r = data as TilesRecord;
     if (r.t === "exchange") {
-      for (const e of r.leaves) e.lp.dispose();
+      for (const e of r.leaves) this._disposeOwned(e.lp);   // record 持有侧可能仍带戳（exchange 交还路）
       r.leaves = [];
       return;
     }
@@ -361,11 +367,18 @@ export class LayerTiles implements CollectorComponent {
   // ── 内部 ──
 
   private _onTileSwap(lp: LayerPixels, key: number, old: TileHandle | null): void {
-    if (this._suspend > 0 || !this._wp.tokenOpen) return;
+    if (this._suspend > 0) return;   // 显式白名单窗：load 灌入 / computed·exchange verb 体 / undo swap / 内部物化
     // C7 所有权过滤（多播观察者）：有主且不是我的实例 → 不收（别的 backend 的换手）。
     // 无主（临时替身）沿旧语义收下，seal 解析不到自动作废。
     const owner = (lp as LayerPixels & { _collectorOwner?: LayerTiles })._collectorOwner;
     if (owner !== undefined && owner !== this) return;
+    if (!this._wp.tokenOpen) {
+      // C7 硬化（census §3.6）：曾是「留给 load 灌入」的静默口，但 load 走 token+suspend，
+      // 真击中这里的 substrate 写只能是坏账——响亮失败（两层防线的 fail-loud 层，ADR-0008）。
+      // 无主临时件（StrokeShadow 替身/scratch/内核直测）在令牌外的换手不归本 collector 管，放行。
+      if (owner === this) throw new Error(`LayerTiles: 无令牌像素写（substrate tile 换手在令牌墙外，key=${key}）——doc mutation 必须持 WriteToken（ADR-0008）`);
+      return;
+    }
     this._wp._componentWrite(this);   // 写即登记 touched（无令牌不可能到这——tokenOpen 已 gate）
     let tiles = this._collected.get(lp);
     if (!tiles) { tiles = new Map(); this._collected.set(lp, tiles); }
