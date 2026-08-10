@@ -119,6 +119,9 @@ initI18n();   // 本地化 boot：设 <html lang> + 填静态 HTML data-i18n（�
 // 换文档仍走 wp2.load（进程内协作面；tab 管理器「弃旧建新」= embedding 纪元的事）。
 const backend = WebPaintBackend.blank({ width: 2048, height: 2048 }, {
   appVersion: WEBPAINT_VERSION,
+  // per-tenant 合成注入（C7）：本 backend 的 merged 合成面走 board GL（thunk——board 在下方 const，
+  // 调用恒在 boot 后）。doc-render 全局接缝仍在（psd/session 等壳模块单租户消费，见下方 setDocCompositor*）。
+  compositorBytes: (nodes, w, h) => board.compositeNodesToBytes(nodes, w, h),
   // T4d：desk persp 配置的读写口（doc 变换 remap 记账用；VP 编辑经 PerspComponent 收口，v0.8.29）
   persp: { snapshot: snapshotShapePersp, restore: restoreShapePersp, remap: remapShapePersp },
   hooks: {

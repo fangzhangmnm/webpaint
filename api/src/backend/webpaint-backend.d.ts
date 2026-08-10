@@ -3,6 +3,7 @@ import { PaintingWorkpiece, type PaintingData, type PaintingDataNode } from "./w
 import { PaintingView } from "./workpiece/painting-view.ts";
 import type { PerspHost } from "./workpiece/persp-component.ts";
 import { LayersFace } from "./layers-face.ts";
+import { type DocCompositorBytesFn } from "./doc-render.ts";
 import { type RgbaPlane } from "./png-codec.ts";
 import type { WebPaintBackendInterface, BackendLayerNode, BackendDocInfo, BackendChangeEvent, BackendOpResult, BackendAddResult, ResolvedBrushSnapshot, StrokeId, FilterSessionId } from "./webpaint-backend-interface.ts";
 /** 壳侧编排钩子（进程内壳专用；headless 缺省 no-op。MCP/embedding 面走 onChange 事件——
@@ -26,6 +27,9 @@ export interface BackendInject {
     imageDecoder?: (bytes: Uint8Array) => Promise<RgbaPlane>;
     /** desk persp 配置读写口（壳接 workbench-state；缺省内存 host——headless/测试）。 */
     persp?: PerspHost;
+    /** per-tenant 合成注入（C7）：本 backend 的 merged 合成面（encodeOra/exportImage/mergeDown）。
+     *  缺省回落 doc-render 全局接缝（壳单租户期语义不变）；多 backend 并存各持己面不串。 */
+    compositorBytes?: DocCompositorBytesFn;
     hooks?: BackendShellHooks;
 }
 export interface BackendOpenResult {
@@ -44,6 +48,7 @@ export declare class WebPaintBackend implements WebPaintBackendInterface {
     private _view;
     private _layers;
     private _inject;
+    private _compositor;
     private _disposed;
     private _listeners;
     /** 进程内协作面（壳迁移期/测试直取引擎；embedding/MCP 只走接口方法——序列化墙那侧不存在这些）。 */

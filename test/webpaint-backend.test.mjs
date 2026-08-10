@@ -164,6 +164,27 @@ describe("webpaint-backend · 多 backend 并发（观察者多播 + 所有权�
     eq(B.canUndo(), true);
     A.dispose(); B.dispose();
   });
+
+  it("per-tenant 合成注入：双 backend 各持己面不串（C7）", async () => {
+    const mkComp = (tag) => {
+      const calls = [];
+      const fn = (nodes, w, h) => {
+        calls.push(tag);
+        const data = new Uint8ClampedArray(w * h * 4).fill(tag);
+        return { data, w, h };
+      };
+      return { fn, calls };
+    };
+    const ca = mkComp(11), cb = mkComp(22);
+    const A = WebPaintBackend.blank({ width: 8, height: 8 }, { compositorBytes: ca.fn });
+    const B = WebPaintBackend.blank({ width: 8, height: 8 }, { compositorBytes: cb.fn });
+    const pa = await A.exportImage("png");
+    const pb = await B.exportImage("png");
+    assert(pa.length > 0 && pb.length > 0, "两家都出字节");
+    assert(ca.calls.length > 0 && ca.calls.every((t) => t === 11), "A 只走 A 的合成面");
+    assert(cb.calls.length > 0 && cb.calls.every((t) => t === 22), "B 只走 B 的合成面");
+    A.dispose(); B.dispose();
+  });
 });
 
 describe("webpaint-backend · dispose / onChange", () => {

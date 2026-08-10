@@ -18,7 +18,7 @@ import { PaintingWorkpiece, type PaintingData, type PaintingDataNode } from "./w
 import { PaintingView } from "./workpiece/painting-view.ts";
 import type { PerspHost } from "./workpiece/persp-component.ts";
 import { LayersFace } from "./layers-face.ts";
-import { renderNodesToBytes } from "./doc-render.ts";
+import { renderNodesToBytes, type DocCompositorBytesFn } from "./doc-render.ts";
 import { encodeDocToOra, decodeOraToPainting, paintingDataToEncodeDoc, type DecodedPainting } from "./ora.ts";
 import { encodePngFromBytes, decodePngToBytes, type RgbaPlane } from "./png-codec.ts";
 import { isGroupNode, type TreeNode } from "./workpiece/layer-tree.ts";
@@ -48,6 +48,9 @@ export interface BackendInject {
   imageDecoder?: (bytes: Uint8Array) => Promise<RgbaPlane>;
   /** desk persp 配置读写口（壳接 workbench-state；缺省内存 host——headless/测试）。 */
   persp?: PerspHost;
+  /** per-tenant 合成注入（C7）：本 backend 的 merged 合成面（encodeOra/exportImage/mergeDown）。
+   *  缺省回落 doc-render 全局接缝（壳单租户期语义不变）；多 backend 并存各持己面不串。 */
+  compositorBytes?: DocCompositorBytesFn;
   hooks?: BackendShellHooks;
 }
 
@@ -91,6 +94,7 @@ export class WebPaintBackend implements WebPaintBackendInterface {
   private _view: PaintingView;
   private _layers: LayersFace;
   private _inject: BackendInject;
+  private _compositor: DocCompositorBytesFn;
   private _disposed = false;
   private _listeners = new Set<(ev: BackendChangeEvent) => void>();
 
@@ -102,6 +106,7 @@ export class WebPaintBackend implements WebPaintBackendInterface {
 
   private constructor(data: PaintingData, inject: BackendInject) {
     this._inject = inject;
+    this._compositor = inject.compositorBytes ?? renderNodesToBytes;
     const hooks = inject.hooks;
     this._history = new History({
       maxQuotaBytes: UNDO_QUOTA_BYTES,
@@ -118,7 +123,7 @@ export class WebPaintBackend implements WebPaintBackendInterface {
     });
     this._view = new PaintingView(this._wp2);
     this._history.attach(this._wp2);
-    this._layers = new LayersFace({ history: this._history, tree: this._wp2.layerTree!, tiles: this._wp2.layerTiles, port: this._view, status: hooks?.status });
+    this._layers = new LayersFace({ history: this._history, tree: this._wp2.layerTree!, tiles: this._wp2.layerTiles, port: this._view, status: hooks?.status, compositorBytes: inject.compositorBytes });
     this._wp2.load(data);   // 令牌灌入 + 清栈 + markSaved（born-loaded 达成）
     this._wp2.onChange(() => this._emit());
   }
@@ -179,9 +184,9 @@ export class WebPaintBackend implements WebPaintBackendInterface {
 
   async encodeOra(opts: { editorSidecar?: object; referencePng?: Uint8Array } = {}): Promise<Uint8Array> {
     this._guard();
-    // merged 合成（mergedimage/缩略图）：合成接缝可用则渲，GL 缺席 → null → 透明占位（层数据完整，
-    // mergedimage 只是预览件——与 autosave GL-lost 兜底同语义）。
-    const merged = renderNodesToBytes(this._view.layers, this._view.width, this._view.height);
+    // merged 合成（mergedimage/缩略图）：合成面可用则渲（per-tenant 注入，缺省全局接缝），GL 缺席 →
+    // null → 透明占位（层数据完整，mergedimage 只是预览件——与 autosave GL-lost 兜底同语义）。
+    const merged = this._compositor(this._view.layers, this._view.width, this._view.height);
     const frozen = paintingDataToEncodeDoc(this._wp2.exportData());
     const blob = await encodeDocToOra(frozen, {
       wroteWith: this._inject.appVersion ?? "",
@@ -194,7 +199,7 @@ export class WebPaintBackend implements WebPaintBackendInterface {
 
   async exportImage(fmt: "png" | "jpg"): Promise<Uint8Array> {
     this._guard();
-    const merged = renderNodesToBytes(this._view.layers, this._view.width, this._view.height);
+    const merged = this._compositor(this._view.layers, this._view.width, this._view.height);
     if (!merged) throw new Error("exportImage: 合成不可用（无 GL/软合成注入）——响亮失败，不出占位图");
     if (fmt === "png") return encodePngFromBytes(merged.data, merged.w, merged.h);
     const enc = this._inject.jpgEncoder;

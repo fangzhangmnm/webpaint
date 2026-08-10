@@ -13,7 +13,7 @@ import type { History } from "./workpiece/history.ts";
 import type { LayerTree, LayerPropKey } from "./workpiece/layer-tree.ts";
 import type { LayerTiles, Rect } from "./workpiece/layer-tiles.ts";
 import { type PaintingView, type ViewLeaf, type ViewGroup, type ViewNode } from "./workpiece/painting-view.ts";
-import { renderNodesToBytes } from "./doc-render.ts";
+import { renderNodesToBytes, type DocCompositorBytesFn } from "./doc-render.ts";
 
 export type OpStatus = { ok: true } | { ok: false; msg?: string };
 export interface TreeStatuses { undoStatus?: string; redoStatus?: string }
@@ -26,13 +26,19 @@ export class LayersFace {
   private _tiles: LayerTiles;
   private _port: PaintingView;
   private _status: (msg: string) => void;
+  private _compositor: DocCompositorBytesFn;
 
-  constructor(deps: { history: History; tree: LayerTree; tiles: LayerTiles; port: PaintingView; status?: (msg: string) => void }) {
+  constructor(deps: {
+    history: History; tree: LayerTree; tiles: LayerTiles; port: PaintingView; status?: (msg: string) => void;
+    /** per-tenant 合成注入（C7）：多 backend 并存时各持己面；缺省回落 doc-render 全局接缝（壳单租户）。 */
+    compositorBytes?: DocCompositorBytesFn;
+  }) {
     this._history = deps.history;
     this._tree = deps.tree;
     this._tiles = deps.tiles;
     this._port = deps.port;
     this._status = deps.status ?? (() => {});
+    this._compositor = deps.compositorBytes ?? renderNodesToBytes;
   }
 
   /** o.statuses → step.hint（undo/redo 时报状态栏；非权威附注）。 */
@@ -115,7 +121,7 @@ export class LayersFace {
     const x1 = uHasPx ? Math.max(under.bboxX + under.bboxW, L.bboxX + L.bboxW) : L.bboxX + L.bboxW;
     const y1 = uHasPx ? Math.max(under.bboxY + under.bboxH, L.bboxY + L.bboxH) : L.bboxY + L.bboxH;
     const newW = x1 - x0, newH = y1 - y0;
-    const comp = renderNodesToBytes([
+    const comp = this._compositor([
       { isGroup: false, id: under.id, opacity: under.opacity, mode: "source-over", clippingMask: false, visible: true, pixels: under.pixels },
       { isGroup: false, id: L.id, opacity: L.opacity, mode: L.mode || "source-over", clippingMask: clipActiveToUnder, visible: true, pixels: L.pixels },
     ], port.width, port.height) as { data: Uint8ClampedArray } | null;

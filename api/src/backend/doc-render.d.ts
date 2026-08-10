@@ -7,7 +7,7 @@ export type DocCompositorBytesFn = (nodes: readonly unknown[], docW: number, doc
 } | null;
 export declare function setDocCompositor(fn: DocCompositorFn): void;
 export declare function setDocCompositorBytes(fn: DocCompositorBytesFn | null): void;
-/** 现值读口（C7：测试 save/restore 全局接缝用；per-tenant 合成注入排 C7 后棒）。 */
+/** 现值读口（测试 save/restore 全局接缝用）。 */
 export declare function getDocCompositorBytes(): DocCompositorBytesFn | null;
 /** nodes → 合成 canvas（**透明底**；doc 背景由调用方按需自铺）。null = GL 不可用。 */
 export declare function renderNodesToCanvas(nodes: readonly unknown[], docW: number, docH: number): Bitmap | null;

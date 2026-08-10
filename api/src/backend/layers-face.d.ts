@@ -2,6 +2,7 @@ import type { History } from "./workpiece/history.ts";
 import type { LayerTree } from "./workpiece/layer-tree.ts";
 import type { LayerTiles, Rect } from "./workpiece/layer-tiles.ts";
 import { type PaintingView, type ViewLeaf } from "./workpiece/painting-view.ts";
+import { type DocCompositorBytesFn } from "./doc-render.ts";
 export type OpStatus = {
     ok: true;
 } | {
@@ -30,12 +31,15 @@ export declare class LayersFace {
     private _tiles;
     private _port;
     private _status;
+    private _compositor;
     constructor(deps: {
         history: History;
         tree: LayerTree;
         tiles: LayerTiles;
         port: PaintingView;
         status?: (msg: string) => void;
+        /** per-tenant 合成注入（C7）：多 backend 并存时各持己面；缺省回落 doc-render 全局接缝（壳单租户）。 */
+        compositorBytes?: DocCompositorBytesFn;
     });
     /** o.statuses → step.hint（undo/redo 时报状态栏；非权威附注）。 */
     private _hint;
