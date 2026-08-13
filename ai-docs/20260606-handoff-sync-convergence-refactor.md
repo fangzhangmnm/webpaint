@@ -8,7 +8,7 @@
 
 ## 权威文档（别重复，照着读）
 
-- **决策 + 实现 gap 清单**：`MyPWAPatterns/docs/adr/0016-clean-silent-fast-forward-conflict-on-dirty.md`（status: accepted / **NEEDS REFACTOR**）。它的 "NEEDS REFACTOR" 段就是 touch-point 清单。**先读它。**
+- **决策 + 实现 gap 清单**：`20260813 internal-store/docs/adr/0016-clean-silent-fast-forward-conflict-on-dirty.md`（status: accepted / **NEEDS REFACTOR**）。它的 "NEEDS REFACTOR" 段就是 touch-point 清单。**先读它。**
   - 同目录 ADR-0009（冲突模型，已说"clean→take-cloud / dirty→options"）、0014（stateful authority）、0015（`.trash`/`.backup` same-tier）是它的上游。
 - **落地待办 + 根因推导**：`WebPaint/docs/20260528-backlog.md` → P1「云同步收敛：干净态快进，别在冲突点修」。
 - **同期 sync 体检（0 字节上传 postmortem，已修）**：`WebPaint/docs/reports/20260605-postmortem-zero-byte-upload.html`（`ai-docs/reports/` 是 gitignored，本地看）。

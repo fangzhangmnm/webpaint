@@ -9,7 +9,7 @@
 用户在权衡两个重构方向：**A. 拆 app.js god file** vs **B. 迁 Vue+TS（esbuild，不用 vite）**。
 首轮 fresh 勘探报告结论：**A/B 是假二选一**，真轴=把被困的深域逻辑抽成深模块（A、B 共同前置）。
 - 报告全文（**起点，先读**）：`ai-docs/reports/20260606-fresh-geological-survey.html`（gitignored，在磁盘上）。
-- 领域词表：`CONTEXT.md`。同步/存储模型的账本：`../20260601 MyPWAPatterns/docs/MASTER.md` + `ai-docs/adr/0001-0017`（**只是 ADR=决策账本；WebPaint 的 `src/store` 才是 SSoT 实现**）。
+- 领域词表：`CONTEXT.md`。同步/存储模型的账本：`../20260601 MyPWAPatterns/docs/MASTER.md` + 家族 ADR 集 0001-0017（家族级在 MyPWAPatterns/docs/adr/，store 系已迁 20260813 internal-store/docs/adr/，2026-08-13 分家）（**只是 ADR=决策账本；WebPaint 的 `src/store` 才是 SSoT 实现**）。
 
 ## 1. 已落地（全在 dev/main，v179→v183，行为保持，全套 138 tests passed）
 报告里的候选编号 K* / A*。详情看 commit message，别在这复述：

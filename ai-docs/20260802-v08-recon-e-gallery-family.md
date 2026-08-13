@@ -64,7 +64,7 @@
 
 **关键分叉：JRP 与 WebPaint 的 store 列举面已不同**：JRP store.listAllItems(ctx) 一次性全树、app 每次传 {signedIn, online}（persistence/index.ts:135-142）；WebPaint（更新，网盘模型）唯一列举面 = files.watchFolder(folder, cb)（订阅单夹、本地帧+云端帧同一 cb，create-store.ts:311-320,724），连接态 store 自持；listGallery 全树 2026-07-12 已删（app-store.ts:111）。**共享库开工前必先拍板此分歧**。
 
-**BgRadio「不用 store paradigm 的 ADR」——不存在（考古更正）**：两 repo 均无 adr/ 目录；家族 ADR 集（MyPWAPatterns/docs/adr/0001-0021）grep radio 三处无一豁免。被记混的真实出处是三条约束：① dev/prod split 豁免（非 store）：WebPaint ai-docs/20260529-dev-prod-split.md:9「Background Radio 之类纯读项目可能根本不需要，单分支保持简单」；② user 原话说的是 cache 策略：BgRadio docs/20260524-offline-and-cache-tiers.md:206「音乐跟论文/写作 app 不一样——cache 不是备份，是选择性下载」；③ 家族分类：MyPWAPatterns docs/20260602-share-file-model.md:214「lone no-Workbench case，resolved as read-only streaming」。反向证据：store **已专门为它实现** autoCacheOpenedFile:false（流式消费 app：RealHome glb / BgRadio，WebPaint src/store/README.md:101，⚠ range/streaming 优化仍 TODO）；gallery 共享库原始设想也点了它的名（WebPaint ai-docs/20260530-gallery-cloud-trash-design.md:4-7）。**净结论：文档从未豁免它用 store；给它的三条约束（无 dev/prod、无 Workbench、禁 listing 缓存）是共享库要满足的输入。**
+**BgRadio「不用 store paradigm 的 ADR」——不存在（考古更正）**：两 repo 均无 adr/ 目录；家族 ADR 集（0001-0021；家族级在 MyPWAPatterns/docs/adr/，store 系 16 篇 2026-08-13 起在 20260813 internal-store/docs/adr/）grep radio 三处无一豁免。被记混的真实出处是三条约束：① dev/prod split 豁免（非 store）：WebPaint ai-docs/20260529-dev-prod-split.md:9「Background Radio 之类纯读项目可能根本不需要，单分支保持简单」；② user 原话说的是 cache 策略：BgRadio docs/20260524-offline-and-cache-tiers.md:206「音乐跟论文/写作 app 不一样——cache 不是备份，是选择性下载」；③ 家族分类：MyPWAPatterns docs/20260602-share-file-model.md:214「lone no-Workbench case，resolved as read-only streaming」。反向证据：store **已专门为它实现** autoCacheOpenedFile:false（流式消费 app：RealHome glb / BgRadio，WebPaint src/store/README.md:101，⚠ range/streaming 优化仍 TODO）；gallery 共享库原始设想也点了它的名（WebPaint ai-docs/20260530-gallery-cloud-trash-design.md:4-7）。**净结论：文档从未豁免它用 store；给它的三条约束（无 dev/prod、无 Workbench、禁 listing 缓存）是共享库要满足的输入。**
 
 ### 3. 共性/分叉功能矩阵
 
@@ -93,7 +93,7 @@
 - **canonical 抽取从未发生**：MyPWAPatterns/sync-store/ 只有 90 行 README；docs/20260619-backlog.md item 3 自认 vaporware（SYNC_STORE_VERSION 常量 + sync-store/src/ 从未实现，live 引擎 baked 在 WebPaint/src/store/）。
 - **目标工作流写好了没执行**（docs/20260610-shared-lib-workflow.md，⚠ PLAN banner）：baked copy 头部戳 fork 版本号=merge-base 指针；三流（在地 dev → upstream release+bump → 按需 reconcile）；两条纪律（app 差异只进两个接缝、漏进引擎标 // APP-DIVERGENCE）。
 - **现状**：唯一锚 = FORK-BASE.md（WebPaint 与 JRP 两份 byte-identical，fork_base_commit: 2e9a809，2026-06-19 拷贝）。此后各自演化：**32 个共有文件全部 differ，仅 substrate.ts 还 byte-identical**；WebPaint 多 8 文件（blob-partition/error-handling/folder-delete/is-hidden/kv-namespace/migration/pending-gone/trash-merge），JRP 多 settings.ts；行数 5799 vs 4177。无版本常量、无校验脚本、无 diff 工具。
-- **收敛已拍板未落地**（memory：锚 JRP + ADR-0019 显式版本迁移 / 0020 dirty 双轨 / 0021 app 四面不碰 kv，MyPWAPatterns/docs/adr/）。
+- **收敛已拍板未落地**（memory：锚 JRP + ADR-0019 显式版本迁移 / 0020 dirty 双轨 / 0021 app 四面不碰 kv，store 系 ADR 2026-08-13 起在 20260813 internal-store/docs/adr/，家族级仍在 MyPWAPatterns/docs/adr/）。
 - **对 gallery 库的启示**：「byte-identical」实际是「fork 戳+手动三方 merge 的承诺」，6 周就漂成 32 文件全 differ——gallery 库照抄这套同样命运；至少补：版本常量 + diff -rq 级对账脚本。
 
 ### 5. esbuild bundle + dev/prod split 采纳表
