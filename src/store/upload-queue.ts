@@ -1,4 +1,4 @@
-// ⚠ 使用前必读 README.md + CONTEXT.md + internal-store docs/adr/0018。app 不直接 import——经 createStore。
+// ⚠ 使用前必读 README.md + CONTEXT.md + internal-store ai-docs/adr/0018。app 不直接 import——经 createStore。
 //
 // upload-queue（深模块，ADR-0018）—— 离线「新上传」回线补推。对称 delete.ts 的 drainDeleteQueue，
 //   补上 state-machine §4 一直只在 spec 的「consented pushes」那半边（从没实现）。
