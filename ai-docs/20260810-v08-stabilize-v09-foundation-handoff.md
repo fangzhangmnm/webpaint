@@ -206,7 +206,8 @@ password 契约、单 .html 发行、pwa wizard、三兄弟对齐。
 3. AI/genAI、shapes 的包形态——AI 建议 exports 子门牌 + 构建期选择性 import（§3.6），
   user 问过（「然后AI，shapes做成什么呢」）未拍。
 4. UI 状态机设计（等户籍档案证据，§3.3）。
-5. 0.9 具体版本号 + 0.8 终点要不要推 prod（维稳批第 6 步现场问）。
+5. ~~0.9 具体版本号 + 0.8 终点要不要推 prod（维稳批第 6 步现场问）~~
+   → **已拍（2026-08-12）**：v0.9.0；v0.8.48 已推 prod。详见 `20260812-v090-epoch-open.md`。
 6. unity inspector UI（user 提过一嘴:「之后再做unity inspector UI?」——归 UI 骑士语境，未展开）。
 
 ## 7. user 原始 competing tasks 13 条 → 归置索引
