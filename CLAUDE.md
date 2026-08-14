@@ -1,14 +1,14 @@
 # WebPaint（家族总规则见上级 CLAUDE.md）
 
-Procreate 级绘画 PWA + **家族 sync-store 引擎的开发面**（shared-lib-workflow 流 1：引擎在 `src/store/` 在地改、真机测，稳了才 merge 回 canonical）。UI 中文。iPad 是手感的最终裁判。
+Procreate 级绘画 PWA。UI 中文。iPad 是手感的最终裁判。
 
-- **红线区**：`src/store/**`（深模块，全 TS，改前 escalate human + 读 MASTER §A）。接缝 = `src/app-store.js` + `src/store/local-adapter.ts`，app 专属只进接缝。
+- **store 引擎已分仓（cutover v0.9.1，2026-08-14）**：`src/store/` 已删，引擎 = `@internal/store` 包（`../20260813 internal-store/` 仓，tgz 走 `vendor-pkgs/` file: 依赖）。改引擎去库仓（红线区，改前 escalate + 读 MASTER §A + pwa-cloud-store skill）；升级 = 换 tgz + `npm install`。接缝 = `src/app-store.ts`（唯一值级 import 点，build.sh lint 守着；`wp:auth-changed` window 广播也由它派发）。缺接口 escalate 改库 API，绝不在 app 端绕（家规）。
 - **【硬规则】文档 mutation 必须持令牌记账（workpiece v2，ADR-0008）**：写前 `wp2.begin()` 拿令牌（共享令牌编排走 `ctx.history.withPoint`），组件 verb 直写 substrate、collector 写时扣押自动记账——结构 = `ctx.layers` 门面（LayersFace）/ `wp2.layerTree` verbs、像素 = `wp2.layerTiles`（engine 直写也被观察者逮到）、选区 = `wp2.selection`、浮层 = `wp2.floatLayer`、fill 预览色 = `wp2.pendingFill`、整 doc 几何 = `doc-ops.runDocTransform`。无令牌写 = `_componentWrite` throw（结构上不存在裸写路径）。「不记账」必须是显式声明态（`_rawWrite` 预览直写 / `setActive` 焦点 / load 灌入）；`ctx.doc` 是 PaintingView 端口（读面 + 选区过渡宿），不是逃生门。
 - **错误上报（统一）**：全 app + store 的错误唯一汇拢点 = `src/error-badge.ts` 的 `reportError(err, level?)`——
   它是**最终消费者**（唯一 console.log 的地方）。分级：`error`/`warning`→顶层 banner（`#__errBar`，z-9999，盖过
   gallery overlay/busy/gate/modal）、`info`→状态栏、`log`→仅 console（良性 offline/fallback）。
-  **别再散落 `console.error/warn` 做错误处理**——funnel 到这里。store 侧走库内 `src/store/error-handling.ts`
-  的 `reportStoreError`（store 不 log），createStore 把它接到 app 传进去的 `ui.reportError`（= error-badge）。
+  **别再散落 `console.error/warn` 做错误处理**——funnel 到这里。store 侧走库内 error-handling 的
+  `reportStoreError`（store 不 log），createStore 把它接到 app 传进去的 `ui.reportError`（= error-badge）。
 - `journal/cached feedback.md` = 人类专属反馈日志，AI 只读，永不写。
 - 人类钉死的区域：手感（streamline/taper/压感 gamma）、UI/UX 决策、store model。其余按 greenfield 标准大胆重构。
 - 测试纪律：mock + node test 先行（store 200+ 测试）；需要真机的积批，"我只测一次。就是交付"；每 commit bump vN + 版本水印（反煤气灯——不确定部署版本时先对水印）。
