@@ -2,7 +2,7 @@
 
 Procreate 级绘画 PWA。UI 中文。iPad 是手感的最终裁判。
 
-- **store 引擎已分仓（cutover v0.9.1，2026-08-14）**：`src/store/` 已删，引擎 = `@internal/store` 包（`../20260813 internal-store/` 仓，tgz 走 `vendor-pkgs/` file: 依赖）。改引擎去库仓（红线区，改前 escalate + 读 MASTER §A + pwa-cloud-store skill）；升级 = 换 tgz + `npm install`。接缝 = `src/app-store.ts`（唯一值级 import 点，build.sh lint 守着；`wp:auth-changed` window 广播也由它派发）。缺接口 escalate 改库 API，绝不在 app 端绕（家规）。
+- **store 引擎已分仓（cutover v0.9.1，2026-08-14）**：`src/store/` 已删，引擎 = `@internal/store` 包（`../20260813 internal-store/` 仓，tgz 走 `vendor-pkgs/` file: 依赖）。改引擎去库仓（红线区，改前 escalate + 读 MASTER §A + pwa-cloud-store skill）；升级 = 本仓根跑 `bash "../20260813 internal-store/scripts/pull-package.sh" [版本]`（只认已发版；测试+commit 归本仓 session）。接缝 = `src/app-store.ts`（唯一值级 import 点，build.sh lint 守着；`wp:auth-changed` window 广播也由它派发）。缺接口 escalate 改库 API，绝不在 app 端绕（家规）。
 - **【硬规则】文档 mutation 必须持令牌记账（workpiece v2，ADR-0008）**：写前 `wp2.begin()` 拿令牌（共享令牌编排走 `ctx.history.withPoint`），组件 verb 直写 substrate、collector 写时扣押自动记账——结构 = `ctx.layers` 门面（LayersFace）/ `wp2.layerTree` verbs、像素 = `wp2.layerTiles`（engine 直写也被观察者逮到）、选区 = `wp2.selection`、浮层 = `wp2.floatLayer`、fill 预览色 = `wp2.pendingFill`、整 doc 几何 = `doc-ops.runDocTransform`。无令牌写 = `_componentWrite` throw（结构上不存在裸写路径）。「不记账」必须是显式声明态（`_rawWrite` 预览直写 / `setActive` 焦点 / load 灌入）；`ctx.doc` 是 PaintingView 端口（读面 + 选区过渡宿），不是逃生门。
 - **错误上报（统一）**：全 app + store 的错误唯一汇拢点 = `src/error-badge.ts` 的 `reportError(err, level?)`——
   它是**最终消费者**（唯一 console.log 的地方）。分级：`error`/`warning`→顶层 banner（`#__errBar`，z-9999，盖过
