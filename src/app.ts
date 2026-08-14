@@ -474,7 +474,7 @@ if (isAuthConfigured()) {
     reportError(new Error("[auth] init failed: " + String(e)), "log");
   });
 }
-// auth 可观察 seam（候选1）：lib 在**每个** auth 转变（登录回来/后台silent/登出/过期F2）fire wp:auth-changed。
+// auth 可观察 seam（候选1）：接缝 app-store 在**每个** auth 转变（登录回来/后台silent/登出/过期F2）fire wp:auth-changed（库 0.1.0 起不碰 window 事件，接缝订阅 onAuthChanged 转发）。
 // UI 订阅一次 → 按钮蓝/灰、save 图标、云列表 全自动同步，永不漂移、不再靠散落手 poke。
 window.addEventListener("wp:auth-changed", () => {
   updateCloudAuthUI();

@@ -2,9 +2,9 @@
 //   只做 config 注入（provider / ui bundle / crypto codec / crypt / validateAdopt）+ auth 转发 + gallery 列举适配。
 //   app 只碰 store 两面（**file / collection**）+ editor-session。绝不裸碰 kv/IDB/graph/vendor。
 //   （localSettings/syncedSettings 那两面已于 2026-07-13 删除 —— 全部 KV 化进 collection。别照旧注释找。）
-import { createStore, createOneDriveProvider, isCached, isDirty } from "./store/index.ts";
+import { createStore, createOneDriveProvider, isCached, isDirty } from "@internal/store";
 import { detectStoreAbsent, createNullStore, createDormantAuth } from "./store-absent.ts";
-import type { Store } from "./store/index.ts";
+import type { Store } from "@internal/store";
 import { stripSessionExt, sessionFileName } from "./config.ts";
 import { storeUI } from "./store-ui.ts";
 import { CLIENT_ID, SCOPES } from "./config.ts";
@@ -79,7 +79,7 @@ const _auth = _asm.auth;
 // 面收窄在此单点声明；app 若碰四面之外的成员 = 编译错。类型 import 也收拢本接缝（下方 re-export）。
 export type AppStorePort = Pick<Store, "file" | "files" | "collection" | "encryption">;
 export const store: AppStorePort = _asm.store;
-export type { Collection, EncryptedBlob } from "./store/index.ts";   // app 侧仅剩的两个库类型，经接缝转口
+export type { Collection, EncryptedBlob } from "@internal/store";   // app 侧仅剩的两个库类型，经接缝转口
 
 // ============ 设置/状态 collection（4 个）注入 ============
 // app-prefs/app-state **不 import 本文件**（防 i18n→app-store→store-ui→i18n 成环）；由此处建好 store 后惰性注入。
@@ -98,6 +98,10 @@ export const retrySilentSignIn = (...a: Parameters<typeof _auth.retrySilentSignI
 export const getToken = (...a: Parameters<typeof _auth.getToken>) => _auth.getToken(...a);
 export const onAuthChanged = (cb: Parameters<typeof _auth.onAuthChanged>[0]) => _auth.onAuthChanged(cb);
 export const getAuthState = () => _auth.getAuthState();
+// wp:auth-changed window 广播由**接缝**派发（@internal/store 0.1.0 起库不再碰 browser 事件——
+//   订阅走 auth.onAuthChanged 回调，window 事件是 WebPaint 自己的 UI 约定）。缺席模式 dormant auth 的
+//   onAuthChanged 是 noop，天然不发。
+_auth.onAuthChanged(() => { try { window.dispatchEvent(new Event("wp:auth-changed")); } catch { /* node 测试环境无 window */ } });
 
 // 上次登录 flag（设备级 auth flag → local-app-state collection，经 appState struct）。boot 门 init 后才读写。
 

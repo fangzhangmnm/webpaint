@@ -2,7 +2,7 @@
 //   cutover：freshness 逻辑进引擎（freshness.ts）后，旧 cloud-freshness.ts 幸存的那点 UI——
 //   ① 冲突二选一 sheet（ADR-0009 冲突必 surface）② 「跳过到离线」逃生闸（iOS 老 token fetchMeta 挂死的唯一逃生）
 //   ③ 错误 surface——塌进这一个模块。app 只在 app-store 装配时把它传进 createStore。
-import type { StoreUI } from "./store/index.ts";
+import type { StoreUI } from "@internal/store";
 import { withBusy } from "./fullscreen-busy.ts";
 import { lockSyncGate, settleSyncGate } from "./sheets.ts";
 import { t } from "./i18n/index.ts";

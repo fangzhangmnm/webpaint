@@ -7,22 +7,21 @@
 //   结果：编辑保存一支笔 / 新建 / 删除 / 导入 / 云端拉取，笔架和引擎全都不刷新。
 // 这个文件走**真 collection + 真 controller**，把那条绑定钉死。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { createCollection } from "../src/store/collection.ts";
+import { createStore } from "@internal/store";
+import { createMockProvider, createMockLocal } from "@internal/store/testing";
 import { BrushRackController } from "../src/brush-rack-controller.ts";
 import { RACK_META_ID } from "../src/brushes.ts";
 
-const blobOf = (s) => ({ text: async () => s });
-function mockCloud() {
-  let stored = null, n = 0;
-  const dirty = new Map(), etags = new Map();
-  return {
-    pull: async () => (stored == null ? null : { blob: blobOf(stored), item: { eTag: "e" } }),
-    push: async (_n, blob) => { stored = await blob.text(); return { item: { eTag: "e" + ++n } }; },
-    fetchMeta: async () => null,
-    setDirty: (k, v) => dirty.set(k, v), isDirty: (k) => !!dirty.get(k),
-    setETag: (k, v) => etags.set(k, v), getETag: (k) => etags.get(k) ?? null,
-  };
-}
+// cutover 2026-08-14：原先 deep import createCollection + 手搓 mockCloud；@internal/store 门牌不放
+//   createCollection（深模块内脏）——改走公开面 createStore(mock provider/local) 拿真 collection，
+//   离线态（isOnline/signedIn=false）→ 纯本地，绑定语义与原测试等价。
+const dumpKv = () => { const m = new Map(); return { get: (k) => (m.has(k) ? m.get(k) : null), set: (k, v) => m.set(k, String(v)), remove: (k) => m.delete(k), keys: () => [...m.keys()] }; };
+const STUB_UI = { busy: (_l, fn) => fn(), resolveConflict: async () => ({ choice: "cancel" }), reportError: () => {} };
+const mkCollection = () => createStore({
+  appId: "wp", provider: createMockProvider(), ui: STUB_UI, validateAdopt: () => true,
+  kv: dumpKv(), local: createMockLocal(), fileName: (n) => n,
+  isOnline: () => false, signedIn: () => false, skipMigration: true,
+}).collection("brush-rack");
 
 const brush = (id, name, extra = {}) => ({
   id, name, tool: "brush", folder: "我的常用",
@@ -31,7 +30,7 @@ const brush = (id, name, extra = {}) => ({
 
 // 最小 controller：只喂数据层依赖（不碰 DOM——订阅在 load()，正是为此挪的）。
 async function mkRack(initial = []) {
-  const collection = createCollection({ cloud: mockCloud(), name: "rack.json", cloudless: true, now: () => 1 });
+  const collection = mkCollection();
   const toolStates = { brush: { size: 12, opacity: 1, activeBrushId: null, activeBrushName: null } };
   const rack = new BrushRackController({
     collection,

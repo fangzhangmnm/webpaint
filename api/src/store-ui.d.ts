@@ -1,2 +1,2 @@
-import type { StoreUI } from "./store/index.ts";
+import type { StoreUI } from "@internal/store";
 export declare const storeUI: StoreUI;

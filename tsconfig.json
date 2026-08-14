@@ -1,6 +1,6 @@
 {
   // 类型检查专用（tsc --noEmit）——不产出任何文件；运行时仍由 node 直接 strip-types + esbuild bundle。
-  // 本轮只把 store 深模块（src/store/**）纳入 strict 检查（被 Uint8Array/Blob 类型 bug 雷击两次）；
+  // store 深模块已分包 @internal/store（cutover 2026-08-14，类型检查在库仓）；本仓 include = app 层逐批迁入名单；
   // 其余 src/ 暂不检（增量推进，别一次铺满全仓引爆历史错误）。
   "compilerOptions": {
     "resolveJsonModule": true,
@@ -92,8 +92,6 @@
     "src/pwa-shell.ts",
     "src/dev-console.ts",
     "src/save-status.ts",
-    "src/store/**/*.ts",
-    "src/store/**/*.js",
     "src/app-context.ts",
     "src/session-state.ts",
     "src/layers-panel.ts",

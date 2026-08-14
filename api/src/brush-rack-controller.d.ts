@@ -76,7 +76,7 @@ export declare class BrushRackController {
     /** collection → 笔架的**唯一**绑定。本地写和云端写在 store 层已一视同仁，这里也不分。
      *  放在 load()（数据层）而非 init()（要 DOM）：绑定与 UI 无关，且这样才能 node 测。 */
     subscribeToCollection(): void;
-    reconcileWithRemote(): Promise<import("./store/collection.ts").ReconcileResult>;
+    reconcileWithRemote(): Promise<import("@internal/store").ReconcileResult>;
     getRackToolKey(tool: string): string;
     defaultToolStateFor(tool: string): {
         size: number;

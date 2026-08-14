@@ -2,7 +2,7 @@
   "name": "webpaint",
   "private": true,
   "type": "module",
-  "comment": "运行时无依赖、全 vendor（src/ ESM，node 直跑 test/ 与 bench/，构建走 scripts/build.sh + tools/esbuild）。devDependencies 仅供开发期（tsc --noEmit 类型检查 + playwright GL smoke `npm run smoke`），不进运行时 bundle、不影响部署。",
+  "comment": "依赖全 vendor：@internal/store 走 file:vendor-pkgs/*.tgz（tgz 物理在仓，断网可装；升级=换 tgz + npm install）；esbuild 把它打进 dist bundle，部署零 node_modules。devDependencies 仅供开发期（tsc --noEmit 类型检查 + playwright GL smoke `npm run smoke`），不进运行时 bundle、不影响部署。",
   "scripts": {
     "test": "node test/run.mjs",
     "test:full": "node test/run.mjs && node test/run-full.mjs && npm run smoke",
@@ -11,6 +11,9 @@
     "preview:build": "tools/esbuild/esbuild test/gl-smoke/preview.ts --bundle --format=iife --outfile=test/gl-smoke/preview.js",
     "build": "bash scripts/build.sh",
     "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@internal/store": "file:./vendor-pkgs/internal-store-0.1.0.tgz"
   },
   "devDependencies": {
     "playwright": "^1.61.1",

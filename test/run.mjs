@@ -1,13 +1,7 @@
 // WebPaint 专属测试入口（store/cloud-sync/provider 契约在 lib 的 test/，这里只留 WebPaint vendored adapter）。
 import "./dom-shim-first.mjs";   // **必须第一**：在任何 import-Vue 之前装 DOM shim（见该文件头注释）。
 import { run } from "./runner.mjs";
-import "./onedrive-provider.contract.test.mjs";
-import "./crypto-container.test.mjs";
-import "./substrate.test.mjs";
 import "./editor-session.test.mjs";   // 家族共享模块 editor-session 生命周期编排（mock store+editor）
-import "./folder-merge.test.mjs";
-import "./folder-flow.test.mjs";
-import "./collection.test.mjs";
 import "./checkpoint-policy.test.mjs";
 import "./brush-rack-migrate.test.mjs";
 import "./engine-registry.test.mjs";
@@ -50,32 +44,10 @@ import "./password-verifier.test.mjs";
 import "./liquify-bilinear.test.mjs";
 import "./liquify-bicubic.test.mjs";
 import "./gallery-model.test.mjs";
-import "./store-folder-listing.test.mjs";   // 2026-07-11 网盘模型：per-folder listFolder/reconcileFolder/watchFolder + 数据安全 guardrail
-import "./store-cloud-naming.test.ts";       // 2026-07-12 回归：裸 session name ↔ 云端 X.ora/X.zip 往返（cutover 漏 fileName + listing 按 path 归一 → 0B/打开空白）
-import "./zip-peek.test.mjs";                // 2026-07-13 getPeek slice：库内 zip 尾片解析（硬扫末尾 PNG + 尾内 CD fallback）
 // ── 新引擎红线对抗 battery（2026-07-12 从 JRP 按模块测试移植；旧 store-flow/store-p0-batch 等 import 已删的
 //    monolithic store.ts、早成孤儿不跑 → 这批直接验新模块的红线：If-Match/parentBase/conflict→backup/move-aside/… ）──
-import "./push.test.ts";             // If-Match=parentBase、412 surface、0 字节占位仍 dirty、撞名不覆盖
-import "./safe-resolve.test.ts";     // 冲突 choke point：keepMine/takeCloud、败者→.backup、同 ms 两份不覆盖
-import "./delete.test.ts";           // 删=move-aside→.trash、null-base 不误删别设备同名、离线排队
-import "./trash.test.ts";            // 回收站 restore/purge/empty、本地云端同层 + emptyBackup + 加密件 restore 落 encFileName
-import "./trash-merge.test.ts";      // 回收站/备份箱本地↔云聚合：mergeTrash 配对（local/cloud/both）+ conflictLive + 加密解析
-import "./upload-queue.test.ts";     // ADR-0018 离线新上传回线补推（auto|ask|manual）
-import "./seal.test.ts";             // 加密封装：无密码 LockedError 绝不落明文
-import "./freshness.test.ts";        // 刷新/快进：clean 快进 vs dirty 不覆盖
-import "./local-head.test.ts";       // 本地权威态机（dirty/clean/parentBase 记账）
-import "./offload.test.ts";          // offload 合法性：世界唯一副本 offload 非法抛错
-import "./identity.test.ts";         // saveAs/rename/move 身份换（含撞名、离线 move）
-import "./cloud-write-ifmatch.test.ts";   // P1: 非 upload 的云写(move/rename/purge)也必须带 If-Match
 import "./name-normalization.test.ts";   // P4: 身份在赋值处归一化（非单射的 sessionFileName）
 import "./boot-restore.test.ts";        // P5: 冷启动恢复的失败路径（幽灵路径纪律 + 不清 currentFile）
-import "./reconcile.test.ts";        // cloud-gone 收敛去抖：首次标 candidate、跨 GRACE send trash、重现/编辑自愈
-import "./pending-gone.test.ts";     // 云端防抖 candidate-gone 深模块 + classifySyncState pendingGone 分支
-import "./cloud-sync.test.ts";       // provider↔本地缓存低层同步 + memKv
-import "./folder-delete.test.ts";    // deleteEmptyFolderVia 护栏四态（deleted/already-gone/non-empty/list-failed）+ If-Match 透传
-import "./store-lost-response-claim.test.mjs";   // N6 认领尾部校验：同名同大小异内容 → 不认作我方 push（防 lost-response 静默丢失）
-import "./migration.test.mjs";       // ADR-0019 迁移**框架**：版本戳/命名空间/编排机制（单调·幂等·崩溃安全，合成迁移注入）。V001/V002 tax 已清（2026-07-13）
-import "./store-narrow-waist.test.ts";   // 2026-07-13 窄腰重构：命名空间根 appId.databaseId + kv 前缀 + isHidden + collection 名/保留名 + 两实例 etag 隔离 + settings 散键 + backupFolder .backup
 import "./app-state.test.mjs";            // 2026-07-14 app-state struct 门面：冷字段直读写 collection（不落 RAM）+ push/pull
 import "./editor-state.test.mjs";         // 2026-07-14 desk struct：默认/setDirtyFlag/Serialize 往返/Unserialize 容错/reset
 import "./gallery-view-model.test.mjs";

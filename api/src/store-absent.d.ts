@@ -1,4 +1,4 @@
-import type { Collection, Store } from "./store/index.ts";
+import type { Collection, Store } from "@internal/store";
 export declare function detectStoreAbsent(): boolean;
 type InitItem = {
     id: string;

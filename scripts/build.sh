@@ -50,26 +50,19 @@ else
 fi
 
 # 0.5 deep-import lint（红线封口的**真**守卫）。
-#     src/store/ 是深模块，唯一公开入口 = src/store/index.ts。app 层绕过 index 直接 import 内部文件
-#     = 绕过红线 guts（cloud-sync / local-head / push / seal / safe-resolve / …）。
-#     ⚠ 这道 lint 以前**不存在**，而 index.ts 和 README.md 都白纸黑字声称「build.sh 的 lint 会挡」——
-#       封口只是口头约定、无守卫。v415 补上，谎注释同步改掉。
+#     store 引擎 = @internal/store 包（cutover 2026-08-14：src/store/ 已删，tgz 走 vendor-pkgs/）。
+#     合法入口只有两个：`@internal/store`（主门牌）和 `@internal/store/testing`（测试替身）。
+#     钻子路径（@internal/store/src/... / dist/...）= 绕过红线 guts——包的 exports map 在 resolve 层
+#     已经封死，这道 lint 提前在源码层报清楚。相对路径 `./store/...` 是 cutover 前的旧写法，一并挡。
 #     零依赖实现（仓库无 eslint/dep-cruiser，也不该为这一条引；MASTER §B: vendor every dependency）。
-echo "[build] deep-import lint（app 层不得绕过 src/store/index.ts）…"
-# 覆盖面（v415 防退化时补齐——初版四个口子全堵上）：
-#   · 单引号和双引号都认（初版只认双引号）
-#   · static import / export-from / 动态 import() / 裸副作用 import 都认（初版只认 `from "..."`）
-#   · 子目录也认，如 store/providers/xxx.ts（初版的字符类不含 `/`，钻子目录就绕过去了）
-#   · src/ 和 test/ 都扫（测试直接 import 库内部是**允许**的——红线测试就得钻进去——故 test/ 只在
-#     app 源码那条规则里排除；这里保持只扫 src/，并把这个取舍写明，免得下个人以为是漏的）
-DEEP_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"](\.{1,2}/)+store/[^'\"]*['\"]" src --include='*.ts' \
-            | grep -v '^src/store/' \
-            | grep -vE "store/index\.ts['\"]" || true)
+echo "[build] deep-import lint（store 只准 @internal/store 与 /testing 两个门牌）…"
+DEEP_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"](@internal/store/[^'\"]+|(\.{1,2}/)+store/[^'\"]*)['\"]" src test --include='*.ts' --include='*.mjs' \
+            | grep -vE "@internal/store/testing['\"]" || true)
 if [ -n "$DEEP_HITS" ]; then
-  echo "[build] ✗ 发现 deep import（app 层直接钻进 src/store/ 内部文件）：" >&2
+  echo "[build] ✗ 发现 store deep import（钻进 @internal/store 包内部 / 旧 src/store 相对路径）：" >&2
   echo "$DEEP_HITS" >&2
-  echo "[build]   → 改成从 './store/index.ts' 拿；index 没导出就说明公开面缺东西，" >&2
-  echo "[build]     补 index 的 export（并想清楚这是不是该暴露），别绕过封口。" >&2
+  echo "[build]   → 改成从 '@internal/store'（或测试替身 '@internal/store/testing'）拿；" >&2
+  echo "[build]     门牌没导出就说明公开面缺东西——escalate 改库 API，别绕过封口（家规：绕=库失败）。" >&2
   exit 1
 fi
 echo "[build] ✓ 无 deep import"
@@ -78,8 +71,8 @@ echo "[build] ✓ 无 deep import"
 #   是缺席变体接缝、只准 type-only）。其余 app 文件要么不 import store、要么 `import type`（窄接口镜像）。
 #   防的是绕接缝直拿 store 内部对象——store = 插件不是地基（缺席模式 ?nostore 必须继续成立）。
 echo "[build] B 分层 lint（app 层 store 值级 import 只许接缝）…"
-APPSTORE_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*/store/" src --include='*.ts' 2>/dev/null \
-  | grep -v "^src/store/" | grep -v "^src/app-store.ts" | grep -v "import type" || true)
+APPSTORE_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"]@internal/store['\"]" src --include='*.ts' 2>/dev/null \
+  | grep -v "^src/app-store.ts" | grep -v "import type" || true)
 if [ -n "$APPSTORE_HITS" ]; then
   echo "[build] ✗ app 层出现 store 值级 import（只准接缝 app-store.ts；其余用 import type 或走 ctx.store）：" >&2
   echo "$APPSTORE_HITS" >&2
@@ -97,14 +90,14 @@ echo "[build] ✓ B 分层 lint 过"
 #     （gpu-tile-pool + tile-bridge + render-tree 取代），不得复活 import
 #   · render/** 是纯规划（node 全测），不 import gl/**、store
 echo "[build] v0.4 分层 lint…"
-LAYER_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(/store/|app-store)" src/workpiece --include='*.ts' 2>/dev/null || true)
+LAYER_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(/store/|app-store|@internal/store)" src/workpiece --include='*.ts' 2>/dev/null || true)
 TILES_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*/gl/" src/tiles --include='*.ts' 2>/dev/null || true)
-SEL_HITS=$(grep -nE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(/gl/|/store/|app-store)" src/selection.ts src/marching-ants.ts 2>/dev/null || true)
+SEL_HITS=$(grep -nE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(/gl/|/store/|app-store|@internal/store)" src/selection.ts src/marching-ants.ts 2>/dev/null || true)
 DEAD_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(/history\.ts|/pixel-edit\.ts|/layer-undo\.ts|/tile-residency\.ts|/tile-backend-gl\.ts|/tile-store\.ts|/tile-index\.ts|/gl-doc-renderer\.ts)" src test --include='*.ts' --include='*.mjs' 2>/dev/null | grep -v "undo-history\|workpiece/history" || true)
 # S9 归档模块防复活（src 禁 import；test/gl-smoke 的 reference-*.ts 是合法归档地）：
 S9DEAD_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(/layer-composite\.ts|/gl-compose-plan\.ts)" src --include='*.ts' 2>/dev/null || true)
 
-RENDER_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(/gl/|/store/|app-store)" src/render --include='*.ts' 2>/dev/null || true)
+RENDER_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(/gl/|/store/|app-store|@internal/store)" src/render --include='*.ts' 2>/dev/null || true)
 if [ -n "$LAYER_HITS$TILES_HITS$SEL_HITS$DEAD_HITS$RENDER_HITS$S9DEAD_HITS" ]; then
   echo "[build] ✗ v0.4 分层违规：" >&2
   echo "$LAYER_HITS$TILES_HITS$SEL_HITS$DEAD_HITS$RENDER_HITS" >&2

@@ -1,8 +1,8 @@
 // app-state struct 门面：冷字段直读写 collection（不落 RAM）+ 默认 + 类型强制 + push/pull。
 import { test, eq, assert } from "./runner.mjs";
-import { createStore } from "../src/store/create-store.ts";
-import { createMockProvider } from "../src/store/mock-provider.ts";
-import { createMockLocal } from "../src/store/mock-local.ts";
+import { createStore } from "@internal/store";
+import { createMockProvider } from "@internal/store/testing";
+import { createMockLocal } from "@internal/store/testing";
 import { wireAppState, initAppState, appState } from "../src/app-state.ts";
 
 const dumpKv = () => { const m = new Map(); return { get: (k) => (m.has(k) ? m.get(k) : null), set: (k, v) => m.set(k, String(v)), remove: (k) => m.delete(k), keys: () => [...m.keys()] }; };
