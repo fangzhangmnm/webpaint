@@ -2,6 +2,10 @@ import type { ViewLeaf } from "./painting-view.ts";
 import type { FloatRect, WorkpieceFloat } from "./float-component.ts";
 import type { Selection } from "../selection.ts";
 export declare function extractFloatPixels(leaf: ViewLeaf, sel: Selection | null): WorkpieceFloat | null;
+/** 任意字节 → 浮层（导入「保持原尺寸」用：图比画布大时经图层落地会被 doc 边界吃掉越界像素，
+ *  这条路不碰图层，字节直接成浮层）。rect 允许越出画布（x/y 负、w/h > doc）；bytes = straight RGBA，
+ *  行优先、rect.w 宽。不做透明边 trim —— 「原大小」的框就该等于原图框。 */
+export declare function makeFloatFromBytes(sourceLayerId: number, bytes: Uint8ClampedArray, rect: FloatRect): WorkpieceFloat | null;
 export declare function composeCutHole(leaf: ViewLeaf, sel: Selection | null, region: FloatRect): {
     x: number;
     y: number;

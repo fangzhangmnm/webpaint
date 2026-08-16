@@ -186,7 +186,13 @@ export async function importImageAsLayer(file: File, opts: { center?: { x: numbe
   const px = imageSourceToBytes(bitmap as ImageBitmap);
   const mode = imgSmoothing === "low" ? "nearest" : "auto";
   const out = (w !== px.w || h !== px.h) ? resampleBytes(px.data, px.w, px.h, w, h, mode) : px.data;
-  layer.replaceFromBytes(out, bx, by, w, h);
+  // v0.9.2 修「选原大小导入的是被画布裁过的图」：图层像素是 doc 边界的（putRegion 与 doc 求交，
+  //   越界不产生 tile）——落图层再 lift，画布外那圈在写入那一刻就没了，缩小回来也回不来。
+  //   会越界就跳过图层、字节直接成浮层（浮层像素 v0.9.2 起是本地坐标，装得下画布外）。
+  //   条件写「会不会被裁」而非「选了原大小」：Ctrl+V 贴在画布边缘也在吃像素，同一个 bug。
+  const willClip = bx < 0 || by < 0 || bx + w > docW || by + h > docH;
+  const direct = willClip && input.lasso.liftFloatFromBytes(layer, out, { x: bx, y: by, w, h });
+  if (!direct) layer.replaceFromBytes(out, bx, by, w, h);   // 不越界 / 直取失败 → 老路（行为不比原来差）
   (bitmap as ImageBitmap).close?.();
   // v0.7.35 修「import 破坏 undo」：加层必记账（现由门面保证——记账失败连层都不留）。此前这里
   // 裸加层不记账 + 伪造 wp:histchange —— 后续 lift 却进栈，栈引用了历史不知道的层：undo 跨树
@@ -200,7 +206,8 @@ export async function importImageAsLayer(file: File, opts: { center?: { x: numbe
   //   lift 本就清选区，省一条不进栈的裸赋值）。
   try {
     {
-      const ok = input.lasso.liftSelectionForTransform(layer, { fallbackFullLayer: true, ignoreSelection: true });
+      // direct = 上面已经字节直取成浮层（越界路径），无需再从图层 lift
+      const ok = direct || input.lasso.liftSelectionForTransform(layer, { fallbackFullLayer: true, ignoreSelection: true });
       if (ok) {
         (editMode.enterTransient as (n: string, o?: TransientOpts) => void)("transform", { apply: _commitTransform, abort: _cancelTransform });
         input.lasso.setMode("free");

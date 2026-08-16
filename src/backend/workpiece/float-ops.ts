@@ -55,9 +55,23 @@ export function extractFloatPixels(leaf: ViewLeaf, sel: Selection | null): Workp
       trimmed.set(src.subarray(si, si + tw * 4), y * tw * 4);
     }
   }
-  const fp = new LayerPixels(leaf.docW, leaf.docH);
-  fp.putRegion(x0 + mnX, y0 + mnY, tw, th, trimmed);
+  // 浮层像素 = 本地坐标（网格 = rect 尺寸，内容在本地 (0,0)），落位由 rect 单独描述。
+  // v0.9.2 前这里开的是 doc 尺寸网格 + doc 坐标存放 —— 浮层因此装不下画布外的像素。
+  const fp = new LayerPixels(tw, th);
+  fp.putRegion(0, 0, tw, th, trimmed);
   return { id: _floatIdCounter++, sourceLayerId: leaf.id, rect: { x: x0 + mnX, y: y0 + mnY, w: tw, h: th }, pixels: fp };
+}
+
+/** 任意字节 → 浮层（导入「保持原尺寸」用：图比画布大时经图层落地会被 doc 边界吃掉越界像素，
+ *  这条路不碰图层，字节直接成浮层）。rect 允许越出画布（x/y 负、w/h > doc）；bytes = straight RGBA，
+ *  行优先、rect.w 宽。不做透明边 trim —— 「原大小」的框就该等于原图框。 */
+export function makeFloatFromBytes(sourceLayerId: number, bytes: Uint8ClampedArray, rect: FloatRect): WorkpieceFloat | null {
+  if (rect.w <= 0 || rect.h <= 0) return null;
+  if (bytes.length < rect.w * rect.h * 4) return null;
+  const fp = new LayerPixels(rect.w, rect.h);
+  fp.putRegion(0, 0, rect.w, rect.h, bytes);
+  if (fp.isEmpty()) { fp.dispose(); return null; }   // 全透明 → 没东西可变换（同 extract 的空判）
+  return { id: _floatIdCounter++, sourceLayerId, rect: { ...rect }, pixels: fp };
 }
 
 // 源层挖洞缓冲（dst-out 等价：a' = a·(255−m)/255；sel=null = 隐式全选 → 区域清空）。
@@ -104,38 +118,67 @@ export interface RigidMap {
 // 零 canvas premult 往返——v0.6.38 warp bake 落层用，取代 editRegion/drawImage）。
 // 调用方负责 leaf.putImageData（保 ViewLeaf 物化缓存失效）。
 export function composeOverWriteback(leaf: ViewLeaf, x: number, y: number, w: number, h: number, src: Uint8ClampedArray): { x: number; y: number; w: number; h: number; data: Uint8ClampedArray } {
-  const dst = leaf.pixels.getRegion(x, y, w, h);
-  for (let i = 0; i < dst.length; i += 4) {
-    const fa = src[i + 3];
-    if (fa === 0) continue;
-    if (fa === 255) {
-      dst[i] = src[i]; dst[i + 1] = src[i + 1]; dst[i + 2] = src[i + 2]; dst[i + 3] = 255;
-      continue;
+  // dest 先夹进画布再分配（理由同 composeRigidWriteback：浮层可越出画布，越界那块 putRegion 本来就丢）
+  const c = _clipToDoc(leaf, x, y, w, h);
+  if (!c) return { x, y, w: 0, h: 0, data: new Uint8ClampedArray(0) };
+  const { x: cx, y: cy, w: cw, h: ch, du, dv } = c;
+  const dst = leaf.pixels.getRegion(cx, cy, cw, ch);
+  for (let v = 0; v < ch; v++) {
+    // src 仍是夹前那块（w 宽），行内偏移 du、行号偏移 dv
+    let si = ((v + dv) * w + du) * 4;
+    let di = v * cw * 4;
+    for (let u = 0; u < cw; u++, si += 4, di += 4) {
+      const fa = src[si + 3];
+      if (fa === 0) continue;
+      if (fa === 255) {
+        dst[di] = src[si]; dst[di + 1] = src[si + 1]; dst[di + 2] = src[si + 2]; dst[di + 3] = 255;
+        continue;
+      }
+      const la = dst[di + 3];
+      const inv = (255 - fa);
+      const outA = fa + Math.round(la * inv / 255);
+      if (outA === 0) { dst[di + 3] = 0; continue; }
+      const wf = fa * 255, wl = la * inv;
+      dst[di]     = Math.round((src[si]     * wf + dst[di]     * wl) / (wf + wl));
+      dst[di + 1] = Math.round((src[si + 1] * wf + dst[di + 1] * wl) / (wf + wl));
+      dst[di + 2] = Math.round((src[si + 2] * wf + dst[di + 2] * wl) / (wf + wl));
+      dst[di + 3] = outA;
     }
-    const la = dst[i + 3];
-    const inv = (255 - fa);
-    const outA = fa + Math.round(la * inv / 255);
-    if (outA === 0) { dst[i + 3] = 0; continue; }
-    const wf = fa * 255, wl = la * inv;
-    dst[i]     = Math.round((src[i]     * wf + dst[i]     * wl) / (wf + wl));
-    dst[i + 1] = Math.round((src[i + 1] * wf + dst[i + 1] * wl) / (wf + wl));
-    dst[i + 2] = Math.round((src[i + 2] * wf + dst[i + 2] * wl) / (wf + wl));
-    dst[i + 3] = outA;
   }
-  return { x, y, w, h, data: dst };
+  return { x: cx, y: cy, w: cw, h: ch, data: dst };
+}
+
+// dest 矩形 ∩ 画布：返回夹后矩形 + 夹掉的左/上偏移（du/dv，供调用方平移源索引）；全在画布外 → null。
+// 存在理由：v0.9.2 起浮层可越出画布，写回缓冲不夹就会按浮层全尺寸分配（内存），
+// 而越界那部分 LayerPixels.putRegion 本来就不收 —— 夹与不夹落盘字节相同。
+function _clipToDoc(leaf: ViewLeaf, x: number, y: number, w: number, h: number):
+    { x: number; y: number; w: number; h: number; du: number; dv: number } | null {
+  if (w <= 0 || h <= 0) return null;
+  const cx = Math.max(0, x), cy = Math.max(0, y);
+  const cx1 = Math.min(leaf.docW, x + w), cy1 = Math.min(leaf.docH, y + h);
+  if (cx1 <= cx || cy1 <= cy) return null;
+  return { x: cx, y: cy, w: cx1 - cx, h: cy1 - cy, du: cx - x, dv: cy - y };
 }
 
 // 整数刚体写回：float 像素按置换映射 source-over 落到 leaf 当前内容之上（straight-alpha，
 // 逐字节精确、与采样模式无关）。调用方负责 leaf.putImageData（保 ViewLeaf 物化缓存失效）。
 export function composeRigidWriteback(leaf: ViewLeaf, f: WorkpieceFloat, m: RigidMap): { x: number; y: number; w: number; h: number; data: Uint8ClampedArray } {
   const { w, h } = f.rect;
-  const { dx0, dy0, dw, dh } = m;
+  // dest 先夹进画布再分配（v0.9.2）：浮层 rect 可远大于 doc（导入原大小），不夹的话
+  // 这里会按整个浮层开缓冲、再由 putRegion 把大半丢掉（8192² ≈ 256MB，iPad 上要命）。
+  // 落盘字节与不夹时逐字节相同——putRegion 本来就在裁。
+  const c = _clipToDoc(leaf, m.dx0, m.dy0, m.dw, m.dh);
+  if (!c) return { x: m.dx0, y: m.dy0, w: 0, h: 0, data: new Uint8ClampedArray(0) };
+  const { x: dx0, y: dy0, w: dw, h: dh, du, dv } = c;
+  // 源索引按夹掉的偏移平移（u/v 是夹后 dest 内偏移，原式吃的是夹前偏移 u+du / v+dv）
+  const s0x = m.m11 * du + m.m12 * dv + m.s0x;
+  const s0y = m.m21 * du + m.m22 * dv + m.s0y;
   const dst = leaf.pixels.getRegion(dx0, dy0, dw, dh);
-  const src = f.pixels.getRegion(f.rect.x, f.rect.y, w, h);
+  const src = f.pixels.getRegion(0, 0, w, h);   // 浮层本地坐标
   for (let v = 0; v < dh; v++) {
     for (let u = 0; u < dw; u++) {
-      const sx = m.m11 * u + m.m12 * v + m.s0x;
-      const sy = m.m21 * u + m.m22 * v + m.s0y;
+      const sx = m.m11 * u + m.m12 * v + s0x;
+      const sy = m.m21 * u + m.m22 * v + s0y;
       if (sx < 0 || sx >= w || sy < 0 || sy >= h) continue;   // 护栏（合法映射不该出界）
       const si = (sy * w + sx) * 4;
       const fa = src[si + 3];

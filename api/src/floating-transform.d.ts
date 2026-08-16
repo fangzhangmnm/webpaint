@@ -85,6 +85,8 @@ export declare class FloatingTransform {
     current(): FloatView | null;
     syncFromWorkpiece(): void;
     lift(node: Node | null, opts?: LiftOpts): boolean;
+    private _installBaked;
+    liftFromBytes(leaf: ViewLeaf | null, bytes: Uint8ClampedArray, rect: Rect): boolean;
     setMode(mode: TransformModeKind | null): void;
     canSetMode(mode: TransformModeKind | null): boolean;
     getMode(): TransformModeKind | null;

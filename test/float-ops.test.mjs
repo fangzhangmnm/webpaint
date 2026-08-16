@@ -21,6 +21,7 @@ import { PaintingView, flattenViewLeaves } from "../src/backend/workpiece/painti
 import { History } from "../src/backend/workpiece/history.ts";
 import { LayersFace } from "../src/backend/layers-face.ts";
 import { FloatingTransform } from "../src/floating-transform.ts";
+import { composeIdentityWriteback } from "../src/backend/workpiece/float-ops.ts";
 
 // 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
 const _ctxs = [];
@@ -69,7 +70,9 @@ describe("S6 · lift（整点：清选区 + float tiles + 挖洞）", () => {
     eq(L.sampleAt(35, 35)[3], 0, "源层挖了洞");
     eq(L.sampleAt(22, 22)[3], 255, "选区外没动");
     eq(doc.selection, null, "lift 清选区（spec:213）");
-    eq(fs.floats[0].pixels.sampleAt(35, 35)[3], 255, "float tiles 有像素");
+    // 浮层像素是本地坐标（v0.9.2）：doc (35,35) 在 rect(30,30) 里是本地 (5,5)
+    eq(fs.floats[0].pixels.sampleAt(5, 5)[3], 255, "float tiles 有像素");
+    eq(fs.floats[0].pixels.docW, 16, "float 网格 = rect 尺寸，不是 doc 尺寸");
     // gizmo = float rect（v0.6.21 frame 化：origin/ux 轴对齐）
     eq(fs.transform.gizmoFrame.origin.x, 30); eq(fs.transform.gizmoFrame.ux.x, 16);
     eq(fs.transform.mode, "free");
@@ -458,6 +461,73 @@ describe("v0.7.37 · resetToCenterOriginal（复位：原始尺寸 + 画布居�
     // undo 链健康：commit → reset → flip → rotate → lift 全撤
     for (let i = 0; i < 8 && h.canUndo(); i++) h.undo();
     eq(L.sampleAt(25, 30)[3], 255, "撤到底：像素回原位");
+  });
+});
+
+// v0.9.2 修「导入选原大小 → 浮层是被画布裁过的图」：浮层像素改本地坐标（网格 = rect 尺寸），
+// 于是 rect 可越出画布；导入侧越界时字节直取成浮层，不再经 doc 边界的图层落地。
+describe("v0.9.2 · 越出画布的浮层（导入「保持原尺寸」）", () => {
+  // 像素花纹：R=本地 x、G=本地 y（w/h < 256 → 无环绕），用来逐字节验证写回的偏移数学
+  function markedBytes(w, h) {
+    const buf = new Uint8ClampedArray(w * h * 4);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 4;
+        buf[i] = x; buf[i + 1] = y; buf[i + 2] = 7; buf[i + 3] = 255;
+      }
+    }
+    return buf;
+  }
+
+  it("字节直取：rect 可越出画布，像素一个不丢、变换框按原图真实大小；undo 整点干净", () => {
+    const { doc, h, ft, float } = mk();
+    const L = doc.activeLayer;   // 空层（导入路径刚建的层）
+    const fw = 40, fh = 50;
+    eq(ft.liftFromBytes(L, markedBytes(fw, fh), { x: -10, y: -20, w: fw, h: fh }), true, "字节直取成浮层");
+
+    const fs = float.view();
+    assert(fs && fs.floats.length === 1, "浮层进组件");
+    eq(fs.floats[0].sourceLayerId, L.id);
+    eq(fs.floats[0].rect.x, -10); eq(fs.floats[0].rect.y, -20);
+    eq(fs.floats[0].rect.w, fw); eq(fs.floats[0].rect.h, fh);
+    eq(fs.floats[0].pixels.docW, fw, "浮层网格 = rect 尺寸，不是 doc 尺寸");
+    // 本地 (0,0) = doc (-10,-20) —— 整个画布外的那一角；旧实现这里是空的（像素在写入时就没了）
+    eq(fs.floats[0].pixels.sampleAt(0, 0)[3], 255, "画布外的像素也在浮层里");
+    eq(fs.floats[0].pixels.sampleAt(fw - 1, fh - 1)[3], 255, "右下角在");
+    // 变换框 = 原图真实大小（越出画布），不是被裁成画布的方块
+    eq(fs.transform.gizmoFrame.origin.x, -10); eq(fs.transform.gizmoFrame.origin.y, -20);
+    eq(fs.transform.gizmoFrame.ux.x, fw); eq(fs.transform.gizmoFrame.uy.y, fh);
+    eq(L.pixels.isEmpty(), true, "源层没被写过（字节没经图层落地，也就没被 doc 边界吃掉）");
+
+    h.undo();
+    eq(float.view(), null, "undo：浮层消失（liftFromBytes 是一个整点）");
+    h.redo();
+    assert(float.view()?.floats.length === 1, "redo：浮层回来");
+    eq(float.view().floats[0].pixels.sampleAt(0, 0)[3], 255, "redo：画布外的像素还在");
+  });
+
+  it("越界浮层 commit：只落画布内那块，源索引按夹掉的偏移平移（逐字节）", () => {
+    const { doc, ft, float } = mk();
+    const L = doc.activeLayer;
+    const fw = 40, fh = 50;
+    eq(ft.liftFromBytes(L, markedBytes(fw, fh), { x: -10, y: -20, w: fw, h: fh }), true);
+
+    // 写回缓冲先夹进画布再分配（内存护栏）：dest 应是 (0,0,30,30)，不是浮层全尺寸 40×50
+    const wb = composeIdentityWriteback(L, float.view().floats[0]);
+    eq(wb.x, 0); eq(wb.y, 0);
+    eq(wb.w, 30, "dest 宽夹到画布内（-10..30 ∩ 0..512）");
+    eq(wb.h, 30, "dest 高夹到画布内（-20..30 ∩ 0..512）");
+    eq(wb.data.length, 30 * 30 * 4, "缓冲按夹后尺寸分配");
+
+    eq(ft.commit(null), true, "identity → 整数刚体置换快路（无需 bakeFn）");
+    eq(float.view(), null, "浮层收摊");
+    // doc (0,0) 吃的是浮层本地 (10,20)；偏移搞反的话这里会是 (0,0) 或错位
+    const a = L.sampleAt(0, 0);
+    eq(a[0], 10, "R = 本地 x = 10"); eq(a[1], 20, "G = 本地 y = 20");
+    const b = L.sampleAt(5, 7);
+    eq(b[0], 15); eq(b[1], 27);
+    const cb = L.pixels.contentBounds(true);
+    eq(cb.x, 0); eq(cb.y, 0); eq(cb.w, 30); eq(cb.h, 30, "画布外那圈按图层语义丢弃（图层本就是 doc 边界的）");
   });
 });
 

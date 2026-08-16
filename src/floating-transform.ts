@@ -27,7 +27,7 @@ import type { ViewLeaf, ViewGroup, PaintingView } from "./backend/workpiece/pain
 import { cloneFloatMeta } from "./backend/workpiece/float-component.ts";
 import type { FloatFrame, FloatTransformMeta, WorkpieceFloat, FloatState, TransformClass, FloatLayerComponent } from "./backend/workpiece/float-component.ts";
 import type { SelectionComponent } from "./backend/workpiece/selection-component.ts";
-import { extractFloatPixels, composeCutHole, composeIdentityWriteback, composeRigidWriteback, composeOverWriteback, applyRegionBuf } from "./backend/workpiece/float-ops.ts";
+import { extractFloatPixels, makeFloatFromBytes, composeCutHole, composeIdentityWriteback, composeRigidWriteback, composeOverWriteback, applyRegionBuf } from "./backend/workpiece/float-ops.ts";
 import type { RigidMap } from "./backend/workpiece/float-ops.ts";
 import type { History } from "./backend/workpiece/history.ts";
 import { prefilterToSplinePlane } from "./backend/algorithms/bspline.ts";
@@ -115,7 +115,9 @@ const _floatBytesCache = new WeakMap<WorkpieceFloat, U8Plane>();
 function floatBytes(f: WorkpieceFloat): U8Plane {
   let p = _floatBytesCache.get(f);
   if (!p) {
-    p = { data: f.pixels.getRegion(f.rect.x, f.rect.y, f.rect.w, f.rect.h), w: f.rect.w, h: f.rect.h };
+    // 浮层像素是**本地坐标**（网格 = rect 尺寸，内容在本地 (0,0)）——v0.9.2 起 rect 可越出画布，
+    // 按 rect.x/y 读会读到画布外的空 tile。落位交给 rect，这里只管取整块。
+    p = { data: f.pixels.getRegion(0, 0, f.rect.w, f.rect.h), w: f.rect.w, h: f.rect.h };
     _floatBytesCache.set(f, p);
   }
   return p;
@@ -246,39 +248,60 @@ export class FloatingTransform {
           if (hole) applyRegionBuf(b.leaf, hole);
         }
       }
-      // gizmo 框 = 可见 source rect 并集（隐藏叶随组动但不定框；全隐藏兜底 = 全部）
-      const vis = baked.filter((b) => b.leaf.visible);
-      const rects = (vis.length ? vis : baked).map((b) => b.float.rect);
-      let gx0 = Infinity, gy0 = Infinity, gx1 = -Infinity, gy1 = -Infinity;
-      for (const rc of rects) {
-        if (rc.x < gx0) gx0 = rc.x;
-        if (rc.y < gy0) gy0 = rc.y;
-        if (rc.x + rc.w > gx1) gx1 = rc.x + rc.w;
-        if (rc.y + rc.h > gy1) gy1 = rc.y + rc.h;
-      }
-      const gw = gx1 - gx0, gh = gy1 - gy0;
-      this._sel!.set(null);   // 旧选区进 selection record（ignoreSelection 也照清——旧 lift 语义）
-      this._float!.install({
-        floats: baked.map((b) => b.float),
-        transform: {
-          // 初始 frame = AABB（轴对齐）；方手柄转轴后才是一般平行四边形（v0.6.21）
-          gizmoFrame: { origin: { x: gx0, y: gy0 }, ux: { x: gw, y: 0 }, uy: { x: 0, y: gh } },
-          mesh: [
-            [{ x: gx0, y: gy0 }, { x: gx1, y: gy0 }],
-            [{ x: gx0, y: gy1 }, { x: gx1, y: gy1 }],
-          ],
-          meshN: 2,
-          mode: "free",
-          uniformAspect: gw / Math.max(1, gh),
-          usedClass: "similarity",
-        },
-      });
+      this._installBaked(baked);
     });
     if (!r.ok) {
       // install 是令牌内最后一步：失败 = 浮层从未上台（cancel 已回滚挖洞/选区）→ 提取物归本函数释放
       for (const b of baked) b.float.pixels.dispose();
       return false;
     }
+    this.syncFromWorkpiece();
+    this.onChange();
+    return true;
+  }
+
+  // 令牌内的上台收尾（lift / liftFromBytes 共用）：清选区 + 初始 gizmo + install。
+  private _installBaked(baked: { leaf: ViewLeaf; float: WorkpieceFloat }[]) {
+    // gizmo 框 = 可见 source rect 并集（隐藏叶随组动但不定框；全隐藏兜底 = 全部）
+    const vis = baked.filter((b) => b.leaf.visible);
+    const rects = (vis.length ? vis : baked).map((b) => b.float.rect);
+    let gx0 = Infinity, gy0 = Infinity, gx1 = -Infinity, gy1 = -Infinity;
+    for (const rc of rects) {
+      if (rc.x < gx0) gx0 = rc.x;
+      if (rc.y < gy0) gy0 = rc.y;
+      if (rc.x + rc.w > gx1) gx1 = rc.x + rc.w;
+      if (rc.y + rc.h > gy1) gy1 = rc.y + rc.h;
+    }
+    const gw = gx1 - gx0, gh = gy1 - gy0;
+    this._sel!.set(null);   // 旧选区进 selection record（ignoreSelection 也照清——旧 lift 语义）
+    this._float!.install({
+      floats: baked.map((b) => b.float),
+      transform: {
+        // 初始 frame = AABB（轴对齐）；方手柄转轴后才是一般平行四边形（v0.6.21）
+        gizmoFrame: { origin: { x: gx0, y: gy0 }, ux: { x: gw, y: 0 }, uy: { x: 0, y: gh } },
+        mesh: [
+          [{ x: gx0, y: gy0 }, { x: gx1, y: gy0 }],
+          [{ x: gx0, y: gy1 }, { x: gx1, y: gy1 }],
+        ],
+        meshN: 2,
+        mode: "free",
+        uniformAspect: gw / Math.max(1, gh),
+        usedClass: "similarity",
+      },
+    });
+  }
+
+  // 字节直接 lift 成浮层（导入「保持原尺寸」：图比画布大时，经图层落地会被 doc 边界吃掉
+  // 越界像素——这条路不碰图层像素，字节直接成浮层）。rect 允许越出画布（x/y 负、w/h > doc）。
+  // leaf 应为空层（不挖洞）；令牌纪律同 lift（一个整点：清选区 + install，可撤销）。
+  liftFromBytes(leaf: ViewLeaf | null, bytes: Uint8ClampedArray, rect: Rect): boolean {
+    if (!leaf || !this._history || !this._float || !this._sel) return false;
+    if (this._float.view()) return false;
+    const float = makeFloatFromBytes(leaf.id, bytes, rect);   // 令牌外纯构造（失败 = 栈未动）
+    if (!float) return false;
+    const baked = [{ leaf, float }];
+    const r = this._history.withPoint("liftFloat", {}, () => { this._installBaked(baked); });
+    if (!r.ok) { float.pixels.dispose(); return false; }
     this.syncFromWorkpiece();
     this.onChange();
     return true;

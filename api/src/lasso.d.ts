@@ -131,6 +131,12 @@ export declare class LassoEngine {
     } | null;
     polygonCancelSession(): void;
     liftSelectionForTransform(layer: LassoNode | null, opts?: LiftOpts): boolean;
+    liftFloatFromBytes(layer: LassoNode | null, bytes: Uint8ClampedArray, rect: {
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+    }): boolean;
     _rasterizeFreehandToSelection(pts: Point[]): SelectionLike | null;
     _rasterizeRectToSelection(r: DraftRect | null): SelectionLike | null;
     _rasterizeEllipseToSelection(r: DraftRect | null): SelectionLike | null;

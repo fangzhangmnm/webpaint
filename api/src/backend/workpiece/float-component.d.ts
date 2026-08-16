@@ -14,9 +14,13 @@ export type FloatMesh = {
 export interface WorkpieceFloat {
     id: number;
     sourceLayerId: number;
-    /** lift 时像素的 identity 位置（内容紧 bbox）；reject 按此写回，不走 warp 采样器。 */
+    /** lift 时像素的 identity 位置（doc 坐标；内容紧 bbox）；reject 按此写回，不走 warp 采样器。
+     *  v0.9.2 起**允许越出画布**（x/y 可负、w/h 可 > doc）——导入「保持原尺寸」的浮层比画布大。 */
     rect: FloatRect;
-    /** doc 网格对齐的稀疏 tile（池驻留、可压缩；不可变——变换只动 transform metadata）。 */
+    /** 浮层**本地坐标**的稀疏 tile：网格尺寸 = rect.w×rect.h，内容存在本地 (0,0)，
+     *  落位由 rect 单独描述（池驻留、可压缩；不可变——变换只动 transform metadata）。
+     *  v0.9.2 前是 doc 坐标 + doc 尺寸网格，因而**物理上装不下画布外的像素**（导入原大小丢外圈）。
+     *  知情者只有三个：extractFloatPixels/makeFloatFromBytes 建、floatBytes 读、composeRigidWriteback 读。 */
     pixels: LayerPixels;
 }
 /** 参考 frame（v0.6.21 有向化，Procreate 方手柄语义）：p(u,v)=origin+u·ux+v·uy，u,v∈[0,1]。 */

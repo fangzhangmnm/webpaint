@@ -342,6 +342,15 @@ export class LassoEngine {
     return ok;
   }
 
+  // 字节直接 lift 成浮层（导入「保持原尺寸」；rect 可越出画布 —— 经图层落地会被 doc 边界吃掉）。
+  // layer 应为刚建的空层；同 lift 一个令牌整点。详 FloatingTransform.liftFromBytes。
+  liftFloatFromBytes(layer: LassoNode | null, bytes: Uint8ClampedArray, rect: { x: number; y: number; w: number; h: number }) {
+    const leaf = layer && !layer.isGroup ? layer as ViewLeaf : null;   // 组不接（浮层源必须是叶）
+    const ok = this._ft.liftFromBytes(leaf, bytes, rect);
+    if (ok) this._state = "floating";
+    return ok;
+  }
+
   // ---- rasterize helpers（返回 selection-shaped object 或 null）----
   _rasterizeFreehandToSelection(pts: Point[]): SelectionLike | null {
     if (pts.length < 3) return null;
