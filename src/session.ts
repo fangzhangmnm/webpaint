@@ -23,6 +23,7 @@ import { renderNodesToBytes } from "./backend/doc-render.ts";
 import { areaResampleBytes } from "./backend/algorithms/resample-bytes.ts";
 import { encodePngFromBytes } from "./backend/png-codec.ts";
 import { defringeAlphaZero } from "./backend/algorithms/defringe.ts";
+import { flattenToBg, parseExportBg } from "./backend/algorithms/flatten-bg.ts";
 import { canvasToBlob } from "./shell/image-io.ts";
 import { appState } from "./app-state.ts";   // active session name = appState.currentFile（synced-app-state，跨设备 resume）
 import type { PaintingView } from "./backend/workpiece/painting-view.ts";
@@ -92,7 +93,7 @@ export async function thumbBlobFromBytes(merged: { data: Uint8ClampedArray; w: n
 // candidate 2：导出格式（png/jpg exporter）只负责把 doc 渲成 image blob；
 // 去向（分享/下载/剪贴板）是正交的 sink，见 shareOrDownloadBlob。故此函数公开。
 // #16（v0.5）：cropRect = 「仅导出选区范围」（选区 bbox，doc 坐标）；null/undefined = 全文档（旧行为）。
-export async function renderDocToImageBlob(doc: PaintingView, mime = "image/png", quality?: number, scope = "merged", cropRect?: { x: number; y: number; w: number; h: number } | null, defringe = false) {
+export async function renderDocToImageBlob(doc: PaintingView, mime = "image/png", quality?: number, scope = "merged", cropRect?: { x: number; y: number; w: number; h: number } | null, defringe = false, bg = "transparent") {
   // S9：合成走 GL（doc-render，与 display 同源，含 clip + 组隔离）。C3（债 d）：全字节管线——
   //   合成字节 → 裁剪/铺底全在字节上做；canvas 只剩 JPEG 编码边界（提案 §4 壳域合法名单）。
   //   scope==="active"：仅当前节点（组照常整树合成）；剥掉节点**自身**的 clippingMask（基底不在导出里，
@@ -115,25 +116,23 @@ export async function renderDocToImageBlob(doc: PaintingView, mime = "image/png"
     }
     plane = { data: cut, w: cw, h: ch };
   }
-  // v134 (user：「导出 png 保留透明度！！」) PNG 永远不涂底，empty 区域 = 透明，user 想要白底自己加图层。
+  // v0.9.14 导出底色（user 拍板：视图级，PNG 默认透明、JPG 默认白；与画板底色/UI 主题三分立不同步）。
+  const bgRgb = parseExportBg(bg);
+  // v134 (user：「导出 png 保留透明度！！」) PNG **默认**不涂底（bg=transparent），empty 区域 = 透明；
+  //   选了底色才 flatten（v0.9.14）——涂底后 α 全 255，defringe 自然无意义（UI 侧同款联动灰掉）。
   if (mime !== "image/jpeg") {
-    // v0.9.13 贴图防黑边：α=0 区 RGB 回填边缘色（全字节管线才留得住——encodePngFromBytes 直写
-    //   straight RGBA，不过 canvas premult；JPG 无 alpha 无此题）。默认关，导出配置里开。
-    if (defringe) defringeAlphaZero(plane.data, plane.w, plane.h);
+    if (bgRgb) {
+      plane = { data: flattenToBg(plane.data, bgRgb.r, bgRgb.g, bgRgb.b), w: plane.w, h: plane.h };
+    } else if (defringe) {
+      // v0.9.13 贴图防黑边：α=0 区 RGB 回填边缘色（全字节管线才留得住——encodePngFromBytes 直写
+      //   straight RGBA，不过 canvas premult；JPG 无 alpha 无此题）。默认关，导出配置里开。
+      defringeAlphaZero(plane.data, plane.w, plane.h);
+    }
     const png = await encodePngFromBytes(plane.data, plane.w, plane.h);
     return new Blob([png as unknown as BlobPart], { type: "image/png" });
   }
-  // JPG 无 alpha 通道 → 白底直下（压底常量——doc 无纸色概念，想要别的底色自己加图层；纯字节数学）。
-  const br = 255, bgc = 255, bb = 255;
-  const flat = new Uint8ClampedArray(plane.w * plane.h * 4);
-  const src = plane.data;
-  for (let p = 0; p < src.length; p += 4) {
-    const a = src[p + 3] / 255;
-    flat[p] = src[p] * a + br * (1 - a);
-    flat[p + 1] = src[p + 1] * a + bgc * (1 - a);
-    flat[p + 2] = src[p + 2] * a + bb * (1 - a);
-    flat[p + 3] = 255;
-  }
+  // JPG 无 alpha 通道 → 必须落底：配置底色，透明/缺省 = 白（v0.9.14 前是硬编码白）。纯字节数学。
+  const flat = flattenToBg(plane.data, bgRgb?.r ?? 255, bgRgb?.g ?? 255, bgRgb?.b ?? 255);
   // canvas 仅当 JPEG 编码器（壳域名单：jpg 编码）。全走 HTMLCanvasElement.toBlob，
   // 避开 Safari OffscreenCanvas.convertToBlob JPEG 返 null 的 bug。
   const c = document.createElement("canvas");
@@ -187,11 +186,11 @@ export async function shareOrDownloadBlob(blob: Blob, filename: string, mime?: s
 // ---- 剪贴板 IO ----
 
 /** 把 doc 合成图复制到剪贴板（PNG）。iPad Safari / 桌面都支持。 */
-export async function copyImageToClipboard(doc: PaintingView, scope = "merged", cropRect?: { x: number; y: number; w: number; h: number } | null) {
+export async function copyImageToClipboard(doc: PaintingView, scope = "merged", cropRect?: { x: number; y: number; w: number; h: number } | null, defringe = false, bg = "transparent") {
   // iOS Safari 要求 clipboard.write 在 user gesture 内"同步"触达；**不能**先 await blob 再 write
   // （那个 await 跨过 gesture 窗口 → NotAllowedError）。把 renderDocToImageBlob 的 Promise<Blob>
   // 直接交给 ClipboardItem（lazy promise 写法），复用 writeImageBlobToClipboard 同款路径。
-  const blobPromise = renderDocToImageBlob(doc, "image/png", undefined, scope, cropRect)
+  const blobPromise = renderDocToImageBlob(doc, "image/png", undefined, scope, cropRect, defringe, bg)
     .then((blob) => { if (!blob) throw new Error("PNG generation failed"); return blob; });
   await writeImageBlobToClipboard(blobPromise);
 }

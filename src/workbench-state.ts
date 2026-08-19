@@ -136,7 +136,7 @@ export interface EditorViewport { tx: number; ty: number; scale: number; rot: nu
 // 序列化形状 = `.webpaint/editor-state.json` 的内容（freshGroups() 即 defaults SSoT）。
 function freshGroups() {
   return {
-    export:        { format: "png" as string, target: "file" as string, layerMode: "merged" as string, clipSelection: false, defringe: false },   // layerMode=scope "merged"|"active"；clipSelection=#16 仅导出选区范围；defringe=v0.9.13 贴图防黑边（PNG）
+    export:        { format: "png" as string, target: "file" as string, layerMode: "merged" as string, clipSelection: false, defringe: false, bg: "transparent" as string },   // layerMode=scope "merged"|"active"；clipSelection=#16 仅导出选区范围；defringe=v0.9.13 贴图防黑边（PNG）；bg=v0.9.14 导出底色（"transparent"|"#rrggbb"，PNG 透明/JPG 白）
     colorPanel:    { enabled: false, position: null as PanelPos | null },
     layersPanel:   { enabled: false, position: null as PanelPos | null },
     refPanel:      { enabled: false, position: null as PanelPos | null, viewport: { tx: 0, ty: 0, scale: 1, rot: 0 } as EditorViewport },
@@ -255,6 +255,7 @@ export const desk = {
     get layerMode(): string { return S.g.export.layerMode; }, set layerMode(v: string) { S.g.export.layerMode = v; },
     get clipSelection(): boolean { return S.g.export.clipSelection; }, set clipSelection(v: boolean) { S.g.export.clipSelection = v; },
     get defringe(): boolean { return S.g.export.defringe; }, set defringe(v: boolean) { S.g.export.defringe = v; },
+    get bg(): string { return S.g.export.bg; }, set bg(v: string) { S.g.export.bg = v; },
   },
   // panels（enabled/position 全 per-doc，决策1「desk 跟画走」）──
   colorPanel: {
