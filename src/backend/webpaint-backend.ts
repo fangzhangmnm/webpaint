@@ -223,7 +223,8 @@ export class WebPaintBackend implements WebPaintBackendInterface {
 
   // ── 字节面 ──
 
-  async encodeOra(opts: { editorSidecar?: object; referencePng?: Uint8Array } = {}): Promise<Uint8Array> {
+  async encodeOra(opts: { editorSidecar?: object; referencePng?: Uint8Array;
+                          timelapse?: { json: string; mp4: Uint8Array } | null } = {}): Promise<Uint8Array> {
     this._guard();
     // merged 合成（mergedimage/缩略图）：合成面可用则渲（per-tenant 注入，缺省全局接缝），GL 缺席 →
     // null → 透明占位（层数据完整，mergedimage 只是预览件——与 autosave GL-lost 兜底同语义）。
@@ -234,6 +235,7 @@ export class WebPaintBackend implements WebPaintBackendInterface {
       mergedBytes: merged,
       desk: opts.editorSidecar,
       referenceImage: opts.referencePng ? new Blob([opts.referencePng as unknown as BlobPart], { type: "image/png" }) : undefined,
+      timelapse: opts.timelapse,
     }) as Blob;
     return new Uint8Array(await blob.arrayBuffer());
   }

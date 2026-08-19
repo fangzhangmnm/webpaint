@@ -7,7 +7,9 @@
 //   stack.xml                XML 描述 <image><stack><layer .../></stack></image>
 //   data/layerN.png          每层的 PNG bitmap（任意尺寸，由 stack.xml 的 x/y 决定位置）
 //   mergedimage.png          整图合成预览（OneDrive 缩略图 / 其他 reader 兜底用）
-//   Thumbnails/thumbnail.png 小缩略图（最长边 ≤ 256，规范要求）
+//   timelapse.mp4            可选：timelapse 录像（直接可播；spec=ai-docs/20260819-timelapse-spec.md）
+//   .webpaint/timelapse.json 可选：录制状态（开关 sticky/取景框 pin/n/motionSamples）
+//   Thumbnails/thumbnail.png 小缩略图（最长边 ≤ 256，规范要求）——**必须最后 entry**（云端 byte-range 尾窗契约）
 //
 // 我们的层 bbox 直接对应 spec 的 x / y / 自带尺寸 PNG —— 零转换。
 //
@@ -100,6 +102,9 @@ interface EncodeOpts {
   mergedBytes?: { data: Uint8ClampedArray; w: number; h: number } | null;   // S9/C3：调用方渲好的合成字节（GL renderNodesToBytes）；缺省=透明占位
   referenceImage?: Blob;
   desk?: object;   // desk.Serialize() → .webpaint/editor-state.json（desk per-doc；不向后兼容 webpaint/state.json）
+  // timelapse 录像（spec=ai-docs/20260819-timelapse-spec.md，ora entry consent 2026-08-19）：
+  //   mp4 = 直接可播的完整录像（TimelapseDocState.serializeForSave 产物；空 Uint8Array=还没帧，只落 json）
+  timelapse?: { json: string; mp4: Uint8Array } | null;
 }
 // decode 产物（T3b-2）：plain data（wp2.load 灌入）+ WebPaint 私有 sidecar 随行。
 // 字段名沿旧 DecodedDoc 下划线惯例——session-state 消费面零改名。
@@ -108,6 +113,8 @@ export interface DecodedPainting {
   _referenceBlob?: Blob;
   _webpaintState?: unknown;
   _editorState?: unknown;   // .webpaint/editor-state.json → desk.Unserialize()
+  _timelapseJson?: string;      // .webpaint/timelapse.json 原文（TimelapseDocState.restore 消费，含自愈）
+  _timelapseMp4?: Uint8Array;   // timelapse.mp4 原字节
   _wroteWith: string | null;
 }
 // 加密对本 codec **不可见**（v235 起）：encode 永远出明文 ora、decode 永远收明文 ora。
@@ -186,6 +193,13 @@ export async function encodeDocToOra(doc: EncodeDoc, opts: EncodeOpts) {
       png = await encodePngFromBytes(new Uint8ClampedArray(4), 1, 1);
     }
     entries.push({ path: `data/layer${L.id}.png`, data: png });
+  }
+
+  // timelapse 录像：mp4 是大块 → 中部（layer 之后）；状态 sidecar 走 .webpaint/ 命名空间。
+  // 两者都必须排在 Thumbnails/thumbnail.png 之前（byte-range 尾窗契约，见下）。zip STORE 不再压（mp4 已是压缩流）。
+  if (opts.timelapse) {
+    if (opts.timelapse.mp4.length > 0) entries.push({ path: "timelapse.mp4", data: opts.timelapse.mp4 });
+    entries.push({ path: ".webpaint/timelapse.json", data: opts.timelapse.json });
   }
 
   // WebPaint 私有扩展：reference 小窗的图 + desk sidecar。
@@ -296,6 +310,9 @@ export async function decodeOraToPainting(blob: Blob): Promise<DecodedPainting> 
       reportError(new Error("[ora] webpaint/state.json parse failed: " + String(e)), "log");
     }
   }
+  // timelapse：原文/原字节随行（解析与自愈在 TimelapseDocState.restore，codec 不掺语义）。
+  if (files[".webpaint/timelapse.json"]) out._timelapseJson = bytesToString(files[".webpaint/timelapse.json"]);
+  if (files["timelapse.mp4"]) out._timelapseMp4 = files["timelapse.mp4"];
   // desk struct（desk per-doc）；缺失（老画作/不向后兼容）→ 留 undefined，adopt 时 reset 到默认。
   if (files[".webpaint/editor-state.json"]) {
     try {
