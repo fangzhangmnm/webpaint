@@ -38,6 +38,7 @@ import "./store-absent.test.mjs";           // v0.8.7 B 骑士：null-store/内�
 import "./sw-strategy.test.mjs";
 import "./liquify-bbox.test.mjs";
 import "./liquify-docspace-mask.test.mjs";
+import "./timelapse.test.mjs";       // 宣发轮：取景框/调和衰减/帧合成/mux↔demux round-trip/录制态自愈/编码器注入槽（spec=ai-docs/20260819-timelapse-spec.md）
 import "./resample-bytes.test.mjs"; // 字节重采样：面积平均严格box/alpha加权/限幅
 import "./png-codec.test.mjs"; // PNG 接缝（UPNG 内脏）：低α无损roundtrip/pHYs
 import "./password-verifier.test.mjs";
