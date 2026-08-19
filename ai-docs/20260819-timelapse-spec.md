@@ -94,7 +94,12 @@
 2. 尾帧同分辨率高码率（单一 SPS）；
 3. muxer 单调时间戳、拼接只发生在 IDR 边界（IDR 重置解码器，播放器安全）。
 
-**fMP4 muxer = vendor `mp4-muxer`**（MIT、零依赖、WebCodecs 生态、支持 fragmented 输出）。进 repo 前先审源码，走家规 vendor 流程。
+**muxer = vendor `mp4-muxer` v5.2.2**（源码审计 2026-08-19 完成，选型报告见本节尾注）：MIT、运行时零依赖、全源 2316 行/6 文件、bundle 实测 28.4KB min / 8.4KB gzip、红旗扫描全零（无 eval/网络/埋点）。已被作者废弃（继任 mediabunny）——由 vendor 模型吸收：mp4 容器是冻结规范，2300 行自己养。mediabunny 否决：110KB min（4 倍）+ MPL-2.0 + 5.8 万行审不动。
+- vendor 最小集合：`src/{box,index,misc,muxer,target,writer}.ts` + LICENSE 原样拷进 `src/vendor/mp4-muxer/`，**不裁**音频/hevc 死代码（esbuild tree-shake 兜底，裁剪=对 vetted 源引入 drift）。
+- 接入注意：VideoEncoder 配 `avc: {format:'avc'}`（length-prefixed 非 annexb），avcC 取首个 key chunk 的 `decoderConfig.description` 传 `addVideoChunkRaw` 的 meta。
+- 尾帧定格：`addVideoChunkRaw(..., duration_µs)` 最后一帧显式 duration=5_000_000 即成（stts/trun 两路径源码已核实）。
+- 工作流 = 内存攒裸 chunk 字节（可序列化进 ora），每次保存整体 re-mux（mux 便宜，纯容器）。既然整文件本在内存，`fastStart:'in-memory'`（moov 前置普通 mp4）兼容面比 fragmented 只宽不窄，实现时两挡都留（一个枚举值）。
+- 审计源码留档：`~/jupyter/third-party/mp4-muxer/`、`~/jupyter/third-party/mediabunny/`。
 
 ## 7. 导出
 
