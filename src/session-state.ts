@@ -34,6 +34,7 @@ import type { AppContext } from "./app-context.ts";
 import type { GalleryItem } from "./gallery/gallery-model.ts";
 import { t } from "./i18n/index.ts";
 import { createEditorSession, type EditorSession, type StoreLike } from "./editor-session/index.ts";
+import { timelapseDetach, timelapseAdopt, timelapseForSave } from "./timelapse-session.ts";
 
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
 
@@ -173,7 +174,10 @@ async function _encodeCurrentOraWithPeek(): Promise<{ bytes: Blob; peek: Blob | 
   //   编辑都追不进快照；无句柄、无 dispose。paintingDataToEncodeDoc 只是纯切片视图。
   const frozen = paintingDataToEncodeDoc(wp2.exportData());
   const meta = _buildOraMeta();
-  const bytes = await encodeDocToOra(frozen, { ...meta, mergedBytes: merged, wroteWith: WEBPAINT_VERSION }) as Blob;
+  // timelapse：drain 运动帧 + 用**同一份 merged** 现编尾帧（与 mergedimage 同刻同源；merged=null → 冻结 passthrough）。
+  //   在 frozen 之后 await——层快照已同步冻结，录像编码的 await 间隙不撕存档。自愈在内，绝不 throw。
+  const timelapse = await timelapseForSave(merged);
+  const bytes = await encodeDocToOra(frozen, { ...meta, mergedBytes: merged, wroteWith: WEBPAINT_VERSION, timelapse }) as Blob;
   const peek = merged ? await thumbBlobFromBytes(merged, 256) : null;
   return { bytes, peek };
 }
@@ -197,6 +201,7 @@ let es: EditorSession;
 function adoptModel(loaded: LoadedDoc) {
   _loadingDoc = true;
   try {
+    timelapseDetach();          // 串扰墙：换文档期间的 histchange（clearHistory/load）不得进旧录像
     input.clearHistory();       // 先清：弃开着的令牌 + drop floats + lasso 取消（load 要开新令牌）
     wp2.load(loaded.data);      // 令牌灌入 + 清栈 + markSaved（docRaw/adoptState 的后继，ADR-0008 §3）
     doc.clearSelectionOnLoad(); // 跨 session 不沿用选区（旧 adoptState 语义）
@@ -224,6 +229,7 @@ function adoptModel(loaded: LoadedDoc) {
       board.fitToScreen();
     }
     applyEditorStateToUI();   // desk：Unserialize 后把面板/checkboard 回灌 UI（各模块订阅 wp:applyEditorState）
+    timelapseAdopt(loaded);   // 录制态从 ora sidecar 回读（per-doc sticky；回读失败自愈=作废+info）
   } finally { _loadingDoc = false; }
 }
 
@@ -448,6 +454,7 @@ async function exitCanvasToGallery() {
 // ---- 新建 doc ----
 async function newDoc({ name, w, h, layer0Name, fillLayer0 }: { name: string; w: number; h: number; layer0Name?: string; fillLayer0?: (layer: unknown) => void }) {
   if (es.isDirty()) await saveNow();
+  timelapseDetach();   // 新建=新身份：旧录像绝不跟过来（per-doc 串扰墙）
   input.clearHistory();
   wp2.load({
     width: w, height: h,
@@ -462,6 +469,7 @@ async function newDoc({ name, w, h, layer0Name, fillLayer0 }: { name: string; w:
   _enc.encrypted = false; board.invalidateAll(); board.fitToScreen(); renderLayersPanel();
   resetEditorState();
   applyEditorStateToUI();   // desk：新建 → 面板回默认（关）
+  timelapseAdopt({});       // 新文档 = 健康空录制态（默认关；可在这张画上开录）
   es.adopted(toFull(name), { create: true });   // 新建画布/import：es 记为当前 + 脏；首存 mode:"new"（撞名不静默覆盖）。边界转全名。
   updateSaveStatus();
   await saveNow();   // 落盘（tryPush:false；撞名 → saveNow try/catch surface）

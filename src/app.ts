@@ -61,6 +61,8 @@ import { initGalleryShell, setGalleryOpen, checkQuotaAndWarn, uniqueNameFor } fr
 import { initTopbarMenu } from "./topbar-menu.ts";
 import { initBlenderSync, reconcileBlenderUrlFromPrefs } from "./blender-sync.ts";   // 推/拉贴图到 Blender（BlenderTextureProtocol，插件式隔离子功能）
 import { initPlatformGuards } from "./platform-guards.ts";
+import { initTimelapse } from "./timelapse-session.ts";
+import { initTimelapseUi } from "./timelapse-ui.ts";
 import { mountLeftDial } from "./ui/left-dial.ts";   // candidate 1 Step 2 · 左栏 dial（size/opacity/笔指示/popup）
 import { watch } from "../vendor/vue/vue.esm-browser.prod.js";   // 加密常驻指示 watch（currentBrush computed + 引擎桥已下沉 resolved-brush.ts）
 import { initRackBoot, bootRestoreSession } from "./boot.ts";   // 启动编排：笔架异步 boot + gallery-first 恢复
@@ -348,6 +350,9 @@ initSmoothDevPanel(ctx);
 initTransientPanels(ctx);
 initSideWindows(ctx);
 initPlatformGuards(ctx);
+// timelapse（宣发轮 2026-08-19）：commit 钩子=wp:histchange；per-doc 串扰墙在 session-state adopt 两端。
+initTimelapse(doc);
+initTimelapseUi(() => session.name || t("nd.untitled"));
 
 // 笔架异步 boot（fire-and-forget；ctx 已建好）。
 initRackBoot(ctx);

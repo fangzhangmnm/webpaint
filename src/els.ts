@@ -106,6 +106,13 @@ export const els = {
   newDocConfirm: byId("newDocConfirm"),
   newDocCancel: byId("newDocCancel"),
   menuRename: byId("menuRename"),
+  // timelapse（宣发轮 2026-08-19）
+  menuTimelapse: byId<HTMLButtonElement>("menuTimelapse"),
+  menuTimelapseState: byId("menuTimelapseState"),
+  tlRecChip: byId<HTMLButtonElement>("tlRecChip"),
+  tlPanel: byId("tlPanel"),
+  tlPanelBody: byId("tlPanelBody"),
+  tlPanelClose: byId<HTMLButtonElement>("tlPanelClose"),
   menuSaveAs: byId("menuSaveAs"),
   menuRevertToOpen: byId("menuRevertToOpen"),
   menuEncrypt: byId("menuEncrypt"),

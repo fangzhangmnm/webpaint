@@ -94,6 +94,8 @@
     "src/save-status.ts",
     "src/app-context.ts",
     "src/session-state.ts",
+    "src/timelapse-session.ts",
+    "src/timelapse-ui.ts",
     "src/layers-panel.ts",
     "src/toolbar.ts",
     "src/transient-panels.ts",
