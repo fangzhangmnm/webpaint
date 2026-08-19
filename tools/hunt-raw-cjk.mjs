@@ -1,10 +1,12 @@
 // AST 级扫描：src/**/*.ts 里含 CJK 的字符串字面量 / 模板字面量（注释天然排除）。
 // 输出：文件:行  字面量内容（截断）+ 简单上下文（外层调用名，便于分类）。
-import ts from "/home/fangzhangmnm/jupyter/20260601 PWAProjects/20260524 WebPaint/node_modules/typescript/lib/typescript.js";
+import ts from "../node_modules/typescript/lib/typescript.js";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
-const ROOT = "/home/fangzhangmnm/jupyter/20260601 PWAProjects/20260524 WebPaint";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CJK = /[぀-ヿ㐀-鿿豈-﫿]/;
 
 const SKIP_DIRS = new Set(["vendor", "node_modules"]);
