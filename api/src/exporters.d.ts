@@ -7,6 +7,8 @@ export interface ExportOpts {
         w: number;
         h: number;
     } | null;
+    defringe?: boolean;
+    bg?: string;
 }
 export interface Exporter {
     id: string;

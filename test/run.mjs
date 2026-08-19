@@ -54,6 +54,7 @@ import "./boot-restore.test.ts";        // P5: 冷启动恢复的失败路径（
 import "./app-state.test.mjs";            // 2026-07-14 app-state struct 门面：冷字段直读写 collection（不落 RAM）+ push/pull
 import "./editor-state.test.mjs";         // 2026-07-14 desk struct：默认/setDirtyFlag/Serialize 往返/Unserialize 容错/reset
 import "./gallery-view-model.test.mjs";
+import "./frame-gate.test.ts";        // 图库帧门（防误触）：按压期扣帧只留最新/尾巴/多指/maxHold 保险丝
 import "./color-model.test.mjs";
 import "./brush-size.test.mjs";
 import "./drag-value.test.mjs";   // 拖动核纯状态机（v0.7.8）：shift 细调相对累积/无缝切换/clamp
