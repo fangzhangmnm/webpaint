@@ -34,6 +34,14 @@ export function setColor(hex: string) {
   colorWheel?.setColor(hex);   // 推给色轮；组件自己守 round-trip，不会弹 hue（init 前无色轮=只写状态）
 }
 
+// restore 路径（载图/新建/重置）的显式笔刷色写入——**绕过 color target**。setColor 会被 fill 期
+// 挂着的 target 劫持写进 PendingFill：存档笔刷色被吞、切工具即蒸发，且 swatch/色轮/编辑目标三方
+// 不一致（v0.9.11 修；用户手势仍走 setColor，target 语义不变）。
+export function setBrushColor(hex: string): void {
+  desk.brushTool.color = hex;
+  refreshColorDisplay();   // 显示按 target 优先刷（fill 期显示 pending，笔刷色在幕后就位）
+}
+
 export function toggleColorPanel(force?: boolean) {
   const hidden = els.colorPanel.classList.contains("hidden");
   const show = force === true ? true : force === false ? false : hidden;
@@ -62,7 +70,7 @@ let _pickerPinTimer: ReturnType<typeof setTimeout> | undefined;
 
 // 文档加载/新建后应用该 doc 保存的面板状态：只写 DOM，绝不回写 desk（否则会误标脏）。
 function applyColorPanelFromEditorState() {
-  els.activeSwatch.style.background = state.color;
+  refreshColorDisplay();   // swatch+色轮一起按 target 优先刷（原来直读 state.color 且不碰色轮 → fill 期三方不一致）
   if (desk.colorPanel.enabled) {
     els.colorPanel.classList.remove("hidden");
     const saved = desk.colorPanel.position;

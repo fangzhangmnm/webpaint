@@ -23,6 +23,8 @@ declare function freshGroups(): {
         target: string;
         layerMode: string;
         clipSelection: boolean;
+        defringe: boolean;
+        bg: string;
     };
     colorPanel: {
         enabled: boolean;
@@ -193,6 +195,8 @@ export declare const desk: {
         target: string;
         layerMode: string;
         clipSelection: boolean;
+        defringe: boolean;
+        bg: string;
     };
     colorPanel: {
         enabled: boolean;

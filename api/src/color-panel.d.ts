@@ -9,5 +9,6 @@ export declare function currentPanelColor(): string;
 /** 显示面重同步（target 生灭/undo 换色后调；只写 DOM/色轮，不写任何状态）。 */
 export declare function refreshColorDisplay(): void;
 export declare function setColor(hex: string): void;
+export declare function setBrushColor(hex: string): void;
 export declare function toggleColorPanel(force?: boolean): void;
 export declare function initColorPanel(ctx: AppContext): void;

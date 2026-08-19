@@ -27,6 +27,7 @@ import {
   watchFolder, listGalleryTrash,
 } from "../app-store.ts";
 import { getOrFetchCloudThumb, invalidateCachedThumb } from "./cloud-thumb-cache.ts";
+import { createFrameGate } from "./frame-gate.ts";
 import { reportError } from "../error-badge.ts";
 // 加密（ADR-0012）：tile 锁样式 + 解锁浏览；transform/密码循环全在 store（flow.encrypt/decrypt +
 // crypt seam）。图库只做 per-app 的部分：首次设密码双输 UX、活动项预检、明文残留清理、
@@ -186,19 +187,40 @@ function makeGallery(host: GalleryHost) {
       function safeFolder() { try { return appState.currentDirectory || ""; } catch { return ""; } }
 
       // ── watchFolder 订阅（网盘模型）：立即本地帧 + 云端帧同一 cb。换夹 = 退订重订。──
+      // 防误触（2026-08-19 user）：sync 完成的帧正好落在点击瞬间 → tile 位移 → 点错/进错文档。两招：
+      //   ① 非清空刷新：同夹重订阅（refresh/auth/online/push-done）不再 loading 清空网格——新帧到了
+      //     原地替换，keyed v-for 最小 patch。只有换夹/首帧前才 blank。
+      //   ② pointer 门（frame-gate）：手指按着（+抬起后短尾）期间到达的帧扣住只留最新，抬手才上屏。
+      //     loading 空白网格没东西可位移 → 直通，换夹导航不吃门的延迟。
+      type Snap = Parameters<Parameters<typeof watchFolder>[1]>[0];
       let _unsub: (() => void) | null = null;
+      let _framedFolder: string | null = null;   // 最近一次已上屏帧所属的夹（判「同夹刷新」用）
+      function applyFrame(snap: Snap) {
+        // 扣帧期间可能已换夹/换视图 → apply 时再挡一次（push 时挡过的是即时帧）
+        if (view.value !== "files" || snap.path !== folder.value) return;
+        data.files = snap.items as unknown as GItem[];
+        data.folderNames = snap.folderNames;
+        _framedFolder = snap.path;
+        loading.value = false;
+        void probeEncrypted();                    // 本夹本地项的加密态（锁图标/缩略图路径/加密菜单都靠它）
+      }
+      const gate = createFrameGate<Snap>(applyFrame);
       function subscribe() {
         _unsub?.(); _unsub = null;
         if (view.value !== "files") return;
-        loading.value = true;
+        loading.value = _framedFolder !== folder.value;
         _unsub = watchFolder(folder.value, (snap) => {
           if (snap.path !== folder.value) return;   // 双保险：换夹途中的旧帧丢弃（库内已 sanity-check，此处再挡）
-          data.files = snap.items as unknown as GItem[];
-          data.folderNames = snap.folderNames;
-          loading.value = false;
-          void probeEncrypted();                    // 本夹本地项的加密态（锁图标/缩略图路径/加密菜单都靠它）
+          if (loading.value) applyFrame(snap); else gate.push(snap);
         });
       }
+      // pointer 门的事件源：document 级捕获。只有图库模式下的按压才持门（canvas 长笔画与图库无关）；
+      // up/cancel 恒计数（按下时开着图库、抬手前关掉也不会漏减）。
+      const _onGatePtrDown = () => { if (document.body.dataset.mode === "gallery") gate.pointerDown(); };
+      const _onGatePtrUp = () => gate.pointerUp();
+      document.addEventListener("pointerdown", _onGatePtrDown, true);
+      document.addEventListener("pointerup", _onGatePtrUp, true);
+      document.addEventListener("pointercancel", _onGatePtrUp, true);
 
       // ── 加密态探测（**app 侧**）───────────────────────────────────────────────────────
       // store 的 Item 刻意没有 encrypted 轴（它内容盲；给它加一个就是让 store 懂内容）。
@@ -244,7 +266,13 @@ function makeGallery(host: GalleryHost) {
       function hydrateFolder(p: string) { if ((p || "") === folder.value) return; folder.value = p || ""; openMenu.value = null; subscribe(); }
 
       subscribe();                        // 初始订阅当前夹（v409：此刻 collection 未 hydrate → 恒为根；hydrateFolder 随后灌真值）
-      onUnmounted(() => { _unsub?.(); _unsub = null; });
+      onUnmounted(() => {
+        _unsub?.(); _unsub = null;
+        gate.reset();
+        document.removeEventListener("pointerdown", _onGatePtrDown, true);
+        document.removeEventListener("pointerup", _onGatePtrUp, true);
+        document.removeEventListener("pointercancel", _onGatePtrUp, true);
+      });
 
       // ---- 派生（纯 view-model；切片已在 store 内完成）----
       const folderTiles = computed(() => data.folderNames.map((fn) => ({ name: fn, path: pathJoin(folder.value, fn) })));

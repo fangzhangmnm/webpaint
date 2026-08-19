@@ -400,18 +400,24 @@ function overlayParity(glctx: BrowserGl2Port, add: Add): void {
     const { md, at } = maxPremulDiff(ref, glpx, n);
     add(`overlay:${erase ? "erase" : bm} vs compositeLayers`, md <= 4 && err === 0, `maxΔ=${md} err=0x${err.toString(16)} ${md > 4 ? at : ""}`);
   }
-  // lockAlpha：GL shader 裁 overlay 到 base.a；2D ref 预裁(dst-in 层 alpha)后 source-over → 应等价。
+  // lockAlpha = 真 source-atop（v0.9.12 语义拍板「改色不动 alpha」，对齐 CPU 像素笔）：
+  //   golden 断言**意图**（α 逐字节不动、RGB 按 ovA 插值、α=0 不动），JS float 独立构造后把
+  //   overlay 折进层再 compositeLayers——不再复刻 shader 的 dst-in 配方（旧 golden 同义反复，
+  //   测不出 α(2−α) 变硬）。
   {
     const opacity = 0.85;
     const A2D = { isGroup: false, visible: true, clippingMask: false, opacity: 1, mode: "source-over", bboxX: 0, bboxY: 0, bboxW: n, bboxH: n, canvas: imgToCanvas(bg, n) };
-    const L2D = { isGroup: false, visible: true, clippingMask: false, opacity: 1, mode: "source-over", bboxX: 0, bboxY: 0, bboxW: n, bboxH: n, canvas: imgToCanvas(layer, n) };
-    const clipped = document.createElement("canvas"); clipped.width = n; clipped.height = n;
-    const cc = clipped.getContext("2d")!; cc.drawImage(imgToCanvas(ov, n), 0, 0);
-    cc.globalCompositeOperation = "destination-in"; cc.drawImage(imgToCanvas(layer, n), 0, 0); cc.globalCompositeOperation = "source-over";
+    const merged = new Uint8Array(layer);
+    for (let p = 0; p < n * n; p++) {
+      const i = p * 4;
+      if (layer[i + 3] === 0) continue;   // α=0 处不动（GL 侧 RGB 规范化 0，premul 对比免疫）
+      const ovA = (ov[i + 3] / 255) * opacity;
+      for (let k = 0; k < 3; k++) merged[i + k] = Math.round(layer[i + k] + (ov[i + k] - layer[i + k]) * ovA);
+      // merged[i+3] = layer[i+3] 原样——α 不动就是语义本体
+    }
+    const L2Dm = { isGroup: false, visible: true, clippingMask: false, opacity: 1, mode: "source-over", bboxX: 0, bboxY: 0, bboxW: n, bboxH: n, canvas: imgToCanvas(merged, n) };
     const gc = document.createElement("canvas"); gc.width = n; gc.height = n; const gctx = gc.getContext("2d")!; gctx.clearRect(0, 0, n, n);
-    compositeLayers(gctx as unknown as CanvasRenderingContext2D, [A2D, L2D] as never, {
-      overlayFor: (node: unknown) => node === L2D ? { canvas: clipped, bboxX: 0, bboxY: 0, bboxW: n, bboxH: n, opacity, blendMode: "source-over" } : null,
-    } as never);
+    compositeLayers(gctx as unknown as CanvasRenderingContext2D, [A2D, L2Dm] as never, {});
     const ref = gctx.getImageData(0, 0, n, n).data;
     const active = { ...L(i1, 1, "source-over"), overlay: { tex: ovTex, opacity, erase: false, blendMode: "source-over", lockAlpha: true, selMask: null, ox: 0, oy: 0, ow: n, oh: n } };
     glctx.gl.getError();
@@ -419,7 +425,7 @@ function overlayParity(glctx: BrowserGl2Port, add: Add): void {
     const glpx = readComposite(glctx, comp, accum, n); glctx.returnFBO(accum);
     const err = glctx.gl.getError();
     const { md, at } = maxPremulDiff(ref, glpx, n);
-    add("overlay:lockAlpha GPU 裁 base.a vs 2D dst-in 层", md <= 4 && err === 0, `maxΔ=${md} err=0x${err.toString(16)} ${md > 4 ? at : ""}`);
+    add("overlay:lockAlpha 真 atop（α 不动）vs JS float golden", md <= 4 && err === 0, `maxΔ=${md} err=0x${err.toString(16)} ${md > 4 ? at : ""}`);
   }
   i0.dispose(); i1.dispose(); glctx.deleteTexture(ovTex);
 }
@@ -696,17 +702,32 @@ function fillParity(glctx: BrowserGl2Port, add: Add): void {
     const leaf = { isGroup: false, id, opacity: 0.9, mode: "source-over", clippingMask: false, visible: true, bboxX: 0, bboxY: 0, bboxW: N, bboxH: N, canvas: cBase, pixels };
     const nodes = [leaf];
     const ov = { kind: "fill", color: FILL, bx, by, bw, bh, layerId: id, lockAlpha, selMask: { data: selData, ox: bx, oy: by, ow: bw, oh: bh } };
-    // golden：CPU fillOnLayer 同式——tmp = 纯色 rect dst-in mask（lockAlpha 再 dst-in base）→ source-over 进层副本 → compositeLayers。
+    // golden：非 lock = CPU fillOnLayer 同式（纯色 rect dst-in mask → source-over 进层副本）。
+    // lock = **断言意图不是配方**（v0.9.12）：真 source-atop——α 平面逐字节不变、RGB 按 mask 强度
+    //   base→FILL 插值、α=0 处完全不变（JS float 独立构造；旧 golden 复刻 shader 的 dst-in 配方 =
+    //   同义反复，测不出 α(2−α) 变硬）。
     const filled = document.createElement("canvas"); filled.width = N; filled.height = N;
     const fctx = filled.getContext("2d")!;
-    fctx.drawImage(cBase, 0, 0);
-    const tmp = document.createElement("canvas"); tmp.width = bw; tmp.height = bh;
-    const tctx = tmp.getContext("2d")!;
-    tctx.fillStyle = `rgb(${FILL[0]},${FILL[1]},${FILL[2]})`;
-    tctx.fillRect(0, 0, bw, bh);
-    tctx.globalCompositeOperation = "destination-in"; tctx.drawImage(maskCanvas, 0, 0);
-    if (lockAlpha) { tctx.drawImage(cBase, -bx, -by); }   // 再 dst-in base alpha（shader ovA *= base.a 的 2D 等价）
-    fctx.drawImage(tmp, bx, by);
+    if (!lockAlpha) {
+      fctx.drawImage(cBase, 0, 0);
+      const tmp = document.createElement("canvas"); tmp.width = bw; tmp.height = bh;
+      const tctx = tmp.getContext("2d")!;
+      tctx.fillStyle = `rgb(${FILL[0]},${FILL[1]},${FILL[2]})`;
+      tctx.fillRect(0, 0, bw, bh);
+      tctx.globalCompositeOperation = "destination-in"; tctx.drawImage(maskCanvas, 0, 0);
+      fctx.drawImage(tmp, bx, by);
+    } else {
+      const src = cBase.getContext("2d")!.getImageData(0, 0, N, N);
+      const d = src.data;
+      for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) {
+        const m = selData[y * bw + x] / 255;
+        if (m === 0) continue;
+        const i = ((by + y) * N + (bx + x)) * 4;
+        if (d[i + 3] === 0) continue;   // α=0：RGB 也不动（不写隐形色）
+        for (let k = 0; k < 3; k++) d[i + k] = Math.round(d[i + k] + (FILL[k] - d[i + k]) * m);
+      }
+      fctx.putImageData(src, 0, 0);
+    }
     const goldenLeaf = { ...leaf, canvas: filled };
     const gc = document.createElement("canvas"); gc.width = N; gc.height = N;
     const gctx2 = gc.getContext("2d")!; gctx2.clearRect(0, 0, N, N);
@@ -746,8 +767,25 @@ function fillParity(glctx: BrowserGl2Port, add: Add): void {
     }
     // commit ≡ live（同 shader SSoT）+ bbox 外 tile 不动 + 收养生效。
     const farBefore = pixels.getTileHandle(1, 1);
+    const baseRegion = lockAlpha ? pixels.getRegion(bx, by, bw, bh) : null;   // α 锚的 before 快照
     const ok = raster.bakeStamps(id, pixels, ov as never, N, N, (px, x, y, w, h) => pixels.applyRegionDiff(x, y, w, h, px));
     add(`fill:${lockAlpha ? "lockAlpha " : ""}commit 提交成功`, ok);
+    if (lockAlpha && baseRegion) {
+      // 真 atop 硬锚（v0.9.12）：commit 后 α 平面逐字节不变；α=0 处 RGB 也不动（不写隐形色）。
+      const after = pixels.getRegion(bx, by, bw, bh);
+      let aBad = 0, rgbBad = 0;
+      for (let i = 0; i < bw * bh; i++) {
+        if (after[i * 4 + 3] !== baseRegion[i * 4 + 3]) aBad++;
+        if (baseRegion[i * 4 + 3] === 0) {
+          // GL merge 外层按 ao 归一：α=0 处 RGB 规范化为 0（原值或 0 都算无隐形色）
+          const keep = after[i * 4] === baseRegion[i * 4] && after[i * 4 + 1] === baseRegion[i * 4 + 1] && after[i * 4 + 2] === baseRegion[i * 4 + 2];
+          const zeroed = after[i * 4] === 0 && after[i * 4 + 1] === 0 && after[i * 4 + 2] === 0;
+          if (!keep && !zeroed) rgbBad++;
+        }
+      }
+      add("fill:lockAlpha commit 后 α 平面逐字节不变（真 atop 锚）", aBad === 0, `${aBad} px α 变了`);
+      add("fill:lockAlpha α=0 处无隐形色（RGB=原值或规范化 0）", rgbBad === 0, `${rgbBad} px RGB 泄漏`);
+    }
     const bridge = room.bridge;
     const upBefore = bridge.stats.uploads;
     tree.renderFrame(nodes as never, N, N, undefined, [1, 0, 0, 1, 0, 0], N, N, 1, [0, 0, 0], [], null, null, null);

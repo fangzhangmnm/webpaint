@@ -67,14 +67,20 @@ export function compositeFragSource(mode: BlendMode, src: SourceKind = "tiled", 
          vec2 ovUv = (docPos - u_ovOrigin) / u_ovSize;
          vec4 ov = (any(lessThan(ovUv, vec2(0.0))) || any(greaterThan(ovUv, vec2(1.0)))) ? vec4(0.0) : texture(u_overlay, ovUv);
          float ovA = ov.a * u_overlayOpacity;
-         if (u_ovLockAlpha == 1) ovA *= base.a;                    // 锁α：裁到层现有 alpha（dst-in 层）
          if (u_ovHasSel == 1) {                                    // 选区：裁到 mask（dst-in 选区）
            vec2 suv = (docPos - u_ovSelOrigin) / u_ovSelSize;
            ovA *= (any(lessThan(suv, vec2(0.0))) || any(greaterThan(suv, vec2(1.0)))) ? 0.0 : texture(u_ovSel, suv).r;   // R8 gray8 直传（v0.4.6）
          }
          float srcA; vec3 Cs;
          if (u_overlayErase == 1) {
-           srcA = base.a * (1.0 - ovA); Cs = base.rgb;
+           srcA = base.a * (1.0 - ovA); Cs = base.rgb;             // erase 不受锁α影响（v242 CPU 像素笔：erase 分支优先）
+         } else if (u_ovLockAlpha == 1) {
+           // 锁α = 真 source-atop（v0.9.12，对齐 CPU 像素笔 brush.ts _pixelBlendSpan "atop"）：
+           //   α 逐字节不动、α=0 处像素完全不变（不写隐形色——贴图防黑边走导出 defringe）。
+           //   旧公式 ovA*=base.a 再 source-over 会让半透明 α → α(2−α)，AA 边反复填/画越来越硬。
+           vec3 ovBlend = (1.0 - base.a) * ov.rgb + base.a * blendRGB_ov(base.rgb, ov.rgb);
+           srcA = base.a;
+           Cs = (base.a > 0.0) ? mix(base.rgb, ovBlend, ovA) : base.rgb;
          } else {
            vec3 ovBlend = (1.0 - base.a) * ov.rgb + base.a * blendRGB_ov(base.rgb, ov.rgb);   // W3C blend 只在 base 存在处
            srcA = ovA + base.a * (1.0 - ovA);

@@ -998,7 +998,7 @@ export class InputController {
   //     rect     → drawing-rect
   //     magic    → magic-tentative（pointerup 时立即 flood fill）
   _beginLasso(rec: PointerRec, e?: PointerEvent) {
-    if (!this.doc.activeLayer) { rec.role = null; return; }
+    if (!this.doc.activeLayer) { rec.role = null; this.status(t("el.none")); return; }   // 曾静默哑 tap（v0.9.11）
     const { x: dx, y: dy } = this.board.screenToDoc(rec.x, rec.y);
     if (this.lasso.state() === "floating") {
       const hit = this.lasso.hitTest(dx, dy, this.board.viewport.scale);

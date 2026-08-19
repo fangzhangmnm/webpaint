@@ -13,6 +13,7 @@
 import { reactive } from "../vendor/vue/vue.esm-browser.prod.js";
 import { WEBPAINT_VERSION } from "./version.ts";
 import { reportError } from "./error-badge.ts";
+import { setBrushColor } from "./color-panel.ts";
 import { thumbBlobFromBytes, setCurrentSessionName } from "./session.ts";
 import { renderNodesToBytes } from "./backend/doc-render.ts";
 import { encodeDocToOra, decodeOraToPainting, paintingDataToEncodeDoc, parseAppVersion, type DecodedPainting } from "./backend/ora.ts";
@@ -54,7 +55,7 @@ let referenceWindow: AppContext["referenceWindow"], paletteWindow: AppContext["p
 let setStatus: AppContext["setStatus"], withBusy: AppContext["withBusy"];
 let updateSaveStatus: AppContext["updateSaveStatus"], updateNewerBanner: AppContext["updateNewerBanner"];
 let pullSettingsAndState: AppContext["pullSettingsAndState"];
-let setColor: AppContext["setColor"], applyCheckerboard: AppContext["applyCheckerboard"], renderLayersPanel: AppContext["renderLayersPanel"];
+let applyCheckerboard: AppContext["applyCheckerboard"], renderLayersPanel: AppContext["renderLayersPanel"];
 let setGalleryOpen: AppContext["setGalleryOpen"];
 let checkQuotaAndWarn: AppContext["checkQuotaAndWarn"];
 // C2 记账：gallery↔session 双向依赖的反向半边（refresh×5 + invalidateEncrypted×2 经此句柄）——
@@ -99,7 +100,7 @@ async function _refreshEncrypted() {
 function resetEditorState() {
   referenceWindow.clearBitmap?.(); referenceWindow.close?.();   // ?.=元素可能未升级（无 CE 环境），见 ReferenceWindowHandle 注
   paletteWindow.clear?.(); paletteWindow.close?.();
-  setColor("#000000"); applyCheckerboard(false); state.filterBrush = null; applyBlenderSyncState();
+  setBrushColor("#000000"); applyCheckerboard(false); state.filterBrush = null; applyBlenderSyncState();   // restore 路径绕 target（v0.9.11）
   desk.reset();   // desk per-doc：开新文件/换画/卸载 → 重置 desk struct（stage4）
 }
 
@@ -115,7 +116,7 @@ function restoreEditorStateFromOra(loaded: LoadedDoc) {
       referenceWindow.setBitmap?.(bitmap, { persistBlob: loaded._referenceBlob, skipFit: true });
     }).catch(() => {});
   }
-  if (ws?.color) setColor(ws.color);
+  if (ws?.color) setBrushColor(ws.color);   // 存档笔刷色写笔刷不写 target——fill 期载图曾被吞进 PendingFill 蒸发（v0.9.11）
   if (ws?.palette) { try { paletteWindow.applySerializedState(ws.palette); } catch (_) {} }
   // 旧轨（webpaint/state.json）：灌**全部**工具的 dial（eraser/filterBrush 只在这一轨；见 storeEditorStateToOra 的双轨注）。
   const savedToolStates = (ws?.toolStates && typeof ws.toolStates === "object") ? ws.toolStates : null;
@@ -629,7 +630,7 @@ export function initSession(ctx: AppContext) {
   setStatus = ctx.setStatus; withBusy = ctx.withBusy;
   updateSaveStatus = ctx.updateSaveStatus; updateNewerBanner = ctx.updateNewerBanner;
   pullSettingsAndState = ctx.pullSettingsAndState;
-  setColor = ctx.setColor; applyCheckerboard = ctx.applyCheckerboard; renderLayersPanel = ctx.renderLayersPanel;
+  applyCheckerboard = ctx.applyCheckerboard; renderLayersPanel = ctx.renderLayersPanel;
   setGalleryOpen = ctx.setGalleryOpen;
   checkQuotaAndWarn = ctx.checkQuotaAndWarn;
   gallery = ctx.gallery;

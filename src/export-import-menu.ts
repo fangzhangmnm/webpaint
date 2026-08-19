@@ -10,6 +10,9 @@
 // app 协作件经 ctx 绑入：doc / setStatus（核心单例）。
 
 import { getExporter, listExportersByKind } from "./exporters.ts";
+import { parseColorName, colorNameOf } from "./color-name.ts";
+import { normalizeHex } from "./ui/color-model.ts";
+import { parseExportBg } from "./backend/algorithms/flatten-bg.ts";
 import { els } from "./els.ts";
 import { t } from "./i18n/index.ts";
 import { setMenuOpen } from "./settings-menu.ts";
@@ -53,7 +56,10 @@ function _updateMenuSubLabels() {
   if (_isProjectFormat(ei.format)) {
     eiEl.textContent = `.${(getExporter(ei.format) || getExporter("ora")).ext} · ${t("tm.scopeAllLayers")} · ${t("sub.file")}`;
   } else {
-    eiEl.textContent = `${ei.format.toUpperCase()} · ${ei.scope === "active" ? t("sub.activeLayer") : t("sub.merged")} · ${ei.target === "clipboard" ? t("sub.clipboard") : ei.target === "print" ? t("sub.print") : t("sub.file")}${ei.clipSelection ? " · " + t("sub.selection") : ""}`;
+    // v0.9.14：底色非透明时 sub-label 带一眼（色名系统给人话：「白」「藏青」；词库未到 = hex 兜底）
+    const bgRgb = parseExportBg(desk.export.bg);
+    const bgTail = bgRgb ? ` · ${colorNameOf(bgRgb.r, bgRgb.g, bgRgb.b)}` : "";
+    eiEl.textContent = `${ei.format.toUpperCase()} · ${ei.scope === "active" ? t("sub.activeLayer") : t("sub.merged")} · ${ei.target === "clipboard" ? t("sub.clipboard") : ei.target === "print" ? t("sub.print") : t("sub.file")}${ei.clipSelection ? " · " + t("sub.selection") : ""}${bgTail}`;
   }
 }
 
@@ -117,8 +123,8 @@ export function initExportImportMenu(ctx: AppContext) {
     const cropRect = _selCropRect();   // #16：仅导出选区范围（三种去向统一生效）
     try {
       if (c.target === "clipboard") {
-        // 剪贴板恒为 PNG（ClipboardItem image/png）——格式选择只作用于文件/分享路径
-        await copyImageToClipboard(doc, c.scope, cropRect);
+        // 剪贴板恒为 PNG（ClipboardItem image/png）——格式选择只作用于文件/分享路径；底色/防黑边同享（v0.9.14）
+        await copyImageToClipboard(doc, c.scope, cropRect, desk.export.defringe, desk.export.bg);
         setStatus(t("tm.copiedPngToClipboard", { scope: c.scope === "active" ? t("tm.scopeActiveLayer") : t("tm.scopeMerged") }));
       } else if (c.target === "print" && !prefersShare()) {
         // 打印恒走位图（PNG）——矢量/ora 之类没意义；scope 仍生效。
@@ -127,7 +133,7 @@ export function initExportImportMenu(ctx: AppContext) {
         //   window.open 必须在此**手势同步期**就开好，不能等 encode 的 await（iOS transient-activation 严）。
         const win = window.open("", "_blank");
         if (exp.busyHint) setStatus(exp.busyHint, true);
-        const blob = await exp.encode(doc, { scope: c.scope, cropRect });
+        const blob = await exp.encode(doc, { scope: c.scope, cropRect, defringe: desk.export.defringe, bg: desk.export.bg });
         if (win) {
           await printImageInNewWindow(win, blob);
           setStatus(t("tm.printOpenedNewTab"));
@@ -140,7 +146,7 @@ export function initExportImportMenu(ctx: AppContext) {
         // 文件/分享——以及 #23：iOS/iPad 上「打印」也走这里（分享面板自带打印；PWA 里 window.open 打印脆弱）
         const exp = getExporter(c.target === "print" ? (c.format === "jpg" ? "jpg" : "png") : c.format) || getExporter("png");
         if (exp.busyHint) setStatus(exp.busyHint, true);
-        const blob = await exp.encode(doc, { scope: c.scope, cropRect });
+        const blob = await exp.encode(doc, { scope: c.scope, cropRect, defringe: desk.export.defringe, bg: desk.export.bg });
         const r = await shareOrDownloadBlob(blob, `${session.name}-${stampNow()}.${exp.ext}`, exp.mime);
         setStatus(r.method === "share" ? t("tm.sharePanelOpened") : r.method === "cancel" ? t("tm.shareCancelled") : t("tm.extDownloadedUpper", { ext: exp.ext.toUpperCase() }));
       }
@@ -159,6 +165,8 @@ export function initExportImportMenu(ctx: AppContext) {
     e.stopPropagation();
     const c = _getExpImg();
     const proj0 = _isProjectFormat(c.format);
+    const bg0 = desk.export.bg;
+    const bgCustom0 = bg0 !== "transparent" && bg0 !== "#ffffff" && bg0 !== "#000000";
     const fmtOptions = [...listExportersByKind("image"), ...listExportersByKind("project")].map((exp) =>
       `<option value="${exp.id}" ${c.format === exp.id ? "selected" : ""}>${exp.label}</option>`).join("");
     const applyLocks = (popup: HTMLElement) => {
@@ -166,6 +174,7 @@ export function initExportImportMenu(ctx: AppContext) {
       const scopeSel = popup.querySelector('select[name="scope"]') as HTMLSelectElement;
       const tgtSel = popup.querySelector('select[name="tgt"]') as HTMLSelectElement;
       const clipEl = popup.querySelector('input[name="clipsel"]') as HTMLInputElement;
+      const defrEl = popup.querySelector('input[name="defringe"]') as HTMLInputElement;
       const proj = _isProjectFormat(fmtSel.value);
       if (proj) { scopeSel.value = "all"; tgtSel.value = "file"; }
       else if (scopeSel.value === "all") scopeSel.value = "merged";   // 「所有图层」仅项目格式可选
@@ -175,6 +184,25 @@ export function initExportImportMenu(ctx: AppContext) {
       desk.export.target = tgtSel.value;
       desk.export.layerMode = scopeSel.value;
       if (!clipEl.disabled) desk.export.clipSelection = clipEl.checked;
+      // v0.9.14 导出底色：preset radio 直落；自定义走 hex/色名/色温 parse，非法=保留现值（半输入永不生效）。
+      //   项目格式（ora/psd）不碰像素 → 整节灰掉。
+      const bgChecked = popup.querySelector('input[name="expbg"]:checked') as HTMLInputElement | null;
+      const bgInput = popup.querySelector('input[name="expbgc"]') as HTMLInputElement;
+      const bgChip = popup.querySelector('[data-role="expbg-chip"]') as HTMLElement;
+      popup.querySelectorAll<HTMLInputElement>('input[name="expbg"]').forEach((r) => { r.disabled = proj; });
+      if (!proj && bgChecked) {
+        if (bgChecked.value !== "custom") desk.export.bg = bgChecked.value;
+        else {
+          const parsed = normalizeHex(bgInput.value) ?? parseColorName(bgInput.value);
+          if (parsed) desk.export.bg = parsed;
+        }
+      }
+      bgInput.disabled = proj || bgChecked?.value !== "custom";
+      const bgEff = parseExportBg(desk.export.bg);
+      bgChip.style.background = bgEff ? desk.export.bg : "transparent";
+      // v0.9.13/14 联动：defringe 只对「PNG 且透明底」有意义（涂了底 α 全 255；JPG 无 alpha；项目格式不碰像素）
+      defrEl.disabled = fmtSel.value !== "png" || !!bgEff;
+      if (!defrEl.disabled) desk.export.defringe = defrEl.checked;
       _updateMenuSubLabels();
     };
     _openMenuConfigPopup(e.currentTarget as HTMLElement, `
@@ -199,8 +227,19 @@ export function initExportImportMenu(ctx: AppContext) {
         </select>
       </div>
       <div class="menu-config-section">
+        <div class="menu-config-title">${t("tm.configBg")}</div>
+        <label><input type="radio" name="expbg" value="transparent" ${bg0 === "transparent" ? "checked" : ""} ${proj0 ? "disabled" : ""} /> ${t("tm.bgTransparent")}</label>
+        <label><input type="radio" name="expbg" value="#ffffff" ${bg0 === "#ffffff" ? "checked" : ""} ${proj0 ? "disabled" : ""} /> ${t("tm.bgWhite")}</label>
+        <label><input type="radio" name="expbg" value="#000000" ${bg0 === "#000000" ? "checked" : ""} ${proj0 ? "disabled" : ""} /> ${t("tm.bgBlack")}</label>
+        <label><input type="radio" name="expbg" value="custom" ${bgCustom0 ? "checked" : ""} ${proj0 ? "disabled" : ""} /> ${t("tm.bgCustom")}
+          <input type="text" name="expbgc" maxlength="24" style="width:9em" placeholder="${t("tm.bgCustomPh")}" value="${bgCustom0 ? bg0 : ""}" ${(proj0 || !bgCustom0) ? "disabled" : ""} />
+          <i class="color-chip" data-role="expbg-chip" style="display:inline-block;vertical-align:middle;background:${parseExportBg(bg0) ? bg0 : "transparent"}"></i>
+        </label>
+      </div>
+      <div class="menu-config-section">
         <div class="menu-config-title">${t("tm.configRange")}</div>
         <label><input type="checkbox" name="clipsel" ${c.clipSelection ? "checked" : ""} ${(proj0 || !doc.selection) ? "disabled" : ""} /> ${t("tm.clipToSelection")}${doc.selection ? "" : `（${t("tm.noSelectionNow")}）`}</label>
+        <label><input type="checkbox" name="defringe" ${desk.export.defringe ? "checked" : ""} ${(c.format !== "png" || !!parseExportBg(bg0)) ? "disabled" : ""} /> ${t("tm.defringe")}</label>
       </div>
     `, applyLocks);
   });

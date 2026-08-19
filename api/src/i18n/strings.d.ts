@@ -294,6 +294,48 @@ export declare const S: {
         readonly ja: "選択範囲に切り抜き";
         readonly tok: "o kipisi tawa ma wile";
     };
+    readonly "tm.defringe": {
+        readonly zh: "贴图防黑边（透明区回填边缘色，仅 PNG）";
+        readonly en: "Defringe for textures (extend edge colors under transparency, PNG only)";
+        readonly ja: "テクスチャ用フリンジ除去（透明部に縁色を延長、PNG のみ）";
+        readonly tok: "pona e selo (kule pi poka li tawa insa pi ala, PNG taso)";
+    };
+    readonly "tm.configBg": {
+        readonly zh: "背景";
+        readonly en: "Background";
+        readonly ja: "背景";
+        readonly tok: "monsi";
+    };
+    readonly "tm.bgTransparent": {
+        readonly zh: "透明（JPG=白底）";
+        readonly en: "Transparent (JPG = white)";
+        readonly ja: "透明（JPG は白）";
+        readonly tok: "ala (JPG la walo)";
+    };
+    readonly "tm.bgWhite": {
+        readonly zh: "白";
+        readonly en: "White";
+        readonly ja: "白";
+        readonly tok: "walo";
+    };
+    readonly "tm.bgBlack": {
+        readonly zh: "黑";
+        readonly en: "Black";
+        readonly ja: "黒";
+        readonly tok: "pimeja";
+    };
+    readonly "tm.bgCustom": {
+        readonly zh: "自定义";
+        readonly en: "Custom";
+        readonly ja: "カスタム";
+        readonly tok: "ante";
+    };
+    readonly "tm.bgCustomPh": {
+        readonly zh: "hex / 色名 / 5600k";
+        readonly en: "hex / color name / 5600k";
+        readonly ja: "hex / 色名 / 5600k";
+        readonly tok: "hex / nimi kule / 5600k";
+    };
     readonly "tm.noSelectionNow": {
         readonly zh: "当前无选区";
         readonly en: "no selection";
@@ -839,6 +881,12 @@ export declare const S: {
         readonly en: "Fill commit failed";
         readonly ja: "塗りつぶしの確定に失敗しました";
         readonly tok: "pali kule li pakala";
+    };
+    readonly "fm.exitNoFill": {
+        readonly zh: "未填充（图层不可编辑），选区已清除";
+        readonly en: "Not filled (layer not editable) — selection cleared";
+        readonly ja: "塗りつぶし未実行（レイヤーは編集不可）。選択を解除しました";
+        readonly tok: "kule ala (lipu li ken ala ante) — ma wile li weka";
     };
     readonly "lp.refTip": {
         readonly zh: "参考层：魔棒 / 填充读这一层";
@@ -5343,9 +5391,9 @@ export declare const S: {
         readonly ja: "彩度";
     };
     readonly "flt.hsb.satMode": {
-        readonly zh: "饱和模式";
-        readonly en: "Saturation mode";
-        readonly ja: "彩度モード";
+        readonly zh: "模式";
+        readonly en: "Mode";
+        readonly ja: "モード";
     };
     readonly "flt.hsb.satNatural": {
         readonly zh: "自然";
@@ -5369,33 +5417,33 @@ export declare const S: {
     };
     readonly "flt.cb.cyanRed": {
         readonly zh: "青 ⟷ 红";
-        readonly en: "Cyan ⟷ Red";
-        readonly ja: "シアン ⟷ レッド";
+        readonly en: "C ⟷ R";
+        readonly ja: "C ⟷ R";
     };
     readonly "flt.cb.magentaGreen": {
         readonly zh: "品 ⟷ 绿";
-        readonly en: "Magenta ⟷ Green";
-        readonly ja: "マゼンタ ⟷ グリーン";
+        readonly en: "M ⟷ G";
+        readonly ja: "M ⟷ G";
     };
     readonly "flt.cb.yellowBlue": {
         readonly zh: "黄 ⟷ 蓝";
-        readonly en: "Yellow ⟷ Blue";
-        readonly ja: "イエロー ⟷ ブルー";
+        readonly en: "Y ⟷ B";
+        readonly ja: "Y ⟷ B";
     };
     readonly "flt.cb.shadows": {
-        readonly zh: "阴影（暗部，luma≈0）";
-        readonly en: "Shadows (dark, luma≈0)";
-        readonly ja: "シャドウ（暗部、luma≈0）";
+        readonly zh: "阴影";
+        readonly en: "Shadows";
+        readonly ja: "シャドウ";
     };
     readonly "flt.cb.midtones": {
-        readonly zh: "中间调（主体，luma≈0.5）";
-        readonly en: "Midtones (luma≈0.5)";
-        readonly ja: "中間調（luma≈0.5）";
+        readonly zh: "中间调";
+        readonly en: "Midtones";
+        readonly ja: "中間調";
     };
     readonly "flt.cb.highlights": {
-        readonly zh: "高光（亮部，luma≈1）";
-        readonly en: "Highlights (bright, luma≈1)";
-        readonly ja: "ハイライト（明部、luma≈1）";
+        readonly zh: "高光";
+        readonly en: "Highlights";
+        readonly ja: "ハイライト";
     };
     readonly "flt.curves.title": {
         readonly zh: "曲线";
@@ -5468,9 +5516,9 @@ export declare const S: {
         readonly ja: "シャープ（ブラシ）";
     };
     readonly "flt.sb.slider": {
-        readonly zh: "← 模糊      锐化 →";
-        readonly en: "← Blur      Sharpen →";
-        readonly ja: "← ぼかし      シャープ →";
+        readonly zh: "模糊 ⟷ 锐化";
+        readonly en: "Blur⟷Sharp";
+        readonly ja: "ボケ ⟷ 鮮鋭";
     };
     readonly "flt.mos.title": {
         readonly zh: "马赛克";
@@ -5480,7 +5528,7 @@ export declare const S: {
     readonly "flt.mos.cellSize": {
         readonly zh: "块大小";
         readonly en: "Cell size";
-        readonly ja: "ブロックサイズ";
+        readonly ja: "サイズ";
     };
     readonly "flt.ht.title": {
         readonly zh: "半调网点";
@@ -5488,14 +5536,14 @@ export declare const S: {
         readonly ja: "ハーフトーン";
     };
     readonly "flt.ht.cellSize": {
-        readonly zh: "网点间距";
-        readonly en: "Dot pitch";
-        readonly ja: "網点間隔";
+        readonly zh: "间距";
+        readonly en: "Pitch";
+        readonly ja: "間隔";
     };
     readonly "flt.ht.dotScale": {
-        readonly zh: "网点缩放";
-        readonly en: "Dot scale";
-        readonly ja: "網点スケール";
+        readonly zh: "缩放";
+        readonly en: "Scale";
+        readonly ja: "スケール";
     };
     readonly "flt.ht.mode": {
         readonly zh: "模式";
@@ -5518,9 +5566,9 @@ export declare const S: {
         readonly ja: "ステンドグラス";
     };
     readonly "flt.sg.cellSize": {
-        readonly zh: "玻璃块大小";
-        readonly en: "Glass cell size";
-        readonly ja: "ガラスサイズ";
+        readonly zh: "块大小";
+        readonly en: "Cell size";
+        readonly ja: "サイズ";
     };
     readonly "flt.sg.leadWidth": {
         readonly zh: "铅条粗细";

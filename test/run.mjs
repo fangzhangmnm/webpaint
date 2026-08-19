@@ -23,6 +23,9 @@ import "./iso-frame.test.mjs";         // isometric 透视模式：纯平行三�
 import "./app-version.test.mjs";
 import "./cpu-tile-pool.test.mjs";
 import "./soft-gl2-port.test.mjs";   // C8 SoftGl2Port：真消费类（栅格/合成/烤定）无 GL 跑通 + 对表纪律
+import "./fill-lockalpha.test.mjs";  // v0.9.12 lockAlpha 真 atop：α 不动/α=0 不写隐形色/erase 不受锁（fill 像素路径首次进 npm test）
+import "./defringe.test.mjs";        // v0.9.13 导出贴图防黑边：α=0 回填边缘色 + PNG 往返保底
+import "./export-bg.test.mjs";       // v0.9.14 导出底色：flattenToBg 数学 + parseExportBg 防御收口
 import "./background-sync-jobs.test.mjs";
 import "./undo-stack.test.mjs";             // T1 workpiece v2（ADR-0008）：令牌/collector/自反 swap/配额/双计数
 import "./layer-tiles.test.mjs";            // T2 像素组件：写时扣押（Krita memento）/verbs/computed 白名单+双捕获/no-op 守卫（pixel-tx-noop 后继）
@@ -53,6 +56,7 @@ import "./boot-restore.test.ts";        // P5: 冷启动恢复的失败路径（
 import "./app-state.test.mjs";            // 2026-07-14 app-state struct 门面：冷字段直读写 collection（不落 RAM）+ push/pull
 import "./editor-state.test.mjs";         // 2026-07-14 desk struct：默认/setDirtyFlag/Serialize 往返/Unserialize 容错/reset
 import "./gallery-view-model.test.mjs";
+import "./frame-gate.test.ts";        // 图库帧门（防误触）：按压期扣帧只留最新/尾巴/多指/maxHold 保险丝
 import "./color-model.test.mjs";
 import "./brush-size.test.mjs";
 import "./drag-value.test.mjs";   // 拖动核纯状态机（v0.7.8）：shift 细调相对累积/无缝切换/clamp
