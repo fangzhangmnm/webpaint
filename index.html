@@ -1401,7 +1401,7 @@
       <!-- v124b dev 标识 (user：「让我们知道是 dev」)；app.js 检测后加 .visible -->
       <span id="envChip" class="env-chip hidden" aria-label="dev environment">DEV</span>
       <!-- timelapse 录制指示：安全护栏，录制中全局常驻（spec §3——只有红点+短词，不显示体积）。点击直达录制面板。 -->
-      <button id="tlRecChip" class="tl-rec-chip hidden" type="button" data-i18n-aria="tl.title"><span class="tl-rec-dot" aria-hidden="true"></span><span data-i18n="tl.rec">录</span></button>
+      <button id="tlRecChip" class="tl-rec-chip hidden" type="button" data-i18n-aria="tl.title"><span class="tl-rec-dot" aria-hidden="true"></span><span id="tlRecLabel">录制中</span></button>
     </div>
 
     <!-- timelapse 录制面板（菜单「过程录像」/ 红点 chip 打开；内容随录制态由 timelapse-ui.ts 渲染） -->
@@ -1444,6 +1444,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-23ea8a4ca9be.mjs"></script>
+    <script type="module" src="./dist/webpaint-08d4b2416f82.mjs"></script>
   </body>
 </html>

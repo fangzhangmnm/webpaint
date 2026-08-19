@@ -110,6 +110,7 @@ export const els = {
   menuTimelapse: byId<HTMLButtonElement>("menuTimelapse"),
   menuTimelapseState: byId("menuTimelapseState"),
   tlRecChip: byId<HTMLButtonElement>("tlRecChip"),
+  tlRecLabel: byId("tlRecLabel"),
   tlPanel: byId("tlPanel"),
   tlPanelHead: byId("tlPanelHead"),
   tlPanelBody: byId("tlPanelBody"),

@@ -88,7 +88,7 @@ export const S = {
   // ── timelapse 过程录像（宣发轮 2026-08-19，spec=ai-docs/20260819-timelapse-spec.md）──────────
   "menu.timelapse":     { zh: "过程录像…",      en: "Timelapse…",        ja: "タイムラプス…", tok: "sitelen tawa…" },
   "tl.title":           { zh: "过程录像",        en: "Timelapse",         ja: "タイムラプス", tok: "sitelen tawa" },
-  "tl.rec":             { zh: "录",              en: "REC",               ja: "録画", tok: "lukin" },
+  "tl.rec":             { zh: "录制中",          en: "REC",               ja: "録画中", tok: "lukin" },
   "tl.aspect":          { zh: "画幅比例",        en: "Aspect ratio",      ja: "アスペクト比" },
   "tl.longEdge":        { zh: "分辨率（最长边）", en: "Resolution (long edge)", ja: "解像度（長辺）" },
   "tl.start":           { zh: "开始录制",        en: "Start recording",   ja: "録画開始", tok: "o open lukin" },

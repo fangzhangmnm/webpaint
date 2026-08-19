@@ -76,6 +76,9 @@ function _renderChip(): void {
   const show = s.exists;   // 开过录就常驻（含暂停态——用户得知道这张画身上有录像）
   els.tlRecChip.classList.toggle("hidden", !show);
   els.tlRecChip.classList.toggle("tl-paused", show && !s.on);
+  // 文案随状态走（user：中文有宽度写全「录制中」；暂停时写「录制中」=谎报，动态换「已暂停」）。
+  // 不挂 data-i18n：换语言=reload（i18n 架构约定），boot 重渲即正确。
+  els.tlRecLabel.textContent = s.on ? t("tl.rec") : t("tl.state.paused");
 }
 
 function _renderMenuState(): void {
