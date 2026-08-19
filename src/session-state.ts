@@ -61,7 +61,7 @@ let checkQuotaAndWarn: AppContext["checkQuotaAndWarn"];
 let gallery: AppContext["gallery"];
 
 // ---- session 拥有的 SSoT 状态 ----
-let _activeSessionName: string | null = "未命名";   // 幽灵 path 保护：boot 成功/主动 open/new/save-as 才升级真名
+let _activeSessionName: string | null = t("nd.untitled");   // 幽灵 path 保护：boot 成功/主动 open/new/save-as 才升级真名
 let _isLazyBlankSession = false;
 let _loadedDocIsNewer = false;
 let _loadedDocWriterVer: string | null = null;
@@ -184,7 +184,7 @@ function _docIsBlankUnnamed() {
     for (const L of flattenViewLeaves(doc.layers)) if (L.bboxW > 0 && L.bboxH > 0) { _isLazyBlankSession = false; _recomputePhase(); return false; }
     return true;
   }
-  if (_activeSessionName && _activeSessionName !== "未命名") return false;
+  if (_activeSessionName && _activeSessionName !== t("nd.untitled")) return false;
   for (const L of flattenViewLeaves(doc.layers)) if (L.bboxW > 0 && L.bboxH > 0) return false;
   return true;
 }
@@ -269,7 +269,7 @@ async function _captureCheckpoint(name: string, trigger: CheckpointTrigger) {
     const bytes: Blob | null = cipher ?? await f.open();   // 明文件取当前 at-rest 明文字节
     if (!bytes) return;                                 // 没字节可封（纯云端未缓存 / 锁定）→ 静默跳过
     await putCheckpoint(checkpointKey(full), { name: full, slot: 0, at: Date.now(), bytes, encrypted: cipher != null });
-  } catch (e) { reportError(new Error("[checkpoint] 封存失败（不影响打开）: " + String(e)), "log"); }
+  } catch (e) { reportError(new Error("[checkpoint] capture failed (open unaffected): " + String(e)), "log"); }
 }
 /** 读回快照。加密的先解壳（内存密码；锁定/错密码 → null 由调用方提示要密码）。 */
 async function _readSessionCheckpoint(name: string): Promise<{ blob: Blob; at: number } | null> {
@@ -281,11 +281,11 @@ async function _readSessionCheckpoint(name: string): Promise<{ blob: Blob; at: n
     if (!pw) return null;                                // 锁定 → 调用方提示「需要密码」
     const plain = await _store.encryption.tryDecryptEncryptedBlob(rec.bytes, pw);
     return plain ? { blob: plain, at: rec.at } : null;
-  } catch (e) { reportError(new Error("[checkpoint] 读取失败: " + String(e)), "log"); return null; }
+  } catch (e) { reportError(new Error("[checkpoint] read failed: " + String(e)), "log"); return null; }
 }
 /** 作品被删/改名 → 丢掉它的快照（按 key 精确清，**不做全库扫描**）。 */
 async function _dropCheckpoint(name: string) {
-  try { await deleteCheckpoint(checkpointKey(toFull(name))); } catch (e) { reportError(new Error("[checkpoint] 清理失败: " + String(e)), "log"); }
+  try { await deleteCheckpoint(checkpointKey(toFull(name))); } catch (e) { reportError(new Error("[checkpoint] cleanup failed: " + String(e)), "log"); }
 }
 
 // ---- 保存（本地）----

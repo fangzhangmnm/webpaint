@@ -111,7 +111,7 @@ describe("webpaint-backend · encode↔open 逐字节 round-trip（无 GL）", (
   it("exportImage：无 GL/合成注入 → 响亮失败（不出占位图）", async () => await withNoGL(async () => {
     const be = WebPaintBackend.blank({ width: 8, height: 8 }, INJ);
     let threw = false;
-    try { await be.exportImage("png"); } catch (e) { threw = true; assert(String(e.message).includes("合成不可用"), e.message); }
+    try { await be.exportImage("png"); } catch (e) { threw = true; assert(String(e.message).includes("no compositor available"), e.message); }
     assert(threw);
     be.dispose();
   }));

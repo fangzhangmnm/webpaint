@@ -33,14 +33,14 @@ describe("requireEditableLeaf", () => {
     let status = null;
     const got = requireEditableLeaf(mkDoc(grp()), (m) => (status = m));
     assert(got === null, "组不可写");
-    assert(/图层组/.test(status), `组文案，实得「${status}」`);
+    assert(/group/.test(status), `组文案，实得「${status}」`);
   });
 
   it("隐藏叶 → null + 状态行（默认不放行）", () => {
     let status = null;
     const got = requireEditableLeaf(mkDoc(leaf({ visible: false })), (m) => (status = m));
     assert(got === null, "隐藏不可写");
-    assert(/隐藏/.test(status), `隐藏文案，实得「${status}」`);
+    assert(/hidden/.test(status), `隐藏文案，实得「${status}」`);
   });
 
   it("隐藏叶 + allowHidden → 放行", () => {
@@ -52,6 +52,6 @@ describe("requireEditableLeaf", () => {
   it("无 active → null + 状态行", () => {
     let status = null;
     const got = requireEditableLeaf(mkDoc(null), (m) => (status = m));
-    assert(got === null && /没有活动图层/.test(status), "无 active");
+    assert(got === null && /No active layer/.test(status), "无 active");
   });
 });

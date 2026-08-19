@@ -249,7 +249,7 @@ export function regionMaskAt(
   const capped = bleedPx >= 0 ? Math.min(255, bleedPx) : -1;
   if (capped >= 0 && !part.inkDepth) {
     // 调用方 bug（oracle 该先 attachInkDepth）——响亮抛，别静默按自动放行
-    throw new Error("regionMaskAt: bleed≥0 但 inkDepth 未构建（先 attachInkDepth）");
+    throw new Error("regionMaskAt: bleed>=0 but inkDepth not built (call attachInkDepth first)");
   }
   const inkDepth = part.inkDepth;
   for (let ry = 0; ry < bh; ry++) {

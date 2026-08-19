@@ -5322,4 +5322,609 @@ export declare const S: {
         readonly ja: "ギャラリーのパスワード";
         readonly tok: "nimi len pi tomo sitelen";
     };
+    readonly "flt.hsb.title": {
+        readonly zh: "色相 / 饱和度 / 亮度";
+        readonly en: "Hue / Saturation / Brightness";
+        readonly ja: "色相 / 彩度 / 明度";
+    };
+    readonly "flt.hsb.brightness": {
+        readonly zh: "亮度";
+        readonly en: "Brightness";
+        readonly ja: "明度";
+    };
+    readonly "flt.hsb.contrast": {
+        readonly zh: "对比";
+        readonly en: "Contrast";
+        readonly ja: "コントラスト";
+    };
+    readonly "flt.hsb.saturation": {
+        readonly zh: "饱和";
+        readonly en: "Saturation";
+        readonly ja: "彩度";
+    };
+    readonly "flt.hsb.satMode": {
+        readonly zh: "饱和模式";
+        readonly en: "Saturation mode";
+        readonly ja: "彩度モード";
+    };
+    readonly "flt.hsb.satNatural": {
+        readonly zh: "自然";
+        readonly en: "Vibrance";
+        readonly ja: "自然な彩度";
+    };
+    readonly "flt.hsb.satLinear": {
+        readonly zh: "线性";
+        readonly en: "Linear";
+        readonly ja: "リニア";
+    };
+    readonly "flt.hsb.hue": {
+        readonly zh: "色相";
+        readonly en: "Hue";
+        readonly ja: "色相";
+    };
+    readonly "flt.cb.title": {
+        readonly zh: "色彩平衡";
+        readonly en: "Color balance";
+        readonly ja: "カラーバランス";
+    };
+    readonly "flt.cb.cyanRed": {
+        readonly zh: "青 ⟷ 红";
+        readonly en: "Cyan ⟷ Red";
+        readonly ja: "シアン ⟷ レッド";
+    };
+    readonly "flt.cb.magentaGreen": {
+        readonly zh: "品 ⟷ 绿";
+        readonly en: "Magenta ⟷ Green";
+        readonly ja: "マゼンタ ⟷ グリーン";
+    };
+    readonly "flt.cb.yellowBlue": {
+        readonly zh: "黄 ⟷ 蓝";
+        readonly en: "Yellow ⟷ Blue";
+        readonly ja: "イエロー ⟷ ブルー";
+    };
+    readonly "flt.cb.shadows": {
+        readonly zh: "阴影（暗部，luma≈0）";
+        readonly en: "Shadows (dark, luma≈0)";
+        readonly ja: "シャドウ（暗部、luma≈0）";
+    };
+    readonly "flt.cb.midtones": {
+        readonly zh: "中间调（主体，luma≈0.5）";
+        readonly en: "Midtones (luma≈0.5)";
+        readonly ja: "中間調（luma≈0.5）";
+    };
+    readonly "flt.cb.highlights": {
+        readonly zh: "高光（亮部，luma≈1）";
+        readonly en: "Highlights (bright, luma≈1)";
+        readonly ja: "ハイライト（明部、luma≈1）";
+    };
+    readonly "flt.curves.title": {
+        readonly zh: "曲线";
+        readonly en: "Curves";
+        readonly ja: "トーンカーブ";
+    };
+    readonly "flt.curves.all": {
+        readonly zh: "全部";
+        readonly en: "All";
+        readonly ja: "すべて";
+    };
+    readonly "flt.liq.title": {
+        readonly zh: "液化";
+        readonly en: "Liquify";
+        readonly ja: "ゆがみ";
+    };
+    readonly "flt.liq.push": {
+        readonly zh: "推";
+        readonly en: "Push";
+        readonly ja: "押す";
+    };
+    readonly "flt.liq.pinch": {
+        readonly zh: "收";
+        readonly en: "Pinch";
+        readonly ja: "つまむ";
+    };
+    readonly "flt.liq.bloat": {
+        readonly zh: "胀";
+        readonly en: "Bloat";
+        readonly ja: "膨張";
+    };
+    readonly "flt.liq.twirlL": {
+        readonly zh: "左旋";
+        readonly en: "Twirl left";
+        readonly ja: "左回転";
+    };
+    readonly "flt.liq.twirlR": {
+        readonly zh: "右旋";
+        readonly en: "Twirl right";
+        readonly ja: "右回転";
+    };
+    readonly "flt.liq.bleedEdge": {
+        readonly zh: "边缘拉伸";
+        readonly en: "Stretch edge";
+        readonly ja: "境界を伸ばす";
+    };
+    readonly "flt.liq.bleedClip": {
+        readonly zh: "不拉边界外";
+        readonly en: "Wall at boundary";
+        readonly ja: "境界の外を使わない";
+    };
+    readonly "flt.liq.bleedImport": {
+        readonly zh: "拉边界外";
+        readonly en: "Pull from outside";
+        readonly ja: "境界の外から引き込む";
+    };
+    readonly "flt.sb.title": {
+        readonly zh: "锐化 / 模糊";
+        readonly en: "Sharpen / Blur";
+        readonly ja: "シャープ / ぼかし";
+    };
+    readonly "flt.sb.blurBrush": {
+        readonly zh: "模糊（笔刷）";
+        readonly en: "Blur (brush)";
+        readonly ja: "ぼかし（ブラシ）";
+    };
+    readonly "flt.sb.sharpBrush": {
+        readonly zh: "锐化（笔刷）";
+        readonly en: "Sharpen (brush)";
+        readonly ja: "シャープ（ブラシ）";
+    };
+    readonly "flt.sb.slider": {
+        readonly zh: "← 模糊      锐化 →";
+        readonly en: "← Blur      Sharpen →";
+        readonly ja: "← ぼかし      シャープ →";
+    };
+    readonly "flt.mos.title": {
+        readonly zh: "马赛克";
+        readonly en: "Mosaic";
+        readonly ja: "モザイク";
+    };
+    readonly "flt.mos.cellSize": {
+        readonly zh: "块大小";
+        readonly en: "Cell size";
+        readonly ja: "ブロックサイズ";
+    };
+    readonly "flt.ht.title": {
+        readonly zh: "半调网点";
+        readonly en: "Halftone";
+        readonly ja: "ハーフトーン";
+    };
+    readonly "flt.ht.cellSize": {
+        readonly zh: "网点间距";
+        readonly en: "Dot pitch";
+        readonly ja: "網点間隔";
+    };
+    readonly "flt.ht.dotScale": {
+        readonly zh: "网点缩放";
+        readonly en: "Dot scale";
+        readonly ja: "網点スケール";
+    };
+    readonly "flt.ht.mode": {
+        readonly zh: "模式";
+        readonly en: "Mode";
+        readonly ja: "モード";
+    };
+    readonly "flt.ht.blackOnWhite": {
+        readonly zh: "黑点 on 白";
+        readonly en: "Black on white";
+        readonly ja: "白地に黒";
+    };
+    readonly "flt.ht.whiteOnBlack": {
+        readonly zh: "白点 on 黑";
+        readonly en: "White on black";
+        readonly ja: "黒地に白";
+    };
+    readonly "flt.sg.title": {
+        readonly zh: "教堂彩窗";
+        readonly en: "Stained glass";
+        readonly ja: "ステンドグラス";
+    };
+    readonly "flt.sg.cellSize": {
+        readonly zh: "玻璃块大小";
+        readonly en: "Glass cell size";
+        readonly ja: "ガラスサイズ";
+    };
+    readonly "flt.sg.leadWidth": {
+        readonly zh: "铅条粗细";
+        readonly en: "Lead width";
+        readonly ja: "鉛線の太さ";
+    };
+    readonly "rsm.bicubic": {
+        readonly zh: "双三次（高质量）";
+        readonly en: "Bicubic (high quality)";
+        readonly ja: "バイキュービック（高品質）";
+    };
+    readonly "rsm.rotsprite": {
+        readonly zh: "像素完美（像素画）";
+        readonly en: "Pixel-perfect (pixel art)";
+        readonly ja: "ピクセルパーフェクト（ドット絵）";
+    };
+    readonly "rsm.spline": {
+        readonly zh: "样条（多次变换）";
+        readonly en: "Spline (repeated transforms)";
+        readonly ja: "スプライン（多重変形）";
+    };
+    readonly "rsm.sharper": {
+        readonly zh: "缩小优化（清晰）";
+        readonly en: "Downscale-optimized (crisp)";
+        readonly ja: "縮小最適化（くっきり）";
+    };
+    readonly "rsm.bilinear": {
+        readonly zh: "双线性（软）";
+        readonly en: "Bilinear (soft)";
+        readonly ja: "バイリニア（ソフト）";
+    };
+    readonly "rsm.nearest": {
+        readonly zh: "最近邻（像素画）";
+        readonly en: "Nearest (pixel art)";
+        readonly ja: "ニアレスト（ドット絵）";
+    };
+    readonly "gv.badge.ghost": {
+        readonly zh: "云端副本已被移动或删除，本地有未推送的修改 —— 可「重命名留存」或「丢弃」";
+        readonly en: "Cloud copy was moved or deleted while local has unpushed edits — “rename & keep” or “discard”";
+        readonly ja: "クラウド側が移動/削除され、ローカルに未プッシュの変更があります——「改名して保持」か「破棄」を";
+    };
+    readonly "gv.badge.pendingGone": {
+        readonly zh: "云端副本已消失，本地干净副本待处理 —— 可「重新上传」推回云端，或「删除」；宽限期后自动移入回收站";
+        readonly en: "Cloud copy is gone; clean local copy pending — “re-upload” to push it back, or “delete”; auto-trashed after the grace period";
+        readonly ja: "クラウド側が消失、ローカルのクリーンな複製が保留中——「再アップロード」か「削除」を。猶予期間後は自動でゴミ箱へ";
+    };
+    readonly "gv.badge.dirtyBoth": {
+        readonly zh: "本地+云端 · 本地有未推改动";
+        readonly en: "Local+cloud · unpushed local edits";
+        readonly ja: "ローカル+クラウド · 未プッシュの変更あり";
+    };
+    readonly "gv.badge.syncedBoth": {
+        readonly zh: "本地+云端（已同步）";
+        readonly en: "Local+cloud (synced)";
+        readonly ja: "ローカル+クラウド（同期済み）";
+    };
+    readonly "gv.badge.cloudOnly": {
+        readonly zh: "纯云端（未拉到本地）";
+        readonly en: "Cloud only (not downloaded)";
+        readonly ja: "クラウドのみ（未ダウンロード）";
+    };
+    readonly "gv.badge.localOnly": {
+        readonly zh: "仅本地（未上传云端）";
+        readonly en: "Local only (not uploaded)";
+        readonly ja: "ローカルのみ（未アップロード）";
+    };
+    readonly "gv.badge.localPlain": {
+        readonly zh: "本地";
+        readonly en: "Local";
+        readonly ja: "ローカル";
+    };
+    readonly "gv.rootDir": {
+        readonly zh: "/ 根目录";
+        readonly en: "/ Root";
+        readonly ja: "/ ルート";
+    };
+    readonly "gv.time.unknown": {
+        readonly zh: "未知";
+        readonly en: "Unknown";
+        readonly ja: "不明";
+    };
+    readonly "gv.time.justNow": {
+        readonly zh: "刚刚";
+        readonly en: "Just now";
+        readonly ja: "たった今";
+    };
+    readonly "gv.time.minAgo": {
+        readonly zh: "{n} 分钟前";
+        readonly en: "{n} min ago";
+        readonly ja: "{n} 分前";
+    };
+    readonly "gv.time.hourAgo": {
+        readonly zh: "{n} 小时前";
+        readonly en: "{n} h ago";
+        readonly ja: "{n} 時間前";
+    };
+    readonly "gv.time.dayAgo": {
+        readonly zh: "{n} 天前";
+        readonly en: "{n} d ago";
+        readonly ja: "{n} 日前";
+    };
+    readonly "gv.src.both": {
+        readonly zh: "本地+云端";
+        readonly en: "Local+cloud";
+        readonly ja: "ローカル+クラウド";
+    };
+    readonly "gv.src.local": {
+        readonly zh: "本地";
+        readonly en: "Local";
+        readonly ja: "ローカル";
+    };
+    readonly "gv.src.cloud": {
+        readonly zh: "云端";
+        readonly en: "Cloud";
+        readonly ja: "クラウド";
+    };
+    readonly "gv.src.cloudStillAlive": {
+        readonly zh: "{base}（云端仍在）";
+        readonly en: "{base} (still in cloud)";
+        readonly ja: "{base}（クラウドに残存）";
+    };
+    readonly "gs.usageCalculating": {
+        readonly zh: "本地占用：计算中…";
+        readonly en: "Local usage: calculating…";
+        readonly ja: "ローカル使用量：計算中…";
+    };
+    readonly "name.copySuffix": {
+        readonly zh: "副本";
+        readonly en: "copy";
+        readonly ja: "コピー";
+    };
+    readonly "name.newBrushN": {
+        readonly zh: "新笔 {n}";
+        readonly en: "New brush {n}";
+        readonly ja: "新規ブラシ {n}";
+    };
+    readonly "name.brushBase": {
+        readonly zh: "新笔";
+        readonly en: "New brush";
+        readonly ja: "新規ブラシ";
+    };
+    readonly "name.defaultBrush": {
+        readonly zh: "默认笔";
+        readonly en: "Default brush";
+        readonly ja: "デフォルトブラシ";
+    };
+    readonly "name.groupN": {
+        readonly zh: "组 {n}";
+        readonly en: "Group {n}";
+        readonly ja: "グループ {n}";
+    };
+    readonly "name.moveToNewLayer": {
+        readonly zh: "移到新层";
+        readonly en: "Moved to new layer";
+        readonly ja: "新規レイヤーへ移動";
+    };
+    readonly "name.copyLayer": {
+        readonly zh: "复制层";
+        readonly en: "Copied layer";
+        readonly ja: "コピーレイヤー";
+    };
+    readonly "st.groupNoDraw": {
+        readonly zh: "当前选中的是图层组，请选择一个图层再绘制";
+        readonly en: "A layer group is selected — pick a layer to draw";
+        readonly ja: "グループが選択されています。描くにはレイヤーを選んでください";
+    };
+    readonly "st.hiddenNoDraw": {
+        readonly zh: "当前图层已隐藏，无法绘制";
+        readonly en: "The current layer is hidden — cannot draw";
+        readonly ja: "現在のレイヤーは非表示のため描けません";
+    };
+    readonly "st.pickerHold": {
+        readonly zh: "吸色（长按）";
+        readonly en: "Eyedropper (long-press)";
+        readonly ja: "スポイト（長押し）";
+    };
+    readonly "st.picked": {
+        readonly zh: "吸色 {hex}";
+        readonly en: "Picked {hex}";
+        readonly ja: "スポイト {hex}";
+    };
+    readonly "st.twoFingerUndo": {
+        readonly zh: "双指 · 撤销";
+        readonly en: "Two fingers · Undo";
+        readonly ja: "2本指 · 元に戻す";
+    };
+    readonly "st.threeFingerRedo": {
+        readonly zh: "三指 · 重做";
+        readonly en: "Three fingers · Redo";
+        readonly ja: "3本指 · やり直す";
+    };
+    readonly "st.magicWandErr": {
+        readonly zh: "魔术棒出错：{msg}";
+        readonly en: "Magic wand error: {msg}";
+        readonly ja: "自動選択エラー：{msg}";
+    };
+    readonly "st.selOpErr": {
+        readonly zh: "选区操作出错：{msg}";
+        readonly en: "Selection op error: {msg}";
+        readonly ja: "選択操作エラー：{msg}";
+    };
+    readonly "st.filterBrushErr": {
+        readonly zh: "filter brush 出错：{msg}";
+        readonly en: "Filter brush error: {msg}";
+        readonly ja: "フィルターブラシエラー：{msg}";
+    };
+    readonly "st.selPenNeedLayer": {
+        readonly zh: "请先选中一个图层（选区笔预览需要锚点）";
+        readonly en: "Select a layer first (the selection pen preview needs an anchor)";
+        readonly ja: "先にレイヤーを選んでください（選択ペンのプレビューに必要）";
+    };
+    readonly "st.selAllOutside": {
+        readonly zh: "选区全在画布外，已取消";
+        readonly en: "Selection is entirely outside the canvas — cancelled";
+        readonly ja: "選択範囲が全てキャンバス外のため取り消しました";
+    };
+    readonly "st.magicWandMiss": {
+        readonly zh: "魔术棒：tap 在线 / 边界上，没选到";
+        readonly en: "Magic wand: tapped on a line/border — nothing selected";
+        readonly ja: "自動選択：線・境界上のため選択できません";
+    };
+    readonly "st.selCancelled": {
+        readonly zh: "已取消选区";
+        readonly en: "Selection cancelled";
+        readonly ja: "選択を解除しました";
+    };
+    readonly "st.polyInvalid": {
+        readonly zh: "多边形选区无效（不足三点 / 全在画布外），已取消";
+        readonly en: "Polygon selection invalid (fewer than 3 points / all outside) — cancelled";
+        readonly ja: "多角形選択が無効（3点未満 / 全て外側）のため取り消しました";
+    };
+    readonly "el.none": {
+        readonly zh: "没有活动图层";
+        readonly en: "No active layer";
+        readonly ja: "アクティブレイヤーがありません";
+    };
+    readonly "el.group": {
+        readonly zh: "当前选中的是图层组，请选择一个图层";
+        readonly en: "A layer group is selected — pick a layer";
+        readonly ja: "グループが選択されています。レイヤーを選んでください";
+    };
+    readonly "el.hidden": {
+        readonly zh: "当前图层已隐藏";
+        readonly en: "The current layer is hidden";
+        readonly ja: "現在のレイヤーは非表示です";
+    };
+    readonly "enc.unlockTitle": {
+        readonly zh: "解锁加密作品";
+        readonly en: "Unlock encrypted artwork";
+        readonly ja: "暗号化作品のロック解除";
+    };
+    readonly "enc.wrongRetry": {
+        readonly zh: "密码不对，再试一次";
+        readonly en: "Wrong password — try again";
+        readonly ja: "パスワードが違います。もう一度";
+    };
+    readonly "enc.enterGalleryPw": {
+        readonly zh: "输入图库密码。密码只存在内存里，关页即忘。";
+        readonly en: "Enter the gallery password. It lives only in memory and is forgotten when the page closes.";
+        readonly ja: "ギャラリーのパスワードを入力。メモリにのみ保持され、ページを閉じると消えます。";
+    };
+    readonly "enc.unlockImportTitle": {
+        readonly zh: "解锁导入的加密文件";
+        readonly en: "Unlock imported encrypted file";
+        readonly ja: "インポートした暗号化ファイルのロック解除";
+    };
+    readonly "enc.importPrompt": {
+        readonly zh: "这是加密文件。输入它的密码。";
+        readonly en: "This file is encrypted. Enter its password.";
+        readonly ja: "これは暗号化ファイルです。パスワードを入力してください。";
+    };
+    readonly "enc.enterPwTitle": {
+        readonly zh: "输入图库密码";
+        readonly en: "Enter gallery password";
+        readonly ja: "ギャラリーパスワードを入力";
+    };
+    readonly "enc.enterPwMsg": {
+        readonly zh: "图库已设过密码（跟账号走）。输入原密码；忘记 = 内容永久找不回。";
+        readonly en: "This gallery already has a password (tied to your account). Enter it — if forgotten, the content is permanently unrecoverable.";
+        readonly ja: "ギャラリーには既にパスワードが設定されています（アカウントに紐付き）。忘れた場合、内容は永久に復元できません。";
+    };
+    readonly "enc.setPwTitle": {
+        readonly zh: "设置图库密码";
+        readonly en: "Set gallery password";
+        readonly ja: "ギャラリーパスワードを設定";
+    };
+    readonly "enc.setPwMismatch": {
+        readonly zh: "两次输入不一致，重新设置";
+        readonly en: "Entries don't match — try again";
+        readonly ja: "入力が一致しません。やり直してください";
+    };
+    readonly "enc.setPwMsg": {
+        readonly zh: "整个图库共用这一个密码。忘记 = 内容永久找不回（没有任何后门）；太短的密码可被暴力破解。加密文件用 7-Zip 输此密码也能打开。";
+        readonly en: "One password for the whole gallery. If forgotten, content is permanently unrecoverable (there is no backdoor); short passwords can be brute-forced. Encrypted files also open in 7-Zip with this password.";
+        readonly ja: "ギャラリー全体で1つのパスワードを共有します。忘れると内容は永久に復元できません（バックドアなし）。短いパスワードは総当たりに弱いです。暗号化ファイルは 7-Zip でも同じパスワードで開けます。";
+    };
+    readonly "enc.confirmTitle": {
+        readonly zh: "再输一遍确认";
+        readonly en: "Confirm password";
+        readonly ja: "もう一度入力して確認";
+    };
+    readonly "enc.confirmMsg": {
+        readonly zh: "两次输入需一致";
+        readonly en: "Both entries must match";
+        readonly ja: "同じものを入力してください";
+    };
+    readonly "exp.oraLabel": {
+        readonly zh: ".ora（推荐 / 开源）";
+        readonly en: ".ora (recommended / open format)";
+        readonly ja: ".ora（推奨 / オープン形式）";
+    };
+    readonly "exp.psdBusy": {
+        readonly zh: "PSD 编码中…";
+        readonly en: "Encoding PSD…";
+        readonly ja: "PSD エンコード中…";
+    };
+    readonly "print.title": {
+        readonly zh: "打印";
+        readonly en: "Print";
+        readonly ja: "印刷";
+    };
+    readonly "err.unknown": {
+        readonly zh: "未知错误";
+        readonly en: "Unknown error";
+        readonly ja: "不明なエラー";
+    };
+    readonly "err.dismissHint": {
+        readonly zh: "点击关闭";
+        readonly en: "tap to dismiss";
+        readonly ja: "タップで閉じる";
+    };
+    readonly "busy.working": {
+        readonly zh: "处理中…";
+        readonly en: "Working…";
+        readonly ja: "処理中…";
+    };
+    readonly "board.noWebgl2a": {
+        readonly zh: "此设备不支持 WebGL2 —— 无法运行画布";
+        readonly en: "This device has no WebGL2 — the canvas cannot run";
+        readonly ja: "この端末は WebGL2 非対応のためキャンバスを実行できません";
+    };
+    readonly "board.noWebgl2b": {
+        readonly zh: "请用支持 WebGL2 的浏览器/设备打开";
+        readonly en: "Please open in a WebGL2-capable browser/device";
+        readonly ja: "WebGL2 対応のブラウザ/端末で開いてください";
+    };
+    readonly "rack.shareTitle": {
+        readonly zh: "笔架代码";
+        readonly en: "Brush rack data";
+        readonly ja: "ブラシ棚データ";
+    };
+    readonly "pal.brush": {
+        readonly zh: "刷（用当前色）";
+        readonly en: "Paint (with current color)";
+        readonly ja: "塗る（現在の色）";
+    };
+    readonly "pal.mix": {
+        readonly zh: "混色";
+        readonly en: "Mix";
+        readonly ja: "混色";
+    };
+    readonly "pal.pick": {
+        readonly zh: "吸到主画";
+        readonly en: "Pick to main canvas";
+        readonly ja: "メインへスポイト";
+    };
+    readonly "pal.clear": {
+        readonly zh: "清空";
+        readonly en: "Clear";
+        readonly ja: "クリア";
+    };
+    readonly "la.transformMove": {
+        readonly zh: "变换 / 移动";
+        readonly en: "Transform / Move";
+        readonly ja: "変形 / 移動";
+    };
+    readonly "la.tfFree": {
+        readonly zh: "自由变换";
+        readonly en: "Free transform";
+        readonly ja: "自由変形";
+    };
+    readonly "la.tfUniform": {
+        readonly zh: "等比缩放";
+        readonly en: "Uniform scale";
+        readonly ja: "等倍スケール";
+    };
+    readonly "la.tfDistort": {
+        readonly zh: "透视变换";
+        readonly en: "Perspective transform";
+        readonly ja: "遠近変形";
+    };
+    readonly "la.stampTip": {
+        readonly zh: "盖印（写入但保留浮层，可连击多次叠加）";
+        readonly en: "Stamp (writes but keeps the floating layer; tap repeatedly to stack)";
+        readonly ja: "スタンプ（書き込み後もフロートを保持、連打で重ねられます）";
+    };
+    readonly "crop.widthPh": {
+        readonly zh: "宽px";
+        readonly en: "W px";
+        readonly ja: "幅px";
+    };
+    readonly "crop.heightPh": {
+        readonly zh: "高px";
+        readonly en: "H px";
+        readonly ja: "高px";
+    };
 };

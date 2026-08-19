@@ -2,6 +2,7 @@
 // store 对密码非交互——「弹密码框 + 验证 + 重试」的循环住这里，且**必须在 withBusy 之外调用**
 // （busy 遮罩 z 高于 sheet，盖住密码框 = 无限转圈死锁；sheets 护栏也会 throw）。
 
+import { t } from "./i18n/index.ts";
 import { store } from "./app-store.ts";
 import { sessionFileName } from "./config.ts";   // 边界：裸 item.name → 库全名（薄库身份=X.ora）
 import { SUFFIX_BYTES, THUMB_PATH } from "./gallery/cloud-thumbs.ts";
@@ -33,8 +34,8 @@ export async function ensureUnlocked(name: string): Promise<boolean> {
   if (cur && await encFile(name).verifyPassword(cur)) return true;
   for (let attempt = 0; ; attempt++) {
     const pw = await promptPassword({
-      title: "解锁加密作品",
-      message: attempt > 0 ? "密码不对，再试一次" : "输入图库密码。密码只存在内存里，关页即忘。",
+      title: t("enc.unlockTitle"),
+      message: attempt > 0 ? t("enc.wrongRetry") : t("enc.enterGalleryPw"),
     });
     if (pw == null) return false;
     if (await encFile(name).verifyPassword(pw)) {
@@ -62,8 +63,8 @@ export async function unlockImportedContainer(blob: Blob): Promise<{ pw: string;
   }
   for (let attempt = 0; ; attempt++) {
     const pw = await promptPassword({
-      title: "解锁导入的加密文件",
-      message: attempt > 0 ? "密码不对，再试一次" : "这是加密文件。输入它的密码。",
+      title: t("enc.unlockImportTitle"),
+      message: attempt > 0 ? t("enc.wrongRetry") : t("enc.importPrompt"),
     });
     if (pw == null) return null;
     const plain = await store.encryption.tryDecryptEncryptedBlob(blob, pw);
@@ -82,8 +83,8 @@ export async function ensureNewPassword() {
   if (hasVerifier()) {
     for (let attempt = 0; attempt < 3; attempt++) {
       const pw = await promptPassword({
-        title: "输入图库密码",
-        message: attempt > 0 ? "密码不对，再试一次" : "图库已设过密码（跟账号走）。输入原密码；忘记 = 内容永久找不回。",
+        title: t("enc.enterPwTitle"),
+        message: attempt > 0 ? t("enc.wrongRetry") : t("enc.enterPwMsg"),
       });
       if (pw == null) return null;
       if ((await checkVerifier(pw)) === "ok") return pw;
@@ -92,13 +93,13 @@ export async function ensureNewPassword() {
   }
   for (let round = 0; round < 3; round++) {
     const p1 = await promptPassword({
-      title: "设置图库密码",
+      title: t("enc.setPwTitle"),
       message: round > 0
-        ? "两次输入不一致，重新设置"
-        : "整个图库共用这一个密码。忘记 = 内容永久找不回（没有任何后门）；太短的密码可被暴力破解。加密文件用 7-Zip 输此密码也能打开。",
+        ? t("enc.setPwMismatch")
+        : t("enc.setPwMsg"),
     });
     if (p1 == null) return null;
-    const p2 = await promptPassword({ title: "再输一遍确认", message: "两次输入需一致" });
+    const p2 = await promptPassword({ title: t("enc.confirmTitle"), message: t("enc.confirmMsg") });
     if (p2 == null) return null;
     if (p1 === p2) { await createVerifier(p1); return p1; }   // v0.4.11：创建即落 verifier（跟账号走）
   }

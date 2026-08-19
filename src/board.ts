@@ -1,4 +1,5 @@
 // Board = 显示层。把 PaintingView 合成到屏幕 <canvas> 上 + 视口 pan/zoom + cursor 预览。
+import { t } from "./i18n/index.ts";
 import { sourceWarpMatrix, sourceDestQuad, integerRigidOf } from "./floating-transform.ts";
 import type { WarpBakeFn } from "./floating-transform.ts";
 import { PREF_DEFAULTS } from "./app-prefs.ts";   // pixel-grid 默认值 SSoT（别在本文件硬编码第二份）
@@ -247,7 +248,7 @@ export class Board {
       // C1（ADR-0009）：壳侧唯一 getContext 创建点——造好 BrowserGl2Port 递入，GL 域只见 Gl2Port。
       this._glBoard = new GLBoard(new BrowserGl2Port(gl), poolCapacityForBudget(256 * 1024 * 1024));
     } catch (e) {
-      reportError(new Error("[board] GL 初始化失败（无 WebGL2）→ 显「需 WebGL2」：" + String(e)), "log");
+      reportError(new Error("[board] GL init failed (no WebGL2) -> showing the WebGL2-required screen: " + String(e)), "log");
       if (this._glCanvas) { this._glCanvas.remove(); this._glCanvas = null; }
       this._glBoard = null;
     }
@@ -615,8 +616,8 @@ export class Board {
     ctx.textBaseline = "middle";
     const s = Math.max(14, Math.round(16 * this.dpr));
     ctx.font = `${s}px system-ui, -apple-system, sans-serif`;
-    ctx.fillText("此设备不支持 WebGL2 —— 无法运行画布", W / 2, H / 2 - s);
-    ctx.fillText("请用支持 WebGL2 的浏览器/设备打开", W / 2, H / 2 + s);
+    ctx.fillText(t("board.noWebgl2a"), W / 2, H / 2 - s);
+    ctx.fillText(t("board.noWebgl2b"), W / 2, H / 2 + s);
   }
 
   // GL 渲染路径：GL canvas 渲 doc（void 底 + doc 背景 + 图层 + live overlay，视口仿射）；
@@ -731,7 +732,7 @@ export class Board {
       // v0.7.25：fill 工具里用选区笔（有选区 → fill 预览 active）时两者合法共存——色带优先，
       //   抬笔选区并入后 fill 预览自然跟上。非色带撞车仍是接线坏了，响亮报错。
       if ((cs as { selPenBand?: boolean } | null)?.selPenBand) return brush;
-      reportError(new Error("[board] stamp overlay 与 fill overlay 同时非空——edit-mode 互斥被破坏"), "warning");
+      reportError(new Error("[board] stamp overlay and fill overlay both non-empty — edit-mode exclusivity broken"), "warning");
       return brush;
     }
     return brush ?? fill;

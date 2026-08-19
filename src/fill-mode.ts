@@ -93,7 +93,7 @@ function _doCommit(clearSelection: boolean): void {
   if (!layer || !doc.selection) return;
   const st = history.withPoint("fill", {}, () => {
     const ok = board.commitFill({ color: fillColor, layer });
-    if (!ok) throw new Error("GL fill merge 未提交（无选区/池到顶）");
+    if (!ok) throw new Error("GL fill merge not committed (no selection / pool exhausted)");
     if (clearSelection) {
       const entry = input.lasso.setSelection(null);
       if (entry) wp2.selection.commitPreApplied(entry.before ?? null);   // 本整点令牌已开——直写组件 verb
@@ -103,7 +103,7 @@ function _doCommit(clearSelection: boolean): void {
     wp2.pendingFill.clearRecorded();
   });
   if (!st.ok) {
-    reportError(new Error("[fill] commit 失败：" + (st.msg || "?")), "warning");
+    reportError(new Error("[fill] commit failed: " + (st.msg || "?")), "warning");
     setStatus(t("fm.commitFailed"), true);
     board.invalidateAll();
     return;

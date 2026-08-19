@@ -5,11 +5,12 @@
 // 论证：模糊本质 non-local 卷积，大图慢；brush 模式天然限定 bbox 不卡
 
 import { registerFilter, clamp8, makeSliderRow, attachColorBrushBehavior } from "../filters.ts";
+import { t, tLatin } from "../i18n/index.ts";
 import type { FilterParams } from "../filters.ts";
 
 export class SharpenBlurFilter {
   static id = "sharpenBlur";
-  static title = "锐化 / 模糊";
+  static title = t("flt.sb.title");
   static category = "adjustment";
   // v132 (user：「全屏的锐化模糊可以删」)：只保留 brush 模式
   //   region 模式大图（4K+）非常卡，brush 模式 stamp bbox 小天然不卡
@@ -17,8 +18,8 @@ export class SharpenBlurFilter {
   // brush 模式 2 个 variants：模糊（amount=-50）/ 锐化（amount=+50）
   // FilterBrushEngine 用 variant.params 初始化；user 进入对应模式就拿到合适默认
   static brushVariants = [
-    { id: "blur",  title: "模糊（笔刷）", params: { amount: -50 } },
-    { id: "sharp", title: "锐化（笔刷）", params: { amount: +50 } },
+    { id: "blur",  title: tLatin("flt.sb.blurBrush"), params: { amount: -50 } },
+    { id: "sharp", title: tLatin("flt.sb.sharpBrush"), params: { amount: +50 } },
   ];
 
   // bleed = 模糊 N 次 box 半径 = N；锐化单次 box = 1；0 = identity
@@ -33,7 +34,7 @@ export class SharpenBlurFilter {
 
   static buildBody(container: HTMLElement, state: unknown, onChange: () => void): void {
     const st = state as { params: { amount: number } };
-    container.appendChild(makeSliderRow("← 模糊      锐化 →", "amount", -100, 100, 1, st.params.amount, (k: string, v: number) => {
+    container.appendChild(makeSliderRow(t("flt.sb.slider"), "amount", -100, 100, 1, st.params.amount, (k: string, v: number) => {
       st.params.amount = v | 0;
       onChange();
     }, {

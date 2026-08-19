@@ -7,6 +7,7 @@
 //
 // 复用形状：item 形状通用、徽章/面包屑无 ORA 依赖 → 整块可抬给 AtlasMaker/RealHome（WebPaint 专用 example）。
 
+import { t } from "../i18n/index.ts";
 import { pathBasename } from "./gallery-path.ts";
 import { itemTime } from "./gallery-model.ts";
 import type { GalleryItem, CloudFile, LocalSession } from "./gallery-model.ts";
@@ -66,18 +67,18 @@ export function tileFor(
   if (item.ghost) {
     // ghost 优先：dirty 孤儿（曾 synced，云端 path 被别的设备改名/移动/删，本地有未推编辑）。
     //   不当普通 localOnly——明确 surface；badge≠localOnly 顺带让「推送到云端」按钮消失（防复活已删路径）。
-    badge = "ghost"; badgeTitle = "云端副本已被移动或删除，本地有未推送的修改 —— 可「重命名留存」或「丢弃」";
+    badge = "ghost"; badgeTitle = t("gv.badge.ghost");
   } else if (item.pendingGone) {
     // pendingGone：clean 孤儿（曾 synced，云端 path 没了，本地干净副本）。防抖 grace 内照常显示 + 此 badge；
     //   宽限期后 reconcile 会自动移入回收站。用户可「重新上传」（推回云端）或「删除」（提前入回收站）。
-    badge = "pendingGone"; badgeTitle = "云端副本已消失，本地干净副本待处理 —— 可「重新上传」推回云端，或「删除」；宽限期后自动移入回收站";
+    badge = "pendingGone"; badgeTitle = t("gv.badge.pendingGone");
   } else if (isLocal && isCloud) {
-    if (opts.signedIn && item.dirty) { badge = "dirtyBoth"; badgeTitle = "本地+云端 · 本地有未推改动"; }
-    else { badge = "syncedBoth"; badgeTitle = "本地+云端（已同步）"; }
+    if (opts.signedIn && item.dirty) { badge = "dirtyBoth"; badgeTitle = t("gv.badge.dirtyBoth"); }
+    else { badge = "syncedBoth"; badgeTitle = t("gv.badge.syncedBoth"); }
   } else if (isCloud) {
-    badge = "cloudOnly"; badgeTitle = "纯云端（未拉到本地）";
+    badge = "cloudOnly"; badgeTitle = t("gv.badge.cloudOnly");
   } else {
-    badge = "localOnly"; badgeTitle = opts.signedIn ? "仅本地（未上传云端）" : "本地";
+    badge = "localOnly"; badgeTitle = opts.signedIn ? t("gv.badge.localOnly") : t("gv.badge.localPlain");
   }
   return {
     name: item.name,
@@ -101,7 +102,7 @@ export function tileFor(
 export interface Crumb { label: string; path: string; current: boolean; }
 
 export function breadcrumb(folder: string): Crumb[] {
-  const out: Crumb[] = [{ label: "/ 根目录", path: "", current: !folder }];
+  const out: Crumb[] = [{ label: t("gv.rootDir"), path: "", current: !folder }];
   if (folder) {
     const segs = folder.split("/").filter(Boolean);
     let accum = "";
@@ -136,13 +137,13 @@ export interface TrashGItem {
 
 // 展示格式化（纯）。humanTime 读 now：组件用，测试只覆 humanSize。
 export function humanTime(ts: number): string {
-  if (!ts) return "未知";
+  if (!ts) return t("gv.time.unknown");
   const d = new Date(ts);
   const dt = Date.now() - ts;
-  if (dt < 60 * 1000) return "刚刚";
-  if (dt < 60 * 60 * 1000) return `${Math.floor(dt / 60000)} 分钟前`;
-  if (dt < 24 * 60 * 60 * 1000) return `${Math.floor(dt / 3600000)} 小时前`;
-  if (dt < 7 * 24 * 60 * 60 * 1000) return `${Math.floor(dt / 86400000)} 天前`;
+  if (dt < 60 * 1000) return t("gv.time.justNow");
+  if (dt < 60 * 60 * 1000) return t("gv.time.minAgo", { n: Math.floor(dt / 60000) });
+  if (dt < 24 * 60 * 60 * 1000) return t("gv.time.hourAgo", { n: Math.floor(dt / 3600000) });
+  if (dt < 7 * 24 * 60 * 60 * 1000) return t("gv.time.dayAgo", { n: Math.floor(dt / 86400000) });
   return d.toLocaleDateString();
 }
 export function humanSize(b: number | null | undefined): string {
@@ -155,8 +156,8 @@ export function humanSize(b: number | null | undefined): string {
 }
 
 export function trashTileFor(item: TrashGItem): TrashTile {
-  const base = item.local && item.cloud ? "本地+云端" : item.local ? "本地" : "云端";
-  const src = item.conflictLive ? `${base}（云端仍在）` : base;   // 离线删被撤销：本地 trash 有、云端还活着 → 提示两存
+  const base = item.local && item.cloud ? t("gv.src.both") : item.local ? t("gv.src.local") : t("gv.src.cloud");
+  const src = item.conflictLive ? t("gv.src.cloudStillAlive", { base }) : base;   // 离线删被撤销：本地 trash 有、云端还活着 → 提示两存
   return {
     name: item.name,
     deletedAt: item.deletedAt || 0,

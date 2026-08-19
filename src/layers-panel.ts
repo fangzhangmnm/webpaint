@@ -38,6 +38,11 @@ import type { AppContext } from "./app-context.ts";
 import { iconHtml } from "./ui/icon.ts";
 import { initExplodeSheet, openExplodeSheet } from "./explode-layers.ts";
 
+// 「组 N」序号扫描的正则按当前语言的 name.groupN 模板生成（名字是数据，换语言从头起序无害）。
+function groupNameRe(): RegExp {
+  const tpl = t("name.groupN", { n: "\u0000" }).replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace("\u0000", "(\\d+)");
+  return new RegExp(`^${tpl}$`);
+}
 // doc 图层活对象（树节点 = 叶 ViewLeaf | 组 ViewGroup，T3b-2 起 = PaintingView 端口的 view 节点）。
 // 不再维护发散本地形状（doc.ts 的 Node 未 export → 此处用导出的两个 class 重建联合）。
 // null 守卫兜「层在回调前被删」。
@@ -177,14 +182,14 @@ function _nextGroupName(): string {
   const walk = (ns: readonly ViewNode[]) => {
     for (const n of ns) {
       if (n.isGroup) {
-        const m = /^组 (\d+)$/.exec(n.name);
+        const m = groupNameRe().exec(n.name);
         if (m) max = Math.max(max, parseInt(m[1], 10));
         walk(n.children);
       }
     }
   };
   walk(doc.layers);
-  return `组 ${max + 1}`;
+  return t("name.groupN", { n: max + 1 });
 }
 // 新建**空**图层组（创建入口 = 「+」菜单；编组当前层已砍，靠空组 + 移入「某组」达成）。
 function _addEmptyGroup() {

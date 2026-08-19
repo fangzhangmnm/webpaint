@@ -102,7 +102,7 @@ export class PaintingWorkpiece extends Workpiece {
       this.register(this.layerTiles, { undo: "recorded" });
       this.register(this.layerTree, { undo: "recorded" });
     } else {
-      if (!opts.host) throw new Error("PaintingWorkpiece: host 模式需要 opts.host（或给 opts.tree 走树模式）");
+      if (!opts.host) throw new Error("PaintingWorkpiece: host mode needs opts.host (or pass opts.tree for tree mode)");
       this.layerTiles = new LayerTiles(this, opts.host);
       this.layerTree = null;
       this.register(this.layerTiles, { undo: "recorded" });
@@ -173,7 +173,7 @@ export class PaintingWorkpiece extends Workpiece {
   // ---- 内部 ----
 
   private _requireTree(): LayerTree {
-    if (!this.layerTree) throw new Error("PaintingWorkpiece: host 模式没有 layerTree（load/export 是树模式能力）");
+    if (!this.layerTree) throw new Error("PaintingWorkpiece: host mode has no layerTree (load/export is a tree-mode capability)");
     return this.layerTree;
   }
 

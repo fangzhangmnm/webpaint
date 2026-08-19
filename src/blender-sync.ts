@@ -232,7 +232,7 @@ function parseTargetSize(): { w: number; h: number } | null {
 // 否则缩到 W×H：拉伸（不裁不留边），缩放走 resampleBytes（C3 全字节：缩→area/放→bicubic，α 加权）。
 async function renderPushPng(scope: string, target: { w: number; h: number } | null): Promise<Blob> {
   const blob = await renderDocToImageBlob(ctx.doc, "image/png", undefined, scope);
-  if (!blob) throw new Error("渲染画布失败");
+  if (!blob) throw new Error("canvas render failed");
   if (!target) return blob;
   const bmp = await createImageBitmap(blob);
   try {

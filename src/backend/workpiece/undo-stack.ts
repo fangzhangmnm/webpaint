@@ -70,7 +70,7 @@ export class UndoStack {
 
   /** 独占绑定（一个栈只服务一个 workpiece；重复绑定 = 装配 bug）。 */
   _bindWorkpiece(hooks: StackWorkpieceHooks): void {
-    if (this._hooks) throw new Error("UndoStack: 已绑定 workpiece（一个栈只准服务一个 workpiece）");
+    if (this._hooks) throw new Error("UndoStack: already bound (one stack serves exactly one workpiece)");
     this._hooks = hooks;
   }
 

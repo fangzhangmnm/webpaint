@@ -47,7 +47,7 @@ export async function exportRackFolder(rack: BrushRackData, tool: string, folder
 // dev：把当前笔架拼成 src/brushes.js 的 DEFAULTS_SPEC 源码（纯函数，返回代码字符串）。
 export function buildRackCode(rack: BrushRackData): string {
   const lines: string[] = [];
-  lines.push("// Auto-dumped from brush rack. 替换 src/brushes.js DEFAULTS_SPEC array 内容。");
+  lines.push("// Auto-dumped from brush rack. Replaces the DEFAULTS_SPEC array contents in src/brushes.js.");
   lines.push("export const DEFAULTS_SPEC = [");
   for (const b of rack.brushes) {
     const args: Record<string, unknown> = {};

@@ -48,7 +48,7 @@ export function createMemoryCollection(opts: { getInitData?: () => InitItem[] | 
     },
     async reconcileWithRemote(): Promise<ReconcileResult> { return { status: "offline" }; },
     setItem(id, value) {
-      if (value === undefined) throw new Error("Collection.setItem: value 不能是 undefined");
+      if (value === undefined) throw new Error("Collection.setItem: value must not be undefined");
       map.set(id, { id, uat: (map.get(id)?.uat ?? 0) + 1, value } as CollectionEntry);
       fire([id]);
     },
@@ -140,7 +140,7 @@ export function createDormantAuth() {
   return {
     isAuthConfigured: () => false,
     initAuth: async () => {},
-    signIn: async () => { throw new Error("store 缺席模式：无云端登录"); },
+    signIn: async () => { throw new Error("store-absent mode: no cloud sign-in"); },
     signOut: async () => {},
     isSignedIn: () => false,
     getActiveAccount: () => null,

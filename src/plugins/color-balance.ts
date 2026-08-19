@@ -2,6 +2,7 @@
 // 数学 = backend/filters/color-balance-kernel.ts（C8 析出：bake/defaults 委托 kernel）。
 
 import { registerFilter, makeSliderRow, makeSectionTitle } from "../filters.ts";
+import { t } from "../i18n/index.ts";
 import { ColorBalanceKernel, type ColorBalanceParams } from "../backend/filters/color-balance-kernel.ts";
 
 interface ColorBalanceState {
@@ -12,7 +13,7 @@ type RampPrefix = "sh" | "m" | "hi";
 
 export class ColorBalanceFilter {
   static id = "colorBalance";
-  static title = "色彩平衡";
+  static title = t("flt.cb.title");
   static category = "adjustment";
   static modes = ["region"];
   static bleedRadius = ColorBalanceKernel.bleedRadius;
@@ -42,15 +43,15 @@ export class ColorBalanceFilter {
     };
     const axisRows = (prefix: RampPrefix) => {
       const r = RAMPS[prefix];
-      container.appendChild(makeSliderRow("青 ⟷ 红", prefix + "R", -100, 100, 1, state.params[prefix + "R"] as number, set, { gradient: r.R }));
-      container.appendChild(makeSliderRow("品 ⟷ 绿", prefix + "G", -100, 100, 1, state.params[prefix + "G"] as number, set, { gradient: r.G }));
-      container.appendChild(makeSliderRow("黄 ⟷ 蓝", prefix + "B", -100, 100, 1, state.params[prefix + "B"] as number, set, { gradient: r.B }));
+      container.appendChild(makeSliderRow(t("flt.cb.cyanRed"), prefix + "R", -100, 100, 1, state.params[prefix + "R"] as number, set, { gradient: r.R }));
+      container.appendChild(makeSliderRow(t("flt.cb.magentaGreen"), prefix + "G", -100, 100, 1, state.params[prefix + "G"] as number, set, { gradient: r.G }));
+      container.appendChild(makeSliderRow(t("flt.cb.yellowBlue"), prefix + "B", -100, 100, 1, state.params[prefix + "B"] as number, set, { gradient: r.B }));
     };
-    container.appendChild(makeSectionTitle("阴影（暗部，luma≈0）"));
+    container.appendChild(makeSectionTitle(t("flt.cb.shadows")));
     axisRows("sh");
-    container.appendChild(makeSectionTitle("中间调（主体，luma≈0.5）"));
+    container.appendChild(makeSectionTitle(t("flt.cb.midtones")));
     axisRows("m");
-    container.appendChild(makeSectionTitle("高光（亮部，luma≈1）"));
+    container.appendChild(makeSectionTitle(t("flt.cb.highlights")));
     axisRows("hi");
   }
 }

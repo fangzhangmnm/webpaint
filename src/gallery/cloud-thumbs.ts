@@ -20,6 +20,6 @@ export const THUMB_PATH = "Thumbnails/thumbnail.png";
  */
 export async function fetchOraThumbnail(name: string): Promise<Blob> {
   const blob = await store.file(sessionFileName(name), { isZip: true, mode: "existing" }).getPeek({ bytesLength: SUFFIX_BYTES, zipEntry: THUMB_PATH });
-  if (!blob) throw new Error("getPeek 返回 null（云端不可达 / 无此文件 / 无此 entry / 无本地副本）");
+  if (!blob) throw new Error("getPeek returned null (cloud unreachable / no such file / no such entry / no local copy)");
   return blob;
 }

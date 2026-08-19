@@ -44,10 +44,10 @@ const bytesEq = (a, b) => a.length === b.length && a.every((v, i) => v === b[i])
 describe("filter-gate · 响亮拒绝", () => {
   it("未注册 id / 空层 / 不存在叶 → throw", () => {
     const be = mkPainted();
-    throws(() => be.filterBegin(1, "nope"), /kernel 未注册/, "未注册 id");
-    throws(() => be.filterBegin(99, "hsb"), /叶不存在/, "不存在叶");
+    throws(() => be.filterBegin(1, "nope"), /kernel not registered/, "未注册 id");
+    throws(() => be.filterBegin(99, "hsb"), /leaf missing/, "不存在叶");
     const blank = WebPaintBackend.blank({ width: 32, height: 32 });
-    throws(() => blank.filterBegin(1, "hsb"), /层无像素/, "空层");
+    throws(() => blank.filterBegin(1, "hsb"), /no pixels/, "空层");
     blank.dispose(); be.dispose();
   });
 });
@@ -103,10 +103,10 @@ describe("filter-gate · 单令牌墙", () => {
   it("filter open 期间 filterBegin/strokeBegin/undo → throw；错 id → throw", () => {
     const be = mkPainted();
     const fid = be.filterBegin(1, "hsb");
-    throws(() => be.filterBegin(1, "curves"), /已有 open filter/, "第二 filterBegin 拒绝");
+    throws(() => be.filterBegin(1, "curves"), /already open/, "第二 filterBegin 拒绝");
     throws(() => be.strokeBegin(1, BRUSH), /open filter/, "filter open 期间 strokeBegin 拒绝");
     throws(() => be.undo(), /open filter/, "filter open 期间 undo 拒绝（门口令牌墙）");
-    throws(() => be.filterSetParams(fid + 9, {}), /无此 open filter/, "错 id 拒绝");
+    throws(() => be.filterSetParams(fid + 9, {}), /no such open filter/, "错 id 拒绝");
     be.filterCancel(fid);
     const sid = be.strokeBegin(1, BRUSH);
     throws(() => be.filterBegin(1, "hsb"), /open stroke/, "stroke open 期间 filterBegin 拒绝");

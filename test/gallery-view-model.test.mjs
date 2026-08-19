@@ -45,7 +45,7 @@ describe("gallery-view-model · tileFor 徽章 4 态", () => {
     const t = tileFor({ name: "a", local, cloud: null, ghost: true }, { signedIn: true, activeName: null });
     eq(t.badge, "ghost");
     eq(t.ghost, true);
-    assert(/移动或删除/.test(t.badgeTitle), "标题说明 cloud-gone");
+    assert(/moved or deleted/.test(t.badgeTitle), "标题说明 cloud-gone");
   });
   it("非 ghost → ghost 字段 false", () => {
     eq(tileFor({ name: "a", local, cloud: null }, { signedIn: true, activeName: null }).ghost, false);
@@ -54,7 +54,7 @@ describe("gallery-view-model · tileFor 徽章 4 态", () => {
     const t = tileFor({ name: "a", local, cloud: null, pendingGone: true }, { signedIn: true, activeName: null });
     eq(t.badge, "pendingGone");
     eq(t.pendingGone, true);
-    assert(/消失|待处理/.test(t.badgeTitle), "标题说明 cloud-gone + 待处理");
+    assert(/gone|pending/.test(t.badgeTitle), "标题说明 cloud-gone + 待处理");
   });
   it("ghost 优先于 pendingGone（dirty cloud-gone 走 ghost，不会误标 pendingGone）", () => {
     const t = tileFor({ name: "a", local, cloud: null, ghost: true, pendingGone: true }, { signedIn: true, activeName: null });
@@ -79,9 +79,9 @@ describe("gallery-view-model · breadcrumb", () => {
 
 describe("gallery-view-model · trashTileFor", () => {
   it("来源标签", () => {
-    eq(trashTileFor({ name: "a", local: {}, cloud: {} }).source, "本地+云端");
-    eq(trashTileFor({ name: "a", local: {}, cloud: null }).source, "本地");
-    eq(trashTileFor({ name: "a", local: null, cloud: {} }).source, "云端");
+    eq(trashTileFor({ name: "a", local: {}, cloud: {} }).source, "Local+cloud");
+    eq(trashTileFor({ name: "a", local: {}, cloud: null }).source, "Local");
+    eq(trashTileFor({ name: "a", local: null, cloud: {} }).source, "Cloud");
   });
   // （旧 mergeTrash 锚已随函数被 store 库收编 → 真测试在 test/trash-merge.test.ts）
 });

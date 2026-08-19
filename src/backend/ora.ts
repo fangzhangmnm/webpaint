@@ -216,12 +216,12 @@ export async function encodeDocToOra(doc: EncodeDoc, opts: EncodeOpts) {
 /** Blob (.ora 明文) → DecodedPainting（json 形 + 内联 tile 字节 + sidecar）。 */
 export async function decodeOraToPainting(blob: Blob): Promise<DecodedPainting> {
   const files = await zipUnpack(blob);
-  if (!files["stack.xml"]) throw new Error(".ora 缺 stack.xml");
+  if (!files["stack.xml"]) throw new Error(".ora missing stack.xml");
   // mimetype 检验（友好，不强制）
   if (files["mimetype"]) {
     const m = bytesToString(files["mimetype"]).trim();
     if (m !== "image/openraster") {
-      reportError(`[ora] mimetype 不是 image/openraster：${m}`, "log");
+      reportError(`[ora] mimetype is not image/openraster: ${m}`, "log");
     }
   }
   const xml = bytesToString(files["stack.xml"]);
@@ -253,7 +253,7 @@ export async function decodeOraToPainting(blob: Blob): Promise<DecodedPainting> 
       };
     }
     const png = files[spec.src];
-    if (!png) throw new Error(`.ora 缺图层 PNG：${spec.src}`);
+    if (!png) throw new Error(`.ora missing layer PNG: ${spec.src}`);
     const px = await decodePngToBytes(png);   // v0.6.42：走 codec facade（换 UPNG/自研只改 png-codec.ts）
     if (spec.isActive) activeId = id;
     if (spec.isReference) referenceLayerId = id;
@@ -270,7 +270,7 @@ export async function decodeOraToPainting(blob: Blob): Promise<DecodedPainting> 
   for (const spec of meta.nodes) nodes.push(await buildNode(spec));
   if (nodes.length === 0) {
     // 防御：完全空 .ora → 给个默认层
-    nodes.push({ id: nextAuto(), name: "图层 1", visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false, pixels: null });
+    nodes.push({ id: nextAuto(), name: "Layer 1", visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false, pixels: null });
   }
   // active 还原：优先 webpaint:active 标记节点；无标记（旧 .ora）→ 末叶（栈顶）= load 的 firstLeaf
   //   兜底不同——这里显式取末叶，语义沿旧 decodeOraToDoc。

@@ -181,8 +181,8 @@ export function initTopbarMenu(ctx: AppContext) {
   els.menuSaveAs.addEventListener("click", async () => {
     setMenuOpen(false);
     editMode.applyPendingTransient();
-    const oldName = session.name || "未命名";
-    let candidate = `${oldName} 副本`;
+    const oldName = session.name || t("nd.untitled");
+    let candidate = `${oldName} ${t("name.copySuffix")}`;
     while (true) {
       const input = await openInputSheet(t("tm.saveAs"), candidate, { placeholder: t("tm.newArtworkNamePlaceholder") });
       if (input === null) return;

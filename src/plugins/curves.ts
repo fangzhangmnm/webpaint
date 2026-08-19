@@ -3,6 +3,7 @@
 // UI 画曲线与 bake 同一条 LUT，所见即所烤）。
 
 import { registerFilter } from "../filters.ts";
+import { t } from "../i18n/index.ts";
 import { CurvesKernel, buildCurveLut, type CurvePoint } from "../backend/filters/curves-kernel.ts";
 
 type Point = CurvePoint;
@@ -13,7 +14,7 @@ interface CurvesBuildState {
 
 export class CurvesFilter {
   static id = "curves";
-  static title = "曲线";
+  static title = t("flt.curves.title");
   static category = "adjustment";
   static modes = ["region"];
   static bleedRadius = CurvesKernel.bleedRadius;
@@ -26,7 +27,7 @@ export class CurvesFilter {
     const tabs = document.createElement("div");
     tabs.className = "curves-tabs";
     const CH = [
-      { id: "comp", label: "全部", color: "#999" },
+      { id: "comp", label: t("flt.curves.all"), color: "#999" },
       { id: "r",    label: "R",    color: "#e44" },
       { id: "g",    label: "G",    color: "#3a3" },
       { id: "b",    label: "B",    color: "#46e" },

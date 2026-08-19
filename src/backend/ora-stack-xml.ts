@@ -159,7 +159,7 @@ function parseNode(el: Element): ParsedNode {
   const idAttr = el.getAttribute("webpaint:id");
   const common: ParsedCommon = {
     id: idAttr != null && idAttr !== "" ? parseInt(idAttr, 10) : null,
-    name: el.getAttribute("name") || "图层",
+    name: el.getAttribute("name") || "Layer",   // 无名层的兜底名（写回文件的数据）
     opacity: parseFloat(el.getAttribute("opacity") || "1"),
     visible: (el.getAttribute("visibility") || "visible") === "visible",
     mode: canvasModeFromOra(el.getAttribute("composite-op") || "svg:src-over"),
@@ -200,12 +200,12 @@ function parseChildren(stackEl: Element): ParsedNode[] {
 export function parseStackXml(xmlText: string): { w: number; h: number; nodes: ParsedNode[]; wroteWith: string | null } {
   const dom = new DOMParser().parseFromString(xmlText, "application/xml");
   const err = dom.querySelector("parsererror");
-  if (err) throw new Error("stack.xml 解析失败：" + err.textContent);
+  if (err) throw new Error("stack.xml parse failed: " + err.textContent);
   const image = dom.querySelector("image");
-  if (!image) throw new Error("stack.xml 缺 <image>");
+  if (!image) throw new Error("stack.xml missing <image>");
   const w = parseInt(image.getAttribute("w") || "0", 10);
   const h = parseInt(image.getAttribute("h") || "0", 10);
-  if (!w || !h) throw new Error("stack.xml <image> w/h 无效");
+  if (!w || !h) throw new Error("stack.xml <image> w/h invalid");
   // root <stack>（image 的直接子 stack）。递归建树。
   const rootStack = [...image.children].find((c) => elemTag(c) === "stack");
   const nodes = rootStack ? parseChildren(rootStack) : [];

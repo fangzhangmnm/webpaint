@@ -85,7 +85,7 @@ function runDocTransform(label: string, tf: DocTransformSpec): void {
     tf.after?.();
     ui.after = _captureUi();
   });
-  if (!res.ok) { reportError(new Error(`[docTransform] ${label} 失败（已回滚）：${res.msg ?? "?"}`), "error"); return; }
+  if (!res.ok) { reportError(new Error(`[docTransform] ${label} failed (rolled back): ${res.msg ?? "?"}`), "error"); return; }
   if (els.canvasSizeLabel) els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
   board.invalidateAll();
   bumpDoc();

@@ -53,10 +53,10 @@ async function _load(): Promise<void> {
         const r = await fetch(url);
         if (!r.ok) throw new Error("HTTP " + r.status);
         const j = await r.json();
-        if (!Array.isArray(j?.categories) || !Array.isArray(j?.words)) throw new Error("color-words.json 格式不对");
+        if (!Array.isArray(j?.categories) || !Array.isArray(j?.words)) throw new Error("color-words.json malformed");
         _adoptColorWords(j);
       } catch (e) {
-        reportError(new Error("[color-name] color-words.json 加载失败 → 本次无色名词库（下次调用重试）。" + String(e)), "log");
+        reportError(new Error("[color-name] color-words.json failed to load -> no color-name lexicon this time (next call retries)." + String(e)), "log");
       }
     })().finally(() => { _inflight = null; });
   }

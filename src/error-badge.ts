@@ -7,6 +7,7 @@
 //   banner 复用 index.html 内联 bootstrap 落下的 #__errBar 那一档（那份内联 = bundle 加载前的早期兜底；
 //   本模块 init 后接管 window.__wp_showFatal，让内联的 error/unhandledrejection handler 也走 severity）。
 
+import { t } from "./i18n/index.ts";
 export type ErrorLevel = "error" | "warning" | "info" | "log";
 
 const BANNER_COLOR: Record<"error" | "warning", string> = {
@@ -33,7 +34,7 @@ export function initErrorBadge(deps: { status: (text: string, persist?: boolean)
 }
 
 function errToText(err: unknown): string {
-  if (err == null) return "未知错误";
+  if (err == null) return t("err.unknown");
   if (typeof err === "string") return err;
   // v0.4.11 插桩（真机 2.3「总是同步错误弹窗」）：Error 带上 err.name——旧库残留类故障
   //   （如 IDB NotFoundError）在 banner 上直接可辨，给下轮 store 大修留诊断证据。
@@ -55,7 +56,7 @@ function showBanner(text: string, level: "error" | "warning"): void {
     (document.body || document.documentElement).appendChild(bar);
   }
   bar.style.cssText = BANNER_CSS + ";background:" + BANNER_COLOR[level];
-  bar.textContent = text + "  (点击关闭)";
+  bar.textContent = text + "  (" + t("err.dismissHint") + ")";
 }
 
 /**

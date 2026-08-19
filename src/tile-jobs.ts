@@ -17,7 +17,7 @@ export function initTileJobs(): { jobs: BackgroundSyncJobs; dispose: () => void 
   setTilePoolLeakReporter((info) => reportError(new Error("[tile-pool] " + info), "log"));
 
   const jobs = new BackgroundSyncJobs({
-    onError: (name, e) => reportError(new Error(`[bg-jobs] handler "${name}" 抛错: ${String(e)}`), "warning"),
+    onError: (name, e) => reportError(new Error(`[bg-jobs] handler "${name}" threw: ${String(e)}`), "warning"),
   });
 
   // tile 压缩：低优先级循环 handler。budget = 距 deadline 的剩余毫秒。

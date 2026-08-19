@@ -257,7 +257,7 @@ export class BrushRackController {
     const builtins = await loadBuiltinBrushes();
     if (!builtins) {
       // 兜底的 emergency 笔**不写库**（会被推上云、污染所有设备）。如实报错，让用户知道该重试/联网。
-      reportError(new Error("[笔架] 内置笔刷数据没加载到（离线或站点缺 builtin-brushes.json），本次还原已取消。"),
+      reportError(new Error("[rack] builtin brush data failed to load (offline, or site missing builtin-brushes.json); this restore was cancelled."),
                   silent ? "log" : "warning");
       return 0;
     }
@@ -276,15 +276,17 @@ export class BrushRackController {
   }
 
   _nextBrushName() {
-    const re = /^新笔\s*(\d+)$/;
+    // 序号扫描按**当前语言**的新笔前缀（名字是数据，不跨语言迁移；换语言从 1 重新起序无害）
+    const base = t("name.brushBase").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`^${base}\\s*(\\d+)$`);
     let max = 0;
     for (const b of getAllBrushes(this.d.collection)) { const m = re.exec(b.name); if (m) max = Math.max(max, parseInt(m[1], 10)); }
-    return `新笔 ${max + 1}`;
+    return t("name.newBrushN", { n: max + 1 });
   }
   // v232 (user：「新建笔从当前 active 笔拷贝，名字也从原名派生」)：「水彩」→「水彩 2」→「水彩 3」。
   // 去掉原名尾部数字得 base，扫全架同 base 的最大序号 +1（base 本身算 1）。
   _deriveBrushName(srcName: string) {
-    const base = String(srcName || "").replace(/\s*\d+$/, "").trim() || "新笔";
+    const base = String(srcName || "").replace(/\s*\d+$/, "").trim() || t("name.brushBase");
     const re = new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*(\\d+)$`);
     let max = 1;
     for (const b of getAllBrushes(this.d.collection)) {
@@ -425,7 +427,7 @@ export class BrushRackController {
       this.d.setStatus(n ? t("br.rackRestored", { n }) : t("br.rackRestoreFailed"), true);
     });
     if (els.dumpCodeBtn) els.dumpCodeBtn.addEventListener("click", async () => {
-      await shareOrDownloadJSON(new Blob([buildRackCode(this._view())], { type: "text/javascript" }), "builtin-brushes.js", "笔架代码");
+      await shareOrDownloadJSON(new Blob([buildRackCode(this._view())], { type: "text/javascript" }), "builtin-brushes.js", t("rack.shareTitle"));
       this.d.setStatus(t("br.codeExported", { n: getAllBrushes(this.d.collection).length }));
     });
   }

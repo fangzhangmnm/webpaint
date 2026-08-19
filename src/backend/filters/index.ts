@@ -20,7 +20,7 @@ export const FILTER_KERNELS: Readonly<Record<string, FilterKernel>> = Object.fre
 
 export function getFilterKernel(id: string): FilterKernel {
   const k = FILTER_KERNELS[id];
-  if (!k) throw new Error(`filter kernel 未注册：${id}（region kernel 清单 = backend/filters/index.ts）`);
+  if (!k) throw new Error(`filter kernel not registered: ${id} (region kernel list = backend/filters/index.ts)`);
   return k;
 }
 

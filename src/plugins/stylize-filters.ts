@@ -3,6 +3,7 @@
 // 数学 = backend/filters/stylize-kernels.ts（C8 析出：bake/defaults/bleedRadius 委托 kernel）。
 
 import { registerFilter, makeSliderRow, makeSelectRow } from "../filters.ts";
+import { t, tLatin } from "../i18n/index.ts";
 import { MosaicKernel, HalftoneKernel, StainedGlassKernel } from "../backend/filters/stylize-kernels.ts";
 
 // buildBody state：app 注入的 { params } 容器（filter UI 读写 state.params）
@@ -14,7 +15,7 @@ interface FilterBuildState {
 // 用途：交作业过审 / 隐私打码 / 像素艺术风格化
 export class MosaicFilter {
   static id = "mosaic";
-  static title = "马赛克";
+  static title = t("flt.mos.title");
   static category = "artist";
   static modes = ["region"];
   static bleedRadius = MosaicKernel.bleedRadius;
@@ -22,7 +23,7 @@ export class MosaicFilter {
   static bake = MosaicKernel.bake;
 
   static buildBody(container: HTMLElement, state: FilterBuildState, onChange: () => void) {
-    container.appendChild(makeSliderRow("块大小", "cellSize", 2, 64, 1, state.params.cellSize as number, (k: string, v: number) => {
+    container.appendChild(makeSliderRow(t("flt.mos.cellSize"), "cellSize", 2, 64, 1, state.params.cellSize as number, (k: string, v: number) => {
       state.params.cellSize = v | 0;
       onChange();
     }, { fmt: (v: number) => `${v | 0} px` }));
@@ -33,7 +34,7 @@ export class MosaicFilter {
 // 报刊 / 漫画 / 老印刷
 export class HalftoneFilter {
   static id = "halftone";
-  static title = "半调网点";
+  static title = t("flt.ht.title");
   static category = "artist";
   static modes = ["region"];
   static bleedRadius = HalftoneKernel.bleedRadius;
@@ -45,15 +46,15 @@ export class HalftoneFilter {
       state.params[k] = (typeof v === "string") ? v : (v | 0);
       onChange();
     };
-    container.appendChild(makeSliderRow("网点间距", "cellSize", 3, 32, 1, state.params.cellSize as number, set, {
+    container.appendChild(makeSliderRow(t("flt.ht.cellSize"), "cellSize", 3, 32, 1, state.params.cellSize as number, set, {
       fmt: (v: number) => `${v | 0} px`,
     }));
-    container.appendChild(makeSliderRow("网点缩放", "dotScale", 50, 200, 5, state.params.dotScale as number, set, {
+    container.appendChild(makeSliderRow(t("flt.ht.dotScale"), "dotScale", 50, 200, 5, state.params.dotScale as number, set, {
       fmt: (v: number) => `${v | 0}%`,
     }));
-    container.appendChild(makeSelectRow("模式", "mode", [
-      { value: "blackOnWhite", label: "黑点 on 白" },
-      { value: "whiteOnBlack", label: "白点 on 黑" },
+    container.appendChild(makeSelectRow(t("flt.ht.mode"), "mode", [
+      { value: "blackOnWhite", label: tLatin("flt.ht.blackOnWhite") },
+      { value: "whiteOnBlack", label: tLatin("flt.ht.whiteOnBlack") },
     ], state.params.mode as string, set));
   }
 }
@@ -61,7 +62,7 @@ export class HalftoneFilter {
 // ============ 教堂彩窗（Stained glass）============
 export class StainedGlassFilter {
   static id = "stainedGlass";
-  static title = "教堂彩窗";
+  static title = t("flt.sg.title");
   static category = "artist";
   static modes = ["region"];
   static bleedRadius = StainedGlassKernel.bleedRadius;
@@ -70,10 +71,10 @@ export class StainedGlassFilter {
 
   static buildBody(container: HTMLElement, state: FilterBuildState, onChange: () => void) {
     const set = (k: string, v: number) => { state.params[k] = v | 0; onChange(); };
-    container.appendChild(makeSliderRow("玻璃块大小", "cellSize", 6, 64, 1, state.params.cellSize as number, set, {
+    container.appendChild(makeSliderRow(t("flt.sg.cellSize"), "cellSize", 6, 64, 1, state.params.cellSize as number, set, {
       fmt: (v: number) => `${v | 0} px`,
     }));
-    container.appendChild(makeSliderRow("铅条粗细",   "leadWidth", 0, 4, 1, state.params.leadWidth as number, set, {
+    container.appendChild(makeSliderRow(t("flt.sg.leadWidth"), "leadWidth", 0, 4, 1, state.params.leadWidth as number, set, {
       fmt: (v: number) => `${v | 0} px`,
     }));
   }

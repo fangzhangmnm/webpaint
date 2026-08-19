@@ -188,11 +188,11 @@ export class WebPaintBackend implements WebPaintBackendInterface {
     if (fmt === "psd") {
       // C7 后棒实勘：全仓不存在 psd 解码器——psd 是**只写格式**（导出 = backend/psd.ts encodeDocToPsd，
       // exporters 懒加载）。open 对 8BPS 响亮失败是终态，不是待接的路由（要导入 psd = 新功能，另立项）。
-      throw new Error("WebPaintBackend.open: WebPaint 无 psd 解码器（psd 只写不读）——请转存 .ora/.png 再导入");
+      throw new Error("WebPaintBackend.open: no psd decoder (psd is write-only) — re-save as .ora/.png and import that");
     }
     const plane = fmt === "png"
       ? await decodePngToBytes(bytes)
-      : await (inject.imageDecoder ?? (() => { throw new Error("WebPaintBackend.open: 非 png 位图需要注入 imageDecoder"); }))(bytes);
+      : await (inject.imageDecoder ?? (() => { throw new Error("WebPaintBackend.open: non-png bitmaps need an injected imageDecoder"); }))(bytes);
     const backend = new WebPaintBackend(singleImageData(plane), inject);
     return { backend, sidecar: { wroteWith: null } };
   }
@@ -218,7 +218,7 @@ export class WebPaintBackend implements WebPaintBackendInterface {
   }
 
   private _guard(): void {
-    if (this._disposed) throw new Error("WebPaintBackend: disposed（换画 = 弃旧建新）");
+    if (this._disposed) throw new Error("WebPaintBackend: disposed (switching artwork = discard and rebuild)");
   }
 
   // ── 字节面 ──
@@ -241,10 +241,10 @@ export class WebPaintBackend implements WebPaintBackendInterface {
   async exportImage(fmt: "png" | "jpg"): Promise<Uint8Array> {
     this._guard();
     const merged = this._compositor(this._view.layers, this._view.width, this._view.height);
-    if (!merged) throw new Error("exportImage: 合成不可用（无 GL/软合成注入）——响亮失败，不出占位图");
+    if (!merged) throw new Error("exportImage: no compositor available (no GL/soft inject) — failing loudly, no placeholder output");
     if (fmt === "png") return encodePngFromBytes(merged.data, merged.w, merged.h);
     const enc = this._inject.jpgEncoder;
-    if (!enc) throw new Error("exportImage: jpg 需要注入 jpgEncoder（壳 canvas 域）");
+    if (!enc) throw new Error("exportImage: jpg needs an injected jpgEncoder (shell canvas domain)");
     return enc(merged);
   }
 
@@ -304,7 +304,7 @@ export class WebPaintBackend implements WebPaintBackendInterface {
     this._txGuard("crop");
     const cx = Math.round(x), cy = Math.round(y), cw = Math.round(w), ch = Math.round(h);
     if (!Number.isFinite(cx) || !Number.isFinite(cy) || cw < 1 || ch < 1 || cw > 8192 || ch > 8192) {
-      return { ok: false, msg: `crop: 非法矩形（w/h 须在 1..8192，got ${w}×${h}）` };
+      return { ok: false, msg: `crop: invalid rect (w/h must be within 1..8192, got ${w}x${h})` };
     }
     const res = this._history.withPoint("docTransform", {}, () => {
       this._wp2.layerTiles.resizeAllLeaves((_id, lp) => lp.cropped(cx, cy, cw, ch));
@@ -328,8 +328,8 @@ export class WebPaintBackend implements WebPaintBackendInterface {
   //    会被 History 当 swap 中途失败走不可恢复协议弃整栈，所以令牌墙必须在本门口挡）──
 
   private _txGuard(op: string): void {
-    if (this._stroke) throw new Error(`${op}: open stroke 事务中（单令牌墙——先 strokeEnd/strokeCancel）`);
-    if (this._filter) throw new Error(`${op}: open filter 事务中（单令牌墙——先 filterCommit/filterCancel）`);
+    if (this._stroke) throw new Error(`${op}: open stroke in progress (single-token wall — strokeEnd/strokeCancel first)`);
+    if (this._filter) throw new Error(`${op}: open filter in progress (single-token wall — filterCommit/filterCancel first)`);
   }
 
   undo(): boolean { this._guard(); this._txGuard("undo"); return this._history.undo(); }
@@ -380,16 +380,16 @@ export class WebPaintBackend implements WebPaintBackendInterface {
 
   private _requireStroke(id: StrokeId) {
     const st = this._stroke;
-    if (!st || st.id !== id) throw new Error(`stroke 档口：无此 open stroke（id=${id}）`);
+    if (!st || st.id !== id) throw new Error(`stroke gate: no such open stroke (id=${id})`);
     return st;
   }
 
   strokeBegin(leafId: number, brush: ResolvedBrushSnapshot): StrokeId {
     this._guard();
-    if (this._stroke) throw new Error("strokeBegin: 已有 open stroke——先 End/Cancel（单令牌墙，响亮拒绝不排队）");
-    if (this._filter) throw new Error("strokeBegin: open filter 事务中——先 filterCommit/filterCancel（单令牌墙）");
+    if (this._stroke) throw new Error("strokeBegin: a stroke is already open — End/Cancel first (single-token wall, loud reject, no queueing)");
+    if (this._filter) throw new Error("strokeBegin: open filter in progress — filterCommit/filterCancel first (single-token wall)");
     const node = findViewNodeById(this._view.layers, leafId);
-    if (!node || node.isGroup) throw new Error(`strokeBegin: 叶不存在或是组（id=${leafId}）`);
+    if (!node || node.isGroup) throw new Error(`strokeBegin: leaf missing or is a group (id=${leafId})`);
     const layer = node as ViewLeaf;
     // 快照钉细（接口文件 §snapshot）：扁平 ResolvedBrush 字段 + 可选 mode；缺字段 DEFAULT_CONFIG 兜底
     //（user mental model：console 设一下工具也能画——MCP 只传 {size,color} 也出完整可画的笔）。
@@ -416,7 +416,7 @@ export class WebPaintBackend implements WebPaintBackendInterface {
   strokeAppend(id: StrokeId, points: Float32Array): void {
     this._guard();
     const st = this._requireStroke(id);
-    if (points.length % 4 !== 0) throw new Error("strokeAppend: points 必须是 stride=4 的 (x,y,p,t) 序列");
+    if (points.length % 4 !== 0) throw new Error("strokeAppend: points must be a stride-4 (x,y,p,t) sequence");
     for (let i = 0; i < points.length; i += 4) {
       const x = points[i], y = points[i + 1], p = points[i + 2], t = points[i + 3];
       const tt = Number.isFinite(t) ? t : null;
@@ -451,20 +451,20 @@ export class WebPaintBackend implements WebPaintBackendInterface {
 
   private _requireFilter(id: FilterSessionId) {
     const fs = this._filter;
-    if (!fs || fs.id !== id) throw new Error(`filter 档口：无此 open filter session（id=${id}）`);
+    if (!fs || fs.id !== id) throw new Error(`filter gate: no such open filter session (id=${id})`);
     return fs;
   }
 
   filterBegin(leafId: number, filterId: string): FilterSessionId {
     this._guard();
-    if (this._stroke) throw new Error("filterBegin: open stroke 事务中——先 strokeEnd/strokeCancel（单令牌墙）");
-    if (this._filter) throw new Error("filterBegin: 已有 open filter session——先 Commit/Cancel（单令牌墙，响亮拒绝不排队）");
+    if (this._stroke) throw new Error("filterBegin: open stroke in progress — strokeEnd/strokeCancel first (single-token wall)");
+    if (this._filter) throw new Error("filterBegin: a filter session is already open — Commit/Cancel first (single-token wall, loud reject, no queueing)");
     const kernel = getFilterKernel(filterId);   // 未注册 id → 响亮 throw
     const node = findViewNodeById(this._view.layers, leafId);
-    if (!node || node.isGroup) throw new Error(`filterBegin: 叶不存在或是组（id=${leafId}）`);
+    if (!node || node.isGroup) throw new Error(`filterBegin: leaf missing or is a group (id=${leafId})`);
     const leaf = node as ViewLeaf;
     const bx = leaf.bboxX, by = leaf.bboxY, bw = leaf.bboxW, bh = leaf.bboxH;
-    if (bw <= 0 || bh <= 0) throw new Error(`filterBegin: 层无像素（id=${leafId}）——region filter 对空层无意义`);
+    if (bw <= 0 || bh <= 0) throw new Error(`filterBegin: layer has no pixels (id=${leafId}) — region filter is meaningless on an empty layer`);
     // begin 即开令牌（adjust surrogate 同语义：预览期真层零写，collector 空 → cancel 无痕）。
     const token = this._wp2.begin("adjust");
     const src = leaf.pixels.getRegion(bx, by, bw, bh);

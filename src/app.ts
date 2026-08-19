@@ -127,7 +127,7 @@ const backend = WebPaintBackend.blank({ width: 2048, height: 2048 }, {
   hooks: {
     // 不可恢复（swap 中途失败 / 回滚自身失败）：栈已弃 → 从当前文档态重建画面 + error banner。
     onUnrecoverable: (e) => {
-      reportError(new Error("[undo] 不可恢复的 undo 异常，撤销历史已重置（画面已从当前文档态重建）：" + String(e)), "error");
+      reportError(new Error("[undo] unrecoverable undo exception; history reset (view rebuilt from current doc state): " + String(e)), "error");
       renderLayersPanel(); board.invalidateAll(); board.requestRender();
     },
     // 栈形状变化 → wp:histchange（session-state 编辑门 / topbar undo 按钮态 都吃这个事件，契约不变）。
@@ -305,7 +305,7 @@ board.setLassoProvider((() => ({
 function freezeCtx<T extends object>(obj: T): T {
   for (const k of Object.keys(obj)) {
     if (Object.getOwnPropertyDescriptor(obj, k)!.get) continue;   // getter（gallery）懒求值，构造期跳过
-    if ((obj as Record<string, unknown>)[k] === undefined) throw new Error(`[ctx] 组合根键 "${k}" 构造时值为 undefined（import 名写错或引用未定义）`);
+    if ((obj as Record<string, unknown>)[k] === undefined) throw new Error(`[ctx] composition-root key "${k}" is undefined at construction (typo in import name or unresolved ref)`);
   }
   return Object.freeze(obj);
 }

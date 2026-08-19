@@ -496,7 +496,7 @@
            换 in-app 下拉（同设置页）；语言补齐（user：「语言没有进图库的菜单」）；gen-AI 开关代理主菜单同款。 -->
       <label class="menu-item menu-lang-row menu-item-with-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#theme"/></svg>
         <span class="menu-item-label" data-i18n="menu.theme">主题</span>
-        <button class="menu-lang-select menu-inline-select" id="galleryThemeBtn" type="button" aria-haspopup="true"><span id="galleryThemeBtnLabel">跟随系统</span><svg class="menu-inline-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M1.4 2.8 L4 5.6 L6.6 2.8" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button class="menu-lang-select menu-inline-select" id="galleryThemeBtn" type="button" aria-haspopup="true"><span id="galleryThemeBtnLabel" data-i18n="theme.auto">跟随系统</span><svg class="menu-inline-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M1.4 2.8 L4 5.6 L6.6 2.8" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       </label>
       <label class="menu-item menu-lang-row menu-item-with-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#globe-speech"/></svg>
         <span class="menu-item-label" data-i18n="menu.language">语言</span>
@@ -526,7 +526,7 @@
 
     <!-- 云图标 popup：未登录显示"登录"；已登录显示账号 + 退出 -->
     <div class="menu-panel hidden" id="cloudAccountPopup" role="menu">
-      <div class="menu-item-info" id="cloudAccountInfo">云端：未配置</div>
+      <div class="menu-item-info" id="cloudAccountInfo" data-i18n="cf.cloudNotConfigured">云端：未配置</div>
       <button class="menu-item hidden menu-item-with-icon" id="cloudSignInBtn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#cloud"/></svg>
         <span class="menu-item-label" data-i18n="gal.menu.signIn">登录 OneDrive</span>
       </button>
@@ -1312,7 +1312,7 @@
       </button>
         <label class="menu-item menu-lang-row menu-item-with-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#theme"/></svg>
           <span class="menu-item-label" data-i18n="menu.theme">主题</span>
-          <button class="menu-lang-select menu-inline-select" id="menuThemeBtn" type="button" aria-haspopup="true"><span id="menuThemeBtnLabel">跟随系统</span><svg class="menu-inline-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M1.4 2.8 L4 5.6 L6.6 2.8" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <button class="menu-lang-select menu-inline-select" id="menuThemeBtn" type="button" aria-haspopup="true"><span id="menuThemeBtnLabel" data-i18n="theme.auto">跟随系统</span><svg class="menu-inline-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M1.4 2.8 L4 5.6 L6.6 2.8" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
         </label>
         <button id="menuTheme" type="button" hidden></button><!-- 旧 id stub：theme.ts renderTheme 查它，v0.6C 下拉化后留防崩 -->
         <label class="menu-item menu-lang-row menu-item-with-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#globe-speech"/></svg>

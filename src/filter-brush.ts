@@ -39,7 +39,7 @@ export class FilterBrushEngine {
 
   beginStroke(layer: ViewLeaf, Filter: BrushFilter, params: unknown, brushSettings: unknown, selection: Selection | null, x: number, y: number, pressure: number) {
     if (!Filter || !Filter.beginBrushStroke) {
-      throw new Error(`Filter ${Filter && Filter.id} 不支持 brush 模式`);
+      throw new Error(`Filter ${Filter && Filter.id} does not support brush mode`);
     }
     this._Filter = Filter;
     this._handle = Filter.beginBrushStroke(layer, params, brushSettings, selection, x, y, pressure);

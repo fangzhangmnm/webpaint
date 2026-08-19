@@ -57,7 +57,7 @@ export function selectionToNewLayer({ move }: { move: boolean }) {
   // compound 把 [addLayer, pixels] 封成一个整点：undo 先还原源层像素、再摘掉新层 + active 回源层。
   // v0.8.2（S2→T5）：move 挖洞在同一 withPoint 令牌内，tile 换手由 LayerTiles 写时扣押。
   const r = history.withPoint(move ? "moveToNewLayer" : "copyToNewLayer", {}, () => {
-    const a = layers.addLayer(move ? "移到新层" : "复制层", { checkpoint: false });
+    const a = layers.addLayer(move ? t("name.moveToNewLayer") : t("name.copyLayer"), { checkpoint: false });
     if (!a.ok) throw new Error(a.msg);
     const newL = a.layer;
     // 把 active ∩ selection 的像素 copy 进 newL（v0.6.41 全字节：tiles 直读 → alpha×mask → 直落 tile）

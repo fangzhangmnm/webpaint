@@ -1,5 +1,6 @@
 // 职责（单一）：全屏 busy 遮罩 + withBusy 长操作包装——纯 DOM，无 app-state 依赖。
 // 全屏 block overlay：拉云端时显示 spinner + 文字，防误操作
+import { t } from "./i18n/index.ts";
 export function showFullscreenBusy(msg?: string): void {
   let el = document.getElementById("fullscreenBusy");
   if (!el) {
@@ -10,7 +11,7 @@ export function showFullscreenBusy(msg?: string): void {
     document.body.appendChild(el);
   }
   const m = el.querySelector(".fullscreen-busy-msg");
-  if (m) m.textContent = msg || "处理中…";
+  if (m) m.textContent = msg || t("busy.working");
   el.classList.remove("hidden");
 }
 export function hideFullscreenBusy() {

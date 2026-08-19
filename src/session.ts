@@ -18,6 +18,7 @@
 //     把"加载失败的 path"当 oldName 删掉
 //   - **破坏性操作永远用「真正载入的路径」**，不用这里的 getCurrentSessionName()
 
+import { t } from "./i18n/index.ts";
 import { renderNodesToBytes } from "./backend/doc-render.ts";
 import { areaResampleBytes } from "./backend/algorithms/resample-bytes.ts";
 import { encodePngFromBytes } from "./backend/png-codec.ts";
@@ -99,7 +100,7 @@ export async function renderDocToImageBlob(doc: PaintingView, mime = "image/png"
     ? (doc.activeLayer ? [{ ...(doc.activeLayer as unknown as Record<string, unknown>), clippingMask: false }] : [])
     : (doc.layers as unknown[]);
   let plane = nodes.length ? renderNodesToBytes(nodes, doc.width, doc.height) : { data: new Uint8ClampedArray(doc.width * doc.height * 4), w: doc.width, h: doc.height };
-  if (!plane) throw new Error("GL 不可用，无法合成导出图");
+  if (!plane) throw new Error("GL unavailable; cannot composite export image");
   // #16：裁剪到选区 bbox（合成仍整 doc 做——GL 合成一次性的，裁剪只是末端行拷贝）
   if (cropRect && cropRect.w > 0 && cropRect.h > 0) {
     const cw = cropRect.w, ch = cropRect.h;
@@ -187,14 +188,14 @@ export async function copyImageToClipboard(doc: PaintingView, scope = "merged", 
   // （那个 await 跨过 gesture 窗口 → NotAllowedError）。把 renderDocToImageBlob 的 Promise<Blob>
   // 直接交给 ClipboardItem（lazy promise 写法），复用 writeImageBlobToClipboard 同款路径。
   const blobPromise = renderDocToImageBlob(doc, "image/png", undefined, scope, cropRect)
-    .then((blob) => { if (!blob) throw new Error("生成 PNG 失败"); return blob; });
+    .then((blob) => { if (!blob) throw new Error("PNG generation failed"); return blob; });
   await writeImageBlobToClipboard(blobPromise);
 }
 
 /** 把任意 PNG blob（或 Promise<Blob>，Safari lazy 写法）复制到剪贴板。 */
 export async function writeImageBlobToClipboard(blobOrPromise: Blob | Promise<Blob>) {
   if (!navigator.clipboard || !navigator.clipboard.write) {
-    throw new Error("浏览器不支持剪贴板写入");
+    throw new Error("browser does not support clipboard write");
   }
   await navigator.clipboard.write([
     new ClipboardItem({ "image/png": blobOrPromise }),
@@ -204,7 +205,7 @@ export async function writeImageBlobToClipboard(blobOrPromise: Blob | Promise<Bl
 /** 读剪贴板里的图片。返回 Blob 或 null（剪贴板里没图）。 */
 export async function readImageFromClipboard() {
   if (!navigator.clipboard || !navigator.clipboard.read) {
-    throw new Error("浏览器不支持剪贴板读取");
+    throw new Error("browser does not support clipboard read");
   }
   const items = await navigator.clipboard.read();
   for (const item of items) {
@@ -249,7 +250,7 @@ function _printDocHtml(src: string, autoPrint: boolean): string {
   return (
     "<!doctype html><html><head><meta charset=\"utf-8\">" +
     "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
-    "<title>打印</title><style>" +
+    "<title>" + t("print.title") + "</title><style>" +
     "@page{margin:0}" +
     "html,body{margin:0;padding:0;height:100%;background:#fff}" +
     "body{display:flex;align-items:center;justify-content:center}" +
@@ -312,7 +313,7 @@ export async function printImageBlob(
   const idoc = iframe.contentDocument;
   const iwin = iframe.contentWindow;
   const cleanup = () => { iframe.remove(); URL.revokeObjectURL(url); };
-  if (!idoc || !iwin) { cleanup(); throw new Error("打印 iframe 创建失败"); }
+  if (!idoc || !iwin) { cleanup(); throw new Error("print iframe creation failed"); }
 
   idoc.open();
   idoc.write(_printDocHtml(url, false));   // 父窗口驱动 print，别让脚本重复打

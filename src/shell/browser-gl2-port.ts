@@ -70,7 +70,7 @@ export class BrowserTileArena implements Gl2TileArena {
   // 退租后动词 = 响亮 throw（契约：用死租约是结构 bug——真 GL 里 bind null 纹理会静默 no-op，
   //   比 throw 危险得多，所以门口挡）。
   private _aliveGuard(): void {
-    if (this._disposed) throw new Error("ARENA_DISPOSED（退租后使用——owner 已 dispose 本 arena）");
+    if (this._disposed) throw new Error("ARENA_DISPOSED (used after teardown — owner already disposed this arena)");
   }
 
   private _alloc(): void {

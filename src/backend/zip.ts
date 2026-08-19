@@ -11,7 +11,7 @@ type ZipLib = any;
 function Z(): ZipLib {
   const g = globalThis as unknown as { zip?: ZipLib };
   if (!g.zip) {
-    throw new Error("zip.js 未加载（应在 app.js 之前以 classic <script> 引入 ./vendor/zip-js/zip-full.min.js）");
+    throw new Error("zip.js not loaded (must be included as a classic <script> before app.js: ./vendor/zip-js/zip-full.min.js)");
   }
   return g.zip;
 }
@@ -30,7 +30,7 @@ function toZipReader(data: Blob | Uint8Array | ArrayBuffer | string) {
   if (data instanceof Uint8Array) return new z.Uint8ArrayReader(data);
   if (data instanceof ArrayBuffer) return new z.Uint8ArrayReader(new Uint8Array(data));
   if (typeof data === "string") return new z.TextReader(data);
-  throw new TypeError("zip: 不支持的数据类型");
+  throw new TypeError("zip: unsupported data type");
 }
 
 interface ZipEntry {

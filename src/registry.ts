@@ -45,7 +45,7 @@ export function makeRegistry<T>({ name = "registry", idKey = "id" }: RegistryOpt
   return {
     register(item: T): T {
       const id = idOf(item);
-      if (!id) throw new Error(`${name}: 注册项缺少 ${idKey}`);
+      if (!id) throw new Error(`${name}: registration entry missing ${idKey}`);
       items.set(id, item);
       for (const fn of listeners) {
         try { fn(item); } catch (e) { reportError(new Error(`[${name} listener] ` + String(e)), "log"); }

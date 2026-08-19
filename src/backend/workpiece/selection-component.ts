@@ -115,7 +115,7 @@ export class SelectionPreviewTx {
 
   origin(): Selection | null { return this._origin; }
   private _assertOpen(): void {
-    if (!this._open) throw new Error("SelectionPreviewTx: 已收口（commit/abort 后不可再用）");
+    if (!this._open) throw new Error("SelectionPreviewTx: already closed (unusable after commit/abort)");
   }
 
   /** 换预览：上一个预览产物无人接手 → 就地 dispose（origin 与新值本体除外）。write(origin) 合法（= 预览回到原选区）。 */

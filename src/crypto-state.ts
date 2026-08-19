@@ -28,7 +28,7 @@ export function onLockChange(cb: LockChangeSub) { _subs.add(cb); return () => _s
 
 /** 弹一次密码输入（不入库、不验证）。app 没注入 prompt → throw（组装错误，早炸）。 */
 export async function promptPassword(opts: PromptOpts = {}) {
-  if (!_prompt) throw new Error("密码输入未接线（setPasswordPrompt）");
+  if (!_prompt) throw new Error("password prompt not wired (setPasswordPrompt)");
   const pw = await _prompt(opts);
   return pw == null || pw === "" ? null : pw;
 }

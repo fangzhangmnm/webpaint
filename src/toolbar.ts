@@ -17,7 +17,7 @@ import type { RampSliderHandle } from "./ui/ramp-slider.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { desk } from "./workbench-state.ts";   // pickMode → desk.colorPicker.layerMode SSoT（binding 写反应式）
 import { fillResampleSelect } from "./frontend/resample-modes.ts";
-import { t } from "./i18n/index.ts";
+import { t, tLatin } from "./i18n/index.ts";
 import { fillPreviewActive, commitFillNow, sendSelectionToFill } from "./fill-mode.ts";
 import { anchorPopupToBtn } from "./anchored-popup.ts";
 import { configFromModeState, planesForMode, defaultVpsForMode } from "./perspective-frame.ts";
@@ -1172,8 +1172,8 @@ export function initToolbar(ctx: AppContext) {
   // v120: 插值模式 dropdown（旧 3 个按钮 → 1 个 select）
   const lassoSampleSel = document.getElementById("lassoSampleSel") as HTMLSelectElement | null;
   // 变换采样 + 调整尺寸 两个 dropdown 都从 resample.js 的 RESAMPLE_MODES SSoT 填（以后加方法/AI 一处生效）
-  fillResampleSelect(lassoSampleSel, "transform", "bicubic");   // v0.6.45 默认双三次（真机裁决，spline 降自选）
-  fillResampleSelect(els.resampleMode, "scale", "bicubic");
+  fillResampleSelect(lassoSampleSel, "transform", "bicubic", tLatin as (key: string) => string);   // v0.6.45 默认双三次（真机裁决，spline 降自选）
+  fillResampleSelect(els.resampleMode, "scale", "bicubic", tLatin as (key: string) => string);
   if (lassoSampleSel) {
     lassoSampleSel.addEventListener("change", () => {
       input.lasso.setSampleMode(lassoSampleSel.value);

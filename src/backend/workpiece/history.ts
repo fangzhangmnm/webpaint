@@ -39,7 +39,7 @@ export class History {
 
   /** 组合根装配（wp 的 ctor 需要 stack 先在 → late-bind）。 */
   attach(wp: Workpiece): void {
-    if (this._wp) throw new Error("History: 重复 attach");
+    if (this._wp) throw new Error("History: attached twice");
     this._wp = wp;
   }
 
@@ -95,7 +95,7 @@ export class History {
   // ---- 内部 ----
 
   private _req(): Workpiece {
-    if (!this._wp) throw new Error("History: 未 attach（组合根装配序 bug）");
+    if (!this._wp) throw new Error("History: not attached (composition-root assembly-order bug)");
     return this._wp;
   }
 

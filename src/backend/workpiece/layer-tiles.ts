@@ -115,12 +115,12 @@ export class LayerTiles implements CollectorComponent {
   }
   acquireTileset(id: number): void {
     const e = this._tilesets.get(id);
-    if (!e) throw new Error(`LayerTiles: acquire 不存在的 tileset（${id}）`);
+    if (!e) throw new Error(`LayerTiles: acquire of nonexistent tileset (${id})`);
     e.refs++;
   }
   releaseTileset(id: number): void {
     const e = this._tilesets.get(id);
-    if (!e) throw new Error(`LayerTiles: release 不存在的 tileset（${id}——双释放?）`);
+    if (!e) throw new Error(`LayerTiles: release of nonexistent tileset (${id} — double release?)`);
     if (--e.refs <= 0) {
       this._tilesets.delete(id);
       this._disposeOwned(e.lp);
@@ -130,7 +130,7 @@ export class LayerTiles implements CollectorComponent {
   /** computed 变换换实例（tileset id 稳定，内容换血；旧实例还池）。 */
   swapTilesetPixels(id: number, np: LayerPixels): void {
     const e = this._tilesets.get(id);
-    if (!e) throw new Error(`LayerTiles: swap 不存在的 tileset（${id}）`);
+    if (!e) throw new Error(`LayerTiles: swap of nonexistent tileset (${id})`);
     this._disposeOwned(e.lp);
     e.lp = np;
     this._stampOwner(np);
@@ -139,7 +139,7 @@ export class LayerTiles implements CollectorComponent {
    *  DocResizeOp（crop/resample 的 undo 包持前一侧实例）用。T3b-2 补。 */
   exchangeTilesetPixels(id: number, np: LayerPixels): LayerPixels {
     const e = this._tilesets.get(id);
-    if (!e) throw new Error(`LayerTiles: exchange 不存在的 tileset（${id}）`);
+    if (!e) throw new Error(`LayerTiles: exchange of nonexistent tileset (${id})`);
     const old = e.lp;
     e.lp = np;
     this._stampOwner(np);
@@ -200,9 +200,9 @@ export class LayerTiles implements CollectorComponent {
    *  json 尺寸（width/height）由调用方另走 setTreeProp 进树 record，同 step 两账同向翻。 */
   resizeAllLeaves(map: (layerId: number, lp: LayerPixels) => LayerPixels): void {
     this._wp._componentWrite(this);
-    if (this._exchange) throw new Error("LayerTiles: 一个 token 只准一个 exchange record");
-    if (this._computed) throw new Error("LayerTiles: exchange 与 computed record 同 token 并存（multiple-parallel-path 违规）");
-    if (this._collectedCount() > 0) throw new Error("LayerTiles: exchange verb 前本 token 已有 tile 收集（双捕获断言）");
+    if (this._exchange) throw new Error("LayerTiles: only one exchange record per token");
+    if (this._computed) throw new Error("LayerTiles: exchange and computed record coexist on one token (multiple-parallel-path violation)");
+    if (this._collectedCount() > 0) throw new Error("LayerTiles: token already collected tiles before exchange verb (double-capture assertion)");
     const leaves: { layerId: number; lp: LayerPixels }[] = [];
     this._suspendCollect(true);
     try {
@@ -260,7 +260,7 @@ export class LayerTiles implements CollectorComponent {
         this._disposeCollected();
         this._computed = null;
         this._exchange = null;
-        throw new Error("LayerTiles: exchange record 与 tile 收集/computed 同 token 并存（双捕获断言）");
+        throw new Error("LayerTiles: exchange record coexists with tile collection/computed on one token (double-capture assertion)");
       }
       const r = this._exchange;
       this._exchange = null;
@@ -270,7 +270,7 @@ export class LayerTiles implements CollectorComponent {
       if (this._collectedCount() > 0) {
         this._disposeCollected();
         this._computed = null;
-        throw new Error("LayerTiles: computed record 双捕获断言——computed verb 与 tile 收集同 token 并存（multiple-parallel-path 违规）");
+        throw new Error("LayerTiles: computed-record double-capture assertion — computed verb and tile collection coexist on one token (multiple-parallel-path violation)");
       }
       const r = this._computed;
       this._computed = null;
@@ -296,8 +296,8 @@ export class LayerTiles implements CollectorComponent {
     if (r.t === "tiles") {
       for (const entry of r.layers) {
         const lp = this._host.getPixels(entry.layerId);
-        if (!lp) throw new Error(`LayerTiles: undo swap 时层已不在（layerId=${entry.layerId}——栈序 bug）`);
-        if (tilesAcross(lp.docW) !== entry.across) throw new Error("LayerTiles: undo swap 时层网格宽不匹配（across drift）");
+        if (!lp) throw new Error(`LayerTiles: layer gone at undo swap (layerId=${entry.layerId} — stack-order bug)`);
+        if (tilesAcross(lp.docW) !== entry.across) throw new Error("LayerTiles: layer grid width mismatch at undo swap (across drift)");
         entry.tiles = entry.tiles.map(([key, h]) => [key, lp._swapTileHandle(key, h)]);
       }
       return r;
@@ -310,7 +310,7 @@ export class LayerTiles implements CollectorComponent {
           t: "exchange",
           leaves: r.leaves.map((e) => {
             const cur = this._host.exchangePixels(e.layerId, e.lp);
-            if (!cur) throw new Error(`LayerTiles: exchange swap 时层已不在（layerId=${e.layerId}——栈序 bug）`);
+            if (!cur) throw new Error(`LayerTiles: layer gone at exchange swap (layerId=${e.layerId} — stack-order bug)`);
             return { layerId: e.layerId, lp: cur };
           }),
         } satisfies TilesRecord;
@@ -376,7 +376,7 @@ export class LayerTiles implements CollectorComponent {
       // C7 硬化（census §3.6）：曾是「留给 load 灌入」的静默口，但 load 走 token+suspend，
       // 真击中这里的 substrate 写只能是坏账——响亮失败（两层防线的 fail-loud 层，ADR-0008）。
       // 无主临时件（StrokeShadow 替身/scratch/内核直测）在令牌外的换手不归本 collector 管，放行。
-      if (owner === this) throw new Error(`LayerTiles: 无令牌像素写（substrate tile 换手在令牌墙外，key=${key}）——doc mutation 必须持 WriteToken（ADR-0008）`);
+      if (owner === this) throw new Error(`LayerTiles: tokenless pixel write (substrate tile handed over outside the token wall, key=${key}) — doc mutation must hold a WriteToken (ADR-0008)`);
       return;
     }
     this._wp._componentWrite(this);   // 写即登记 touched（无令牌不可能到这——tokenOpen 已 gate）
@@ -388,21 +388,21 @@ export class LayerTiles implements CollectorComponent {
   private _write(layerId: number): LayerPixels {
     this._wp._componentWrite(this);
     const lp = this._host.getPixels(layerId);
-    if (!lp) throw new Error(`LayerTiles: 层不存在（layerId=${layerId}）`);
+    if (!lp) throw new Error(`LayerTiles: layer does not exist (layerId=${layerId})`);
     return lp;
   }
 
   private _computedVerb(r: TilesRecord): void {
     this._wp._componentWrite(this);
-    if (this._computed) throw new Error("LayerTiles: 一个 token 只准一个 computed record");
-    if (this._collectedCount() > 0) throw new Error("LayerTiles: computed verb 前本 token 已有 tile 收集（双捕获断言）");
+    if (this._computed) throw new Error("LayerTiles: only one computed record per token");
+    if (this._collectedCount() > 0) throw new Error("LayerTiles: token already collected tiles before computed verb (double-capture assertion)");
     this._suspendCollect(true);
     try {
       this._applyComputed(r);
     } finally {
       this._suspendCollect(false);
     }
-    if (this._collectedCount() > 0) throw new Error("LayerTiles: computed verb 期间发生 tile 收集（双捕获断言）");
+    if (this._collectedCount() > 0) throw new Error("LayerTiles: tile collection happened during computed verb (double-capture assertion)");
     this._computed = this._invertComputed(r);   // 入栈的是 undo 包：应用它 = 撤销刚做的变换
   }
 

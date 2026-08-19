@@ -121,7 +121,7 @@ const _reg = makeRegistry<Filter>({ name: "filter" });
 
 export function registerFilter(FilterClass: Filter): void {
   if (!FilterClass || !FilterClass.id) {
-    throw new Error("Filter 必须有 static id");
+    throw new Error("Filter must have a static id");
   }
   _reg.register(FilterClass);
 }

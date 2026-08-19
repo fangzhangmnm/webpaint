@@ -15,11 +15,11 @@ import type { AppContext } from "./app-context.ts";
 let setStatus: AppContext["setStatus"];
 
 const _SMOOTH_LABELS: Record<string, string> = {
-  tauMaxMs:           "streamline=1 时间常数 tau (ms, 越大越平滑/越拖)",
-  tailBow:            "弧 tail 增益 (1=自然, >1 更鼓, 0=直)",
-  stabMaxPx:          "stabilization=1 死区半径 (screen px)",
-  rawStaticSq:        "raw 静止门限 (screen px²)",
-  pressureAlpha:      "压感 EMA α (input 端去尖刺, 0..1)",
+  tauMaxMs:           "streamline=1 time constant tau (ms; larger = smoother/laggier)",
+  tailBow:            "arc tail gain (1=natural, >1 rounder, 0=straight)",
+  stabMaxPx:          "stabilization=1 dead-zone radius (screen px)",
+  rawStaticSq:        "raw stillness threshold (screen px²)",
+  pressureAlpha:      "pressure EMA α (input-side despike, 0..1)",
 };
 let _smoothDevPanel: HTMLDivElement | null = null;
 function _refreshSmoothInputs(p: HTMLElement) {
@@ -35,7 +35,7 @@ function _buildSmoothDevPanel() {
   p.style.cssText = "position:fixed;right:12px;top:60px;z-index:300;background:var(--panel,#fff);color:var(--ink,#222);border:1px solid var(--line,#ccc);border-radius:10px;padding:12px 14px;font:12px/1.5 system-ui;box-shadow:0 6px 24px rgba(0,0,0,.25);max-width:300px";
   const head = document.createElement("div");
   head.style.cssText = "display:flex;justify-content:space-between;align-items:center;font-weight:600;margin-bottom:8px";
-  head.innerHTML = "<span>平滑调参 (dev)</span>";
+  head.innerHTML = "<span>Smoothing tuner (dev)</span>";
   const close = document.createElement("button");
   close.textContent = "×";
   close.style.cssText = "border:none;background:none;font-size:18px;line-height:1;cursor:pointer;color:inherit";
@@ -71,13 +71,13 @@ function _buildSmoothDevPanel() {
     p.appendChild(row);
   }
   const reset = document.createElement("button");
-  reset.textContent = "重置默认";
+  reset.textContent = "Reset defaults";
   reset.style.cssText = "margin-top:8px;width:100%;padding:6px;cursor:pointer";
-  reset.addEventListener("click", () => { resetSmooth(); _refreshSmoothInputs(p); setStatus("平滑参数已重置默认"); });
+  reset.addEventListener("click", () => { resetSmooth(); _refreshSmoothInputs(p); setStatus("smoothing params reset to defaults"); });
   p.appendChild(reset);
   const note = document.createElement("div");
   note.style.cssText = "margin-top:8px;color:var(--ink-soft,#888);font-size:11px";
-  note.textContent = "textbox 可打任意数量级值。改完下一笔生效。×100 没变化 = 该参数对当前笔无效。";
+  note.textContent = "Textbox accepts any magnitude. Takes effect next stroke. If ×100 changes nothing, the param is inert for the current brush.";
   p.appendChild(note);
   document.body.appendChild(p);
   return p;

@@ -11,7 +11,7 @@ import { isBusyActive } from "./fullscreen-busy.ts";
 //   冲突 gate，自带 spinner、设计上与 busy 协同，不走这条。）
 function _assertNotBusy(kind: string) {
   if (isBusyActive()) {
-    throw new Error(`不能在 withBusy 期间打开${kind}（会被全屏遮罩盖住→死锁）。把交互输入移到 withBusy 之外。`);
+    throw new Error(`cannot open ${kind} during withBusy (fullscreen overlay covers it -> deadlock). Move interactive input outside withBusy.`);
   }
 }
 
@@ -44,7 +44,7 @@ function resolveAndClose<T>(resolve: (v: T) => void, value: T, cleanup: () => vo
 // 输入框对话框 → Promise<string|null>（取消 = null）。
 // opts.password：输入框打码（type=password，关闭时还原）；opts.message：输入框上方说明行。
 export function openInputSheet(title: string, defaultValue = "", { placeholder = "", password = false, message = "" } = {}): Promise<string | null> {
-  _assertNotBusy("输入框");
+  _assertNotBusy("input sheet");
   return new Promise((resolve) => {
     g.title().textContent = title;
     if (message) { g.message().classList.remove("hidden"); g.message().textContent = message; }
@@ -84,7 +84,7 @@ export function openInputSheet(title: string, defaultValue = "", { placeholder =
 
 // 确认对话框 → Promise<boolean>。
 export function openConfirmSheet(title: string, message: string): Promise<boolean> {
-  _assertNotBusy("确认框");
+  _assertNotBusy("confirm sheet");
   return new Promise((resolve) => {
     g.title().textContent = title;
     g.input().classList.add("hidden");
@@ -107,7 +107,7 @@ export function openConfirmSheet(title: string, message: string): Promise<boolea
 // 多选项对话框 → Promise<T|null>（取消/点背板 = null）。#19 首用（拖入图片：新图层/设为参考）。
 //   确认按钮隐藏，取消保留；选项按钮动态生成进 #genericSheetChoices。
 export function openChoiceSheet<T>(title: string, message: string, choices: { label: string; value: T; primary?: boolean }[]): Promise<T | null> {
-  _assertNotBusy("选择框");
+  _assertNotBusy("choice sheet");
   return new Promise((resolve) => {
     g.title().textContent = title;
     g.input().classList.add("hidden");

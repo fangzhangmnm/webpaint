@@ -12,6 +12,7 @@
 //   - size = state.brush.size（左栏 size slider）
 
 import { registerFilter } from "../filters.ts";
+import { t, tLatin } from "../i18n/index.ts";
 import type { Filter, FilterParams, BrushLayer, BrushSettings, BrushSelection, DirtyRect } from "../filters.ts";
 import { LiquifyEngine } from "./liquify-engine.ts";
 import type { ViewLeaf } from "../backend/workpiece/painting-view.ts";
@@ -24,7 +25,7 @@ interface LiquifyBrushState {
 
 export class LiquifyFilter {
   static id = "liquify";
-  static title = "液化";
+  static title = t("flt.liq.title");
   static category = "adjustment";   // 跟 sharpenBlur 同组（菜单"笔刷类"）
   static modes = ["brush"];
   static bleedRadius(p: FilterParams): number {
@@ -39,19 +40,19 @@ export class LiquifyFilter {
   //   收/胀/旋 是径向变形，单 stamp 累积快 → 0.1（多笔触叠加可达更强）
   //   slider 仍在（opacity → 乘 scale），最大值发生在 opacity 100%
   static brushVariants = [
-    { id: "push",    title: "推",   params: { mode: "push",    strengthScale: 1.0 } },
-    { id: "pinch",   title: "收",   params: { mode: "pinch",   strengthScale: 0.1 } },
-    { id: "bloat",   title: "胀",   params: { mode: "bloat",   strengthScale: 0.1 } },
-    { id: "twirlL",  title: "左旋", params: { mode: "twirl",   strengthScale: 0.1 } },
-    { id: "twirlR",  title: "右旋", params: { mode: "twirlCW", strengthScale: 0.1 } },
+    { id: "push",    title: tLatin("flt.liq.push"),   params: { mode: "push",    strengthScale: 1.0 } },
+    { id: "pinch",   title: tLatin("flt.liq.pinch"),   params: { mode: "pinch",   strengthScale: 0.1 } },
+    { id: "bloat",   title: tLatin("flt.liq.bloat"),   params: { mode: "bloat",   strengthScale: 0.1 } },
+    { id: "twirlL",  title: tLatin("flt.liq.twirlL"), params: { mode: "twirl",   strengthScale: 0.1 } },
+    { id: "twirlR",  title: tLatin("flt.liq.twirlR"), params: { mode: "twirlCW", strengthScale: 0.1 } },
   ];
 
   // v147 选区边界取样模式（仅有选区时有意义）。feature 自己声明，toolbar 通用渲染第 2 个下拉，
   // 值经 params.bleed 透传到 LiquifyEngine.settings.bleed（见 src/liquify.js 注释）。
   static boundaryModes = [
-    { id: "edge",   title: "边缘拉伸" },   // 默认：边界像素沿拉拽方向无限拉长
-    { id: "clip",   title: "不拉边界外" }, // 设墙：外部什么都不进
-    { id: "import", title: "拉边界外" },   // 旧行为：把外部内容拉进选区
+    { id: "edge",   title: tLatin("flt.liq.bleedEdge") },   // 默认：边界像素沿拉拽方向无限拉长
+    { id: "clip",   title: tLatin("flt.liq.bleedClip") }, // 设墙：外部什么都不进
+    { id: "import", title: tLatin("flt.liq.bleedImport") },   // 旧行为：把外部内容拉进选区
   ];
 
   // v0.6.36 采样核（保锐模式）：声明存在即渲染下拉（选项从 RESAMPLE_MODES 的 liquify context 拉），

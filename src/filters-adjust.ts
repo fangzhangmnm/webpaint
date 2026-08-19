@@ -351,7 +351,7 @@ function _renderFilterBrushToolbar() {
   //   的 liquify context（SSoT 复用，与 transform 下拉同源）；持久化 desk.liquify.sample。
   if (Filter.sampleModes) {
     const ssel = mkSel("filterBrushSampleSel");
-    fillResampleSelect(ssel, "liquify", (fb.params.sample as string) || "bicubic");
+    fillResampleSelect(ssel, "liquify", (fb.params.sample as string) || "bicubic", tLatin as (key: string) => string);
     ssel.addEventListener("change", () => {
       fb.params = { ...fb.params, sample: ssel.value };
       desk.liquify.sample = ssel.value;

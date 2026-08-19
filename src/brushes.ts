@@ -22,6 +22,7 @@
 //   shape / coeffs / pressureGamma / compositeMode /
 //   spacing / pixelMode / taper / hardness / 椭圆参数 / smooth
 
+import { t } from "./i18n/index.ts";
 import type { Brush, BrushRackData } from "./brush-types.ts";
 import { reportError } from "./error-badge.ts";
 
@@ -83,6 +84,8 @@ interface BrushSizeLegacy {
   pressureCurve?: number;
 }
 
+// DEFAULT_FOLDER 是**持久化数据身份**（写进 brush 记录/云端），不是 UI 文案——不进 i18n，
+// 否则同账号多语言设备会分裂出两个默认文件夹。显示层若要翻译在渲染处做。
 export const DEFAULT_FOLDER = "我的常用";
 
 export function newBrushId() {
@@ -155,10 +158,10 @@ async function _loadBuiltinSpec(): Promise<BrushSpec[]> {
         const r = await fetch(url);
         if (!r.ok) throw new Error("HTTP " + r.status);
         const json = await r.json();
-        if (!Array.isArray(json)) throw new Error("builtin-brushes.json 不是数组");
+        if (!Array.isArray(json)) throw new Error("builtin-brushes.json is not an array");
         _builtinSpec = json;
       } catch (e) {
-        reportError(new Error("[brushes] builtin-brushes.json 加载失败 → 本次没有内置笔刷（下次调用会重试）。" + String(e)), "log");
+        reportError(new Error("[brushes] builtin-brushes.json failed to load -> no builtin brushes this time (next call retries)." + String(e)), "log");
       }
       return _builtinSpec;
     })().finally(() => { _builtinInflight = null; });         // 无论成败都释放；成功由 _builtinSpec 兜住
@@ -170,7 +173,7 @@ void _loadBuiltinSpec();   // 模块加载即预热（保持「async fetch，什
 // fetch 失败时的兜底：至少一个能画的笔，UI 不挂。
 function _emergencyBrush(): Brush {
   return makeBrush({
-    id: "emergency-brush", name: "默认笔", tool: "brush",
+    id: "emergency-brush", name: t("name.defaultBrush"), tool: "brush",
     size: 12, hardness: 0.8, sizeCoeff: 0.6, opaCoeff: 0.6,
   });
 }
@@ -341,7 +344,7 @@ export function brushToJSON(brush: Brush): string {
 }
 export function brushFromJSON(text: string): LegacyBrush {
   const obj = JSON.parse(text);
-  if (!obj.id || !obj.name || !obj.tool) throw new Error("brush JSON 缺必填字段");
+  if (!obj.id || !obj.name || !obj.tool) throw new Error("brush JSON missing required fields");
   obj.id = newBrushId();
   migrateBrush(obj);
   return obj;

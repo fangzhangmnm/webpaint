@@ -84,8 +84,8 @@ describe("backend-stroke · 单令牌墙（响亮拒绝）", () => {
     eq(be.strokeEnd(id0), true);
     const id = be.strokeBegin(1, BRUSH);
     be.strokeAppend(id, diagPts(3));
-    throws(() => be.strokeBegin(1, BRUSH), /open stroke/, "第二 begin 拒绝");
-    throws(() => be.strokeAppend(id + 99, diagPts(1)), /无此 open stroke/, "错 id 拒绝");
+    throws(() => be.strokeBegin(1, BRUSH), /already open/, "第二 begin 拒绝");
+    throws(() => be.strokeAppend(id + 99, diagPts(1)), /no such open stroke/, "错 id 拒绝");
     throws(() => be.undo(), null, "开着期间 undo 被令牌墙挡（workpiece beforeApply throw）");
     be.strokeCancel(id);
     eq(be.canUndo(), true, "cancel 后栈自由（第一步还在）");
@@ -96,7 +96,7 @@ describe("backend-stroke · 单令牌墙（响亮拒绝）", () => {
   it("stride 校验：length % 4 != 0 → throw", () => {
     const be = mk();
     const id = be.strokeBegin(1, BRUSH);
-    throws(() => be.strokeAppend(id, new Float32Array([1, 2, 3])), /stride=4/, "stride 校验");
+    throws(() => be.strokeAppend(id, new Float32Array([1, 2, 3])), /stride-4/, "stride 校验");
     be.strokeCancel(id);
     be.dispose();
   });

@@ -52,11 +52,11 @@ export class Workpiece {
   constructor(opts?: WorkpieceOpts) {
     this._undo = opts?.undo ?? null;
     this._onTokenLeak = opts?.onTokenLeak
-      ?? ((label) => console.error(`Workpiece: 令牌泄漏（未 commit/cancel 被 GC）label=${label ?? "?"}`));
+      ?? ((label) => console.error(`Workpiece: token leak (GCed without commit/cancel) label=${label ?? "?"}`));
     this._fr = new FinalizationRegistry((label) => this._onTokenLeak(label || undefined));
     this._undo?._bindWorkpiece({
       beforeApply: () => {
-        if (this._tokenOpen) throw new Error("Workpiece: 令牌开着时禁 undo/redo（先 commit/cancel）");
+        if (this._tokenOpen) throw new Error("Workpiece: undo/redo forbidden while a token is open (commit/cancel first)");
       },
       afterApply: (step, _dir) => {
         this._commitVersion++;
@@ -71,7 +71,7 @@ export class Workpiece {
   begin(label?: string): WriteToken {
     if (this._tokenOpen) {
       if (this._tokenRef?.deref()) {
-        throw new Error(`Workpiece: 已有开着的令牌（同时只准一个；label=${label ?? "?"}）`);
+        throw new Error(`Workpiece: a token is already open (only one at a time; label=${label ?? "?"})`);
       }
       // 泄漏令牌已被 GC（FR 报警或迟或早）：无人能再 commit/cancel 它——自愈 = 回滚 touched，别死锁。
       this._rollbackTouched();
@@ -118,7 +118,7 @@ export class Workpiece {
 
   protected register(c: CollectorComponent, policy: { undo: UndoPolicy }): void {
     if (this._registry.some((r) => r.c.kind === c.kind)) {
-      throw new Error(`Workpiece: 组件 kind 重复注册（${c.kind}）`);
+      throw new Error(`Workpiece: component kind registered twice (${c.kind})`);
     }
     this._registry.push({ c, policy: policy.undo });
   }
@@ -128,10 +128,10 @@ export class Workpiece {
   /** component 写路径守门：写 substrate 前必调（无开着的令牌 → throw；同时登记 touched）。 */
   _componentWrite(c: CollectorComponent): void {
     if (!this._tokenOpen || !this._tokenRef?.deref()) {
-      throw new Error(`Workpiece: 无令牌写被拒（${c.kind}——先 begin() 拿令牌）`);
+      throw new Error(`Workpiece: tokenless write rejected (${c.kind} — begin() first to get a token)`);
     }
     if (!this._registry.some((r) => r.c === c)) {
-      throw new Error(`Workpiece: 未注册组件的写被拒（${c.kind}）`);
+      throw new Error(`Workpiece: write from unregistered component rejected (${c.kind})`);
     }
     if (!this._touched.includes(c)) this._touched.push(c);
   }
@@ -193,7 +193,7 @@ export class Workpiece {
 
   private _assertCurrent(token: WriteToken): void {
     if (!this._tokenOpen || this._tokenRef?.deref() !== token) {
-      throw new Error("Workpiece: 非当前令牌的 commit/cancel 被拒（令牌只能从 begin() 拿）");
+      throw new Error("Workpiece: commit/cancel from a non-current token rejected (tokens only come from begin())");
     }
   }
 
@@ -237,21 +237,21 @@ export class WriteToken {
   get open(): boolean { return this._open; }
 
   commit(opts?: { label?: string; hint?: (dir: "undo" | "redo") => void }): void {
-    if (!this._open) throw new Error("WriteToken: 已关闭（commit/cancel 只准一次）");
+    if (!this._open) throw new Error("WriteToken: already closed (commit/cancel exactly once)");
     this._open = false;
     this._wp._commitToken(this, opts?.label ?? this._label, opts?.hint);
   }
 
   /** 各被摸 collector 倒序回滚，无痕。 */
   cancel(): void {
-    if (!this._open) throw new Error("WriteToken: 已关闭（commit/cancel 只准一次）");
+    if (!this._open) throw new Error("WriteToken: already closed (commit/cancel exactly once)");
     this._open = false;
     this._wp._cancelToken(this);
   }
 
   /** 不可恢复路径：弃置（不回滚不入栈，只释放 record）。app 正常流禁用——只给 unrecoverable 兜底。 */
   abandon(): void {
-    if (!this._open) throw new Error("WriteToken: 已关闭（commit/cancel 只准一次）");
+    if (!this._open) throw new Error("WriteToken: already closed (commit/cancel exactly once)");
     this._open = false;
     this._wp._abandonToken(this);
   }

@@ -12,24 +12,24 @@ describe("gallery-path", () => {
 
 describe("gallery-model · copyTargetName（复制项目目标名）", () => {
   it("首份「<名> 副本」（不带数字）", () => {
-    eq(copyTargetName("猫", () => false), "猫 副本");
+    eq(copyTargetName("猫", () => false), "猫 copy");
   });
   it("「副本」已占 → 「副本2」起递增", () => {
-    const taken = new Set(["猫 副本", "猫 副本2"]);
-    eq(copyTargetName("猫", (n) => taken.has(n)), "猫 副本3");
+    const taken = new Set(["猫 copy", "猫 copy2"]);
+    eq(copyTargetName("猫", (n) => taken.has(n)), "猫 copy3");
   });
   it("保持源同一文件夹（path 前缀不变）", () => {
-    eq(copyTargetName("插画/猫", () => false), "插画/猫 副本");
-    const taken = new Set(["插画/猫 副本"]);
-    eq(copyTargetName("插画/猫", (n) => taken.has(n)), "插画/猫 副本2");
+    eq(copyTargetName("插画/猫", () => false), "插画/猫 copy");
+    const taken = new Set(["插画/猫 copy"]);
+    eq(copyTargetName("插画/猫", (n) => taken.has(n)), "插画/猫 copy2");
   });
-  it("复制的复制：「猫 副本」→「猫 副本 副本」", () => {
-    eq(copyTargetName("猫 副本", () => false), "猫 副本 副本");
+  it("复制的复制：「猫 copy」→「猫 copy copy」（node=en；zh 运行时同构为「副本」）", () => {
+    eq(copyTargetName("猫 copy", () => false), "猫 copy copy");
   });
   it("taken 同时查本地⊕云端并集（任一占用都跳过）", () => {
-    const local = new Set(["猫 副本"]);
-    const cloud = new Set(["猫 副本2"]);
-    eq(copyTargetName("猫", (n) => local.has(n) || cloud.has(n)), "猫 副本3");
+    const local = new Set(["猫 copy"]);
+    const cloud = new Set(["猫 copy2"]);
+    eq(copyTargetName("猫", (n) => local.has(n) || cloud.has(n)), "猫 copy3");
   });
 });
 

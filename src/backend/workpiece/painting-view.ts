@@ -83,7 +83,7 @@ export class ViewLeaf {
   /** 活像素（tileset 注册表解析；叶已被删时端口不再发出本对象，getter 假定 ref 有效）。 */
   get pixels(): LayerPixels {
     const lp = this._tiles.tilesetPixels(this._pixelsRef);
-    if (!lp) throw new Error(`ViewLeaf: tileset 不在（id=${this.id}, ref=${this._pixelsRef}——stale view 引用?）`);
+    if (!lp) throw new Error(`ViewLeaf: tileset missing (id=${this.id}, ref=${this._pixelsRef} — stale view reference?)`);
     return lp;
   }
 
@@ -198,7 +198,7 @@ export class PaintingView {
   private _memBudgetBytes: number | null = null;
 
   constructor(wp: PaintingWorkpiece) {
-    if (!wp.layerTree) throw new Error("PaintingView: 需要树模式的 PaintingWorkpiece（opts.tree）");
+    if (!wp.layerTree) throw new Error("PaintingView: needs a tree-mode PaintingWorkpiece (opts.tree)");
     this._wp = wp;
     // 主动跟车：任何 commit/undo/redo/cancel 后立刻 resync——持有 ViewLeaf 引用跨 commit 的
     // 消费者（引擎/测试）读 props 不吃 stale 镜像（lazy _sync 只兜「谁先读 layers」的路径）。

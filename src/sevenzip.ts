@@ -33,14 +33,14 @@ async function _defaultBrowserLoader(): Promise<SevenZipConfig> {
       const s = document.createElement("script");
       s.src = VENDOR_JS;
       s.onload = resolve;
-      s.onerror = () => reject(new Error("7z-wasm 脚本加载失败（离线且未缓存过？）"));
+      s.onerror = () => reject(new Error("7z-wasm script failed to load (offline and never cached?)"));
       document.head.appendChild(s);
     });
   }
   const factory = (globalThis as unknown as { SevenZip?: SevenZipModuleFactory }).SevenZip;
-  if (!factory) throw new Error("7z-wasm 工厂未挂载（window.SevenZip）");
+  if (!factory) throw new Error("7z-wasm factory not mounted (window.SevenZip)");
   const resp = await fetch(VENDOR_WASM);
-  if (!resp.ok) throw new Error("7z-wasm wasm 加载失败：" + resp.status);
+  if (!resp.ok) throw new Error("7z-wasm wasm failed to load: " + resp.status);
   const wasmBinary = await resp.arrayBuffer();
   return { factory, wasmBinary };
 }
@@ -71,7 +71,7 @@ function _toU8(d: SevenZipData) {
   if (d instanceof Uint8Array) return d;
   if (d instanceof ArrayBuffer) return new Uint8Array(d);
   if (typeof d === "string") return _UTF8.encode(d);
-  throw new TypeError("7z: 不支持的数据类型");
+  throw new TypeError("7z: unsupported data type");
 }
 
 /**
@@ -79,7 +79,7 @@ function _toU8(d: SevenZipData) {
  * -t7z AES-256 · -mhe=on 加密头（文件名也加密）· -mx=0 STORE（内容已压缩，不再 deflate）。
  */
 export async function pack7z(entries: SevenZipEntry[], password: string) {
-  if (!password) throw new Error("没有密码，无法加密");
+  if (!password) throw new Error("cannot encrypt without a password");
   const sz = await _instance();
   const names = [];
   for (const { path, data } of entries) {
@@ -90,7 +90,7 @@ export async function pack7z(entries: SevenZipEntry[], password: string) {
   catch (_) { /* Emscripten exit() 可能抛 ExitStatus；下面以产物存在与否为准 */ }
   let out;
   try { out = sz.FS.readFile("/out.7z"); } catch (_) { out = null; }
-  if (!out || !out.length) throw new Error("7z 打包失败（无产物）");
+  if (!out || !out.length) throw new Error("7z pack failed (no output)");
   return out;
 }
 
@@ -109,7 +109,7 @@ export async function unpack7z(bytes: SevenZipData, password: string) {
   try { files = sz.FS.readdir("/out").filter((n: string) => n !== "." && n !== ".."); }
   catch (_) { files = []; }
   if (!files.length) {
-    const e: WrongPasswordError = new Error("密码不对或文件已损坏"); e.code = "WRONG_PASSWORD"; throw e;
+    const e: WrongPasswordError = new Error("wrong password or corrupted file"); e.code = "WRONG_PASSWORD"; throw e;
   }
   /** @type {Record<string, Uint8Array>} */
   const out: Record<string, Uint8Array> = {};
@@ -121,7 +121,7 @@ export async function unpack7z(bytes: SevenZipData, password: string) {
     } catch (_) { /* skip */ }
   }
   if (!Object.keys(out).length) {
-    const e: WrongPasswordError = new Error("密码不对或文件已损坏"); e.code = "WRONG_PASSWORD"; throw e;
+    const e: WrongPasswordError = new Error("wrong password or corrupted file"); e.code = "WRONG_PASSWORD"; throw e;
   }
   return out;
 }

@@ -225,7 +225,7 @@ describe("LayerTiles · 无令牌像素写硬化（C7）", () => {
     const leaf = wp2.layerTree.view().nodes[0];
     const lp = wp2.layerTiles.tilesetPixels(leaf.pixelsRef);
     let threw = false;
-    try { lp.putRegion(0, 0, 4, 4, solid(4, 4, 99)); } catch (e) { threw = /无令牌像素写/.test(String(e)); }
+    try { lp.putRegion(0, 0, 4, 4, solid(4, 4, 99)); } catch (e) { threw = /tokenless pixel write/.test(String(e)); }
     assert(threw, "无令牌直写 substrate → throw（不再静默不记账）");
     const t = wp2.begin("stroke");
     lp.putRegion(0, 0, 4, 4, solid(4, 4, 120));

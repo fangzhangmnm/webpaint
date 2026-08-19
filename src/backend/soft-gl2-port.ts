@@ -51,7 +51,7 @@ class SoftTileArena implements Gl2TileArena {
   }
   // 退租后动词 = 响亮 throw（契约语义，与 BrowserTileArena 同）。
   private _aliveGuard(): void {
-    if (this._disposed) throw new Error("ARENA_DISPOSED（退租后使用——owner 已 dispose 本 arena）");
+    if (this._disposed) throw new Error("ARENA_DISPOSED (used after teardown — owner already disposed this arena)");
   }
   get capacity(): number { return this._slices.length; }
   recreate(newCapacity: number): void { this._aliveGuard(); this._alloc(newCapacity); }
@@ -156,7 +156,7 @@ export class SoftGl2Port implements Gl2Port {
   program(name: string, _vert?: string, _frag?: string): void {
     if (this._programs.has(name)) return;
     const cpu = resolveCpuProgram(name);
-    if (cpu === null) throw new Error(`SHADER_NO_CPU_EQUIV:${name}（soft-shaders.ts 对表缺席——补 CPU 版或显式登 GPU_ONLY）`);
+    if (cpu === null) throw new Error(`SHADER_NO_CPU_EQUIV:${name} (missing in soft-shaders.ts table — add a CPU version or register as GPU_ONLY)`);
     this._programs.set(name, cpu);
   }
 
@@ -198,8 +198,8 @@ export class SoftGl2Port implements Gl2Port {
   private _drawCommon(spec: Gl2DrawSpec, instances: Float32Array | null, count: number): void {
     const prog = this._programs.get(spec.program);
     if (!prog) throw new Error(`PROGRAM_NOT_BUILT:${spec.program}`);
-    if (prog === "gpu-only") throw new Error(`GPU_ONLY_SHADER:${spec.program}（软域不实现屏显 pass）`);
-    if (spec.target === "screen") throw new Error("SOFT_NO_SCREEN（headless 无屏——present 走 FBO + readPixels）");
+    if (prog === "gpu-only") throw new Error(`GPU_ONLY_SHADER:${spec.program} (soft domain has no present pass)`);
+    if (spec.target === "screen") throw new Error("SOFT_NO_SCREEN (headless — present goes through FBO + readPixels)");
     const target = spec.target as SoftFBO;
     const vp = spec.viewport ?? [0, 0, target.w, target.h];
     if (vp[0] !== 0 || vp[1] !== 0) throw new Error("SOFT_VIEWPORT_OFFSET_UNSUPPORTED");   // 本引擎全部 pass 视口原点 0

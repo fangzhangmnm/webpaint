@@ -32,11 +32,11 @@ export const SCOPES = ["Files.ReadWrite.AppFolder", "offline_access"];
 //   下次 autosave 以 mode:"existing" 把旧身份重建出来 → **两个文件，可见的那个不是正在编辑的那个**。
 // → 纪律：**在赋值处归一化**，别在比较处补救。活动名一旦落地就已经是归一形式。
 export function sessionBareName(sessionName: string) {
-  const segments = (sessionName || "未命名")
+  const segments = (sessionName || "Untitled")   // 防御 fallback（正常路径名字来自 session-state 的 t("nd.untitled")）；config 在 store 上游不引 i18n
     .split("/")
     .map((s: string) => s.replace(/[\\:*?"<>|]+/g, "_").trim())
     .filter(Boolean);
-  if (!segments.length) segments.push("未命名");
+  if (!segments.length) segments.push("Untitled");
   return segments.join("/");
 }
 

@@ -50,13 +50,13 @@ export function initDevConsole() {
   WP.pocFetchThumb = async function (name?: string) {
     // fetchOraThumbnail 按**裸 session 名**（item.name，无后缀）走 store.getPeek（zip 解析在库内部）。
     //   POC 需显式给该 name（从 gallery tile 取 item.name）；不再是 OneDrive itemId / fileSize。
-    if (!name) throw new Error("pocFetchThumb 需显式裸 session 名（item.name）");
+    if (!name) throw new Error("pocFetchThumb needs an explicit bare session name (item.name)");
     const t0 = performance.now();
     const blob = await fetchOraThumbnail(name);
-    console.log(`POC 完成 ${(performance.now() - t0) | 0}ms, blob size ${blob.size}`);
+    console.log(`POC done in ${(performance.now() - t0) | 0}ms, blob size ${blob.size}`);
     // 显示到 console（可见 thumbnail）
     const url = URL.createObjectURL(blob);
-    console.log("thumbnail URL（在 console 点击预览）：", url);
+    console.log("thumbnail URL (click in console to preview): ", url);
     const img = new Image();
     img.src = url;
     document.body.appendChild(img);

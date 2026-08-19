@@ -98,7 +98,7 @@ export class FloatLayerComponent implements CollectorComponent {
   /** 变换整点（token 写）：只换 transform metadata（入参克隆，caller 的 live 网格不被引用）。 */
   setTransform(meta: FloatTransformMeta): void {
     this._wp._componentWrite(this);
-    if (!this._fs) throw new Error("FloatLayerComponent: setTransform 时无浮层");
+    if (!this._fs) throw new Error("FloatLayerComponent: setTransform with no floating layer");
     if (!this._pending) this._pending = { t: "meta", meta: cloneFloatMeta(this._fs.transform) };
     this._fs.transform = cloneFloatMeta(meta);
   }
@@ -106,7 +106,7 @@ export class FloatLayerComponent implements CollectorComponent {
   /** 收摊（token 写；accept/reject 的收尾微步——像素落层由同 token 的 LayerTiles 扣押记账）。 */
   drop(): void {
     this._wp._componentWrite(this);
-    if (!this._fs) throw new Error("FloatLayerComponent: drop 时无浮层");
+    if (!this._fs) throw new Error("FloatLayerComponent: drop with no floating layer");
     const fs = this._fs;
     this._fs = null;
     if (!this._pending) { this._pending = { t: "state", fs }; return; }
@@ -137,7 +137,7 @@ export class FloatLayerComponent implements CollectorComponent {
   swapRecord(data: RecordData): RecordData {
     const r = data as FloatRecord;
     if (r.t === "meta") {
-      if (!this._fs) throw new Error("FloatLayerComponent: meta swap 时无浮层（栈序 bug）");
+      if (!this._fs) throw new Error("FloatLayerComponent: meta swap with no floating layer (stack-order bug)");
       const cur = this._fs.transform;
       this._fs.transform = cloneFloatMeta(r.meta);
       return { t: "meta", meta: cur };

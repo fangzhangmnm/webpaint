@@ -19,7 +19,7 @@ export const deflateTileCodec: TileCodec = {
   decompress(bytes: Uint8Array, byteLength: number): Uint8Array {
     // out 预分配到已知原长：fflate 直接填入，长度天然精确；不符即数据坏 → throw（池会让读者看到异常）
     const out = inflateSync(bytes, { out: new Uint8Array(byteLength) });
-    if (out.byteLength !== byteLength) throw new Error(`deflate-v1: 解压长度不符 ${out.byteLength} ≠ ${byteLength}`);
+    if (out.byteLength !== byteLength) throw new Error(`deflate-v1: inflated length mismatch ${out.byteLength} != ${byteLength}`);
     return out;
   },
 };

@@ -5,6 +5,8 @@
 // 本模块只剩 gallery UI 自己的展示纯函数与列表项类型。
 
 // 本模块只读这些字段；local session / cloud file 本体仍是未类型化 .js。
+import { t } from "../i18n/index.ts";
+
 export interface LocalSession { name: string; updatedAt?: number; }
 export interface CloudFile { path: string; name?: string; lastModifiedDateTime?: string; }
 export interface GalleryItem { name: string; local: LocalSession | null; cloud: CloudFile | null; deletedAt?: number; }
@@ -23,11 +25,12 @@ export function copyTargetName(sourceName: string, taken: (name: string) => bool
   const folder = slash < 0 ? "" : sourceName.slice(0, slash);
   const base = slash < 0 ? sourceName : sourceName.slice(slash + 1);
   const join = (stem: string) => (folder ? `${folder}/${stem}` : stem);
-  let candidate = join(`${base} 副本`);
+  const SUF = t("name.copySuffix");
+  let candidate = join(`${base} ${SUF}`);
   if (!taken(candidate)) return candidate;
   for (let i = 2; i < 1000; i++) {
-    candidate = join(`${base} 副本${i}`);
+    candidate = join(`${base} ${SUF}${i}`);
     if (!taken(candidate)) return candidate;
   }
-  return join(`${base} 副本${Date.now()}`);
+  return join(`${base} ${SUF}${Date.now()}`);
 }

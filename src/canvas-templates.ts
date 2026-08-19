@@ -50,11 +50,11 @@ export function loadCanvasTemplates(): Promise<void> {
         const r = await fetch(url);
         if (!r.ok) throw new Error("HTTP " + r.status);
         const j = await r.json();
-        if (!Array.isArray(j?.templates)) throw new Error("canvas-templates.json 格式不对");
+        if (!Array.isArray(j?.templates)) throw new Error("canvas-templates.json malformed");
         _adoptCanvasTemplates(j.templates as CanvasTemplate[]);
       } catch (e) {
-        reportError(new Error("[canvas-templates] canvas-templates.json 加载失败 → 本次尺寸模板列表为空"
-          + "（自定义尺寸仍可用；下次调用会重试）。" + String(e)), "log");
+        reportError(new Error("[canvas-templates] canvas-templates.json failed to load -> size template list empty this time"
+          + " (custom sizes still work; next call retries)." + String(e)), "log");
       }
     })().finally(() => { _inflight = null; });
   }

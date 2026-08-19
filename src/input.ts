@@ -559,7 +559,7 @@ export class InputController {
     if (_paintIntent) {
       const { reason } = this.doc.activeEditableLeaf();
       if (reason === "group" || reason === "hidden") {
-        const msg = reason === "group" ? "当前选中的是图层组，请选择一个图层再绘制" : "当前图层已隐藏，无法绘制";
+        const msg = reason === "group" ? t("st.groupNoDraw") : t("st.hiddenNoDraw");
         if (e.pointerType === "touch") {
           rec.role = "hold";
           if (reason === "group") rec._deferGroupWarn = true; else rec._deferHiddenWarn = true;
@@ -624,7 +624,7 @@ export class InputController {
         }
         rec.role = "pick";
         this._doPick(rec.x, rec.y);
-        this.status("吸色（长按）");
+        this.status(t("st.pickerHold"));
       }, LONG_PRESS_MS);
     }
 
@@ -745,7 +745,7 @@ export class InputController {
               this.board.invalidateAll();
             } catch (err) {
               reportError(new Error("[magic-drag] " + String(err)), "log");
-              this.status("魔术棒出错：" + ((err as { message?: unknown })?.message || err));
+              this.status(t("st.magicWandErr", { msg: String((err as { message?: unknown })?.message || err) }));
               this.lasso.magicDragCancel();
               rec._lassoMode = "tentative";
             }
@@ -772,7 +772,7 @@ export class InputController {
           if (this.lasso.magicDragStep(dx, dy, this.doc.getFloodSourceLayer())) this.board.invalidateAll();
         } catch (err) {
           reportError(new Error("[magic-drag] " + String(err)), "log");
-          this.status("魔术棒出错：" + ((err as { message?: unknown })?.message || err));
+          this.status(t("st.magicWandErr", { msg: String((err as { message?: unknown })?.message || err) }));
         }
       } else if (rec._lassoMode === "drawing") {
         this.lasso.extendPath(dx, dy);
@@ -796,8 +796,8 @@ export class InputController {
       if (rec._deferHiddenWarn || rec._deferGroupWarn) {
         const dx = e.clientX - rec.startX!, dy = e.clientY - rec.startY!;
         if (dx * dx + dy * dy > GESTURE_TAP_MAX_MOVE_SQ) {
-          if (rec._deferGroupWarn) { rec._deferGroupWarn = false; this.status("当前选中的是图层组，请选择一个图层再绘制"); }
-          else { rec._deferHiddenWarn = false; this.status("当前图层已隐藏，无法绘制"); }
+          if (rec._deferGroupWarn) { rec._deferGroupWarn = false; this.status(t("st.groupNoDraw")); }
+          else { rec._deferHiddenWarn = false; this.status(t("st.hiddenNoDraw")); }
         }
       }
     }
@@ -829,8 +829,8 @@ export class InputController {
           const palmGuard = (now - this._lastPenActivity) < PALM_PEN_GUARD_MS;
           if (tap.isTap && elapsed < GESTURE_TAP_MAX_MS && !palmGuard) {
             const act = gestureTapAction(tap.maxCount);   // 2→undo / 3+→redo
-            if (act === "undo") { this.ctrlZ(); this.status("双指 · 撤销"); }
-            else if (act === "redo") { this.redo(); this.status("三指 · 重做"); }
+            if (act === "undo") { this.ctrlZ(); this.status(t("st.twoFingerUndo")); }
+            else if (act === "redo") { this.redo(); this.status(t("st.threeFingerRedo")); }
           }
         }
       } else {
@@ -983,7 +983,7 @@ export class InputController {
       this._activeStroke = null;
       s.cancel();   // 令牌必须收口，否则后续 begin 全被单令牌门挡死（引擎 begin 半途抛，cancelStroke 清残态无害）
       rec.role = null;
-      this.status?.(`filter brush 出错：${(e as { message?: unknown })?.message || e}`);
+      this.status?.(t("st.filterBrushErr", { msg: String((e as { message?: unknown })?.message || e) }));
       return;
     }
     const bbox = this.filterBrush.flushDirty();
@@ -1018,7 +1018,7 @@ export class InputController {
     //   已映射 "selPen"（第四类别，出厂三支：硬圆/勾线/像素），色带覆写在 selPenSettingsFrom。
     if (this.lasso.getSubTool() === "pen") {
       const { leaf } = this.doc.activeEditableLeaf();
-      if (!leaf) { this.status("请先选中一个图层（选区笔预览需要锚点）"); rec.role = null; return; }
+      if (!leaf) { this.status(t("st.selPenNeedLayer")); rec.role = null; return; }
       const base = this.getResolvedBrush();
       if (!base) { rec.role = null; return; }
       const settings = selPenSettingsFrom(base);
@@ -1054,7 +1054,7 @@ export class InputController {
         if (entry) { this._pushSelEntry(entry); this.board.invalidateAll(); }
       } catch (e) {
         reportError(new Error("[magic-drag end] " + String(e)), "log");
-        this.status("魔术棒出错：" + ((e as { message?: unknown })?.message || e));
+        this.status(t("st.magicWandErr", { msg: String((e as { message?: unknown })?.message || e) }));
         this.lasso.magicDragCancel();
       }
       return;
@@ -1068,11 +1068,11 @@ export class InputController {
         } else {
           // v125: rasterize 后全在 doc 外 → status 提示，不静默
           this.lasso.cancelDrawing();
-          this.status("选区全在画布外，已取消");
+          this.status(t("st.selAllOutside"));
         }
       } catch (e) {
         reportError(new Error("[lasso end] " + String(e)), "log");
-        this.status("选区操作出错：" + ((e as { message?: unknown })?.message || e));
+        this.status(t("st.selOpErr", { msg: String((e as { message?: unknown })?.message || e) }));
         this.lasso.cancelDrawing();
       }
     } else if (rec._lassoMode === "transform") {
@@ -1090,11 +1090,11 @@ export class InputController {
             this._pushSelEntry(entry);
             this.board.invalidateAll();
           } else {
-            this.status("魔术棒：tap 在线 / 边界上，没选到");
+            this.status(t("st.magicWandMiss"));
           }
         } catch (e) {
           reportError(new Error("[magic-wand] " + String(e)), "log");
-          this.status("魔术棒出错：" + ((e as { message?: unknown })?.message || e));
+          this.status(t("st.magicWandErr", { msg: String((e as { message?: unknown })?.message || e) }));
         }
       } else {
         // v134 (user：「自由/矩形/圆 单击在新建选区模式下 = 取消当前选区」)
@@ -1102,7 +1102,7 @@ export class InputController {
         if (this.lasso.getSetOpMode() === "new" && this.lasso.hasSelection()) {
           this._pushSelEntry(this.lasso.setSelection(null));
           this.board.invalidateAll();
-          this.status("已取消选区");
+          this.status(t("st.selCancelled"));
         }
       }
     }
@@ -1126,10 +1126,10 @@ export class InputController {
     try {
       const entry = this.lasso.polygonClose();
       if (entry) { this._pushSelEntry(entry); this.board.invalidateAll(); }
-      else this.status("多边形选区无效（不足三点 / 全在画布外），已取消");
+      else this.status(t("st.polyInvalid"));
     } catch (e) {
       reportError(new Error("[polygon close] " + String(e)), "log");
-      this.status("选区操作出错：" + ((e as { message?: unknown })?.message || e));
+      this.status(t("st.selOpErr", { msg: String((e as { message?: unknown })?.message || e) }));
       this.lasso.polygonCancelSession();
     }
     this.board.requestRender();
@@ -1218,7 +1218,7 @@ export class InputController {
     const hex = "#" +
       [r, g, b].map((v) => Math.round(v).toString(16).padStart(2, "0")).join("");
     this.onColorSampled(hex);
-    this.status(`吸色 ${hex}`);
+    this.status(t("st.picked", { hex }));
     // v124 吸色 pin (user：「Google Maps pin 风格，pin 头颜色 / pin 尖中选 pixel」)
     window.dispatchEvent(new CustomEvent("wp:pickerShow", { detail: { sx, sy, hex } }));
   }

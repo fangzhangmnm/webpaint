@@ -18,6 +18,7 @@
 // 去向（文件下载 / 分享 / 剪贴板）是**正交的 sink**，不进 exporter——见 session.js
 // shareOrDownloadBlob / triggerDownload。exporter 只管「doc → 该格式的字节」。
 
+import { t } from "./i18n/index.ts";
 import { makeRegistry } from "./registry.ts";
 import { encodeDocToOra } from "./backend/ora.ts";
 import { WEBPAINT_VERSION } from "./version.ts";
@@ -41,10 +42,10 @@ export interface Exporter {
 const _reg = makeRegistry<Exporter>({ name: "exporter" });
 
 export function registerExporter(spec: Exporter) {
-  if (!spec || !spec.id) throw new Error("Exporter 必须有 id");
-  if (typeof spec.encode !== "function") throw new Error(`Exporter ${spec.id} 缺 encode()`);
+  if (!spec || !spec.id) throw new Error("Exporter must have an id");
+  if (typeof spec.encode !== "function") throw new Error(`Exporter ${spec.id} missing encode()`);
   if (spec.kind !== "project" && spec.kind !== "image") {
-    throw new Error(`Exporter ${spec.id} 的 kind 必须是 "project" | "image"`);
+    throw new Error(`Exporter ${spec.id} kind must be "project" | "image"`);
   }
   _reg.register(spec);
 }
@@ -57,7 +58,7 @@ export function listExportersByKind(kind: string) { return _reg.list().filter((e
 
 // ============= 第一方内建导出器 =============
 registerExporter({
-  id: "ora", label: ".ora（推荐 / 开源）", ext: "ora", kind: "project",
+  id: "ora", label: t("exp.oraLabel"), ext: "ora", kind: "project",
   // ⚠ 本 encode 产出**明文** .ora —— 它只负责「把内存 doc 编码成 ora」，不懂加密。
   //   加密作品**不走这里**：export-import-menu 直接用 session.readEncryptedBytes()
   //   （store 的 ZipFile.getEncryptedBlob）原样导出 at-rest 密文容器，落地名 <名>.ora.zip。
@@ -67,7 +68,7 @@ registerExporter({
   },
 });
 registerExporter({
-  id: "psd", label: ".psd（Photoshop）", ext: "psd", kind: "project", busyHint: "PSD 编码中…",
+  id: "psd", label: ".psd（Photoshop）", ext: "psd", kind: "project", busyHint: t("exp.psdBusy"),
   encode: async (doc) => {
     const { encodeDocToPsd } = await import("./backend/psd.ts");   // 懒加载：psd 编码器只在用时拉
     return encodeDocToPsd(doc);
