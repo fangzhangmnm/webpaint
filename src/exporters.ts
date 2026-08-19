@@ -28,6 +28,7 @@ import type { PaintingView } from "./backend/workpiece/painting-view.ts";
 export interface ExportOpts {
   scope?: string;
   cropRect?: { x: number; y: number; w: number; h: number } | null;   // #16：仅导出选区范围（bbox，doc 坐标）
+  defringe?: boolean;   // v0.9.13 贴图防黑边：α=0 区 RGB 回填边缘色（仅 PNG 生效）
 }
 export interface Exporter {
   id: string;
@@ -76,7 +77,7 @@ registerExporter({
 });
 registerExporter({
   id: "png", label: "PNG", ext: "png", mime: "image/png", kind: "image",
-  encode: (doc, { scope = "merged", cropRect = null } = {}) => renderDocToImageBlob(doc, "image/png", undefined, scope, cropRect) as Promise<Blob>,
+  encode: (doc, { scope = "merged", cropRect = null, defringe = false } = {}) => renderDocToImageBlob(doc, "image/png", undefined, scope, cropRect, defringe) as Promise<Blob>,
 });
 registerExporter({
   id: "jpg", label: "JPG", ext: "jpg", mime: "image/jpeg", kind: "image",

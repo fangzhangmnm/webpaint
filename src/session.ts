@@ -22,6 +22,7 @@ import { t } from "./i18n/index.ts";
 import { renderNodesToBytes } from "./backend/doc-render.ts";
 import { areaResampleBytes } from "./backend/algorithms/resample-bytes.ts";
 import { encodePngFromBytes } from "./backend/png-codec.ts";
+import { defringeAlphaZero } from "./backend/algorithms/defringe.ts";
 import { canvasToBlob } from "./shell/image-io.ts";
 import { appState } from "./app-state.ts";   // active session name = appState.currentFile（synced-app-state，跨设备 resume）
 import type { PaintingView } from "./backend/workpiece/painting-view.ts";
@@ -91,7 +92,7 @@ export async function thumbBlobFromBytes(merged: { data: Uint8ClampedArray; w: n
 // candidate 2：导出格式（png/jpg exporter）只负责把 doc 渲成 image blob；
 // 去向（分享/下载/剪贴板）是正交的 sink，见 shareOrDownloadBlob。故此函数公开。
 // #16（v0.5）：cropRect = 「仅导出选区范围」（选区 bbox，doc 坐标）；null/undefined = 全文档（旧行为）。
-export async function renderDocToImageBlob(doc: PaintingView, mime = "image/png", quality?: number, scope = "merged", cropRect?: { x: number; y: number; w: number; h: number } | null) {
+export async function renderDocToImageBlob(doc: PaintingView, mime = "image/png", quality?: number, scope = "merged", cropRect?: { x: number; y: number; w: number; h: number } | null, defringe = false) {
   // S9：合成走 GL（doc-render，与 display 同源，含 clip + 组隔离）。C3（债 d）：全字节管线——
   //   合成字节 → 裁剪/铺底全在字节上做；canvas 只剩 JPEG 编码边界（提案 §4 壳域合法名单）。
   //   scope==="active"：仅当前节点（组照常整树合成）；剥掉节点**自身**的 clippingMask（基底不在导出里，
@@ -116,6 +117,9 @@ export async function renderDocToImageBlob(doc: PaintingView, mime = "image/png"
   }
   // v134 (user：「导出 png 保留透明度！！」) PNG 永远不涂底，empty 区域 = 透明，user 想要白底自己加图层。
   if (mime !== "image/jpeg") {
+    // v0.9.13 贴图防黑边：α=0 区 RGB 回填边缘色（全字节管线才留得住——encodePngFromBytes 直写
+    //   straight RGBA，不过 canvas premult；JPG 无 alpha 无此题）。默认关，导出配置里开。
+    if (defringe) defringeAlphaZero(plane.data, plane.w, plane.h);
     const png = await encodePngFromBytes(plane.data, plane.w, plane.h);
     return new Blob([png as unknown as BlobPart], { type: "image/png" });
   }

@@ -127,7 +127,7 @@ export function initExportImportMenu(ctx: AppContext) {
         //   window.open 必须在此**手势同步期**就开好，不能等 encode 的 await（iOS transient-activation 严）。
         const win = window.open("", "_blank");
         if (exp.busyHint) setStatus(exp.busyHint, true);
-        const blob = await exp.encode(doc, { scope: c.scope, cropRect });
+        const blob = await exp.encode(doc, { scope: c.scope, cropRect, defringe: desk.export.defringe });
         if (win) {
           await printImageInNewWindow(win, blob);
           setStatus(t("tm.printOpenedNewTab"));
@@ -140,7 +140,7 @@ export function initExportImportMenu(ctx: AppContext) {
         // 文件/分享——以及 #23：iOS/iPad 上「打印」也走这里（分享面板自带打印；PWA 里 window.open 打印脆弱）
         const exp = getExporter(c.target === "print" ? (c.format === "jpg" ? "jpg" : "png") : c.format) || getExporter("png");
         if (exp.busyHint) setStatus(exp.busyHint, true);
-        const blob = await exp.encode(doc, { scope: c.scope, cropRect });
+        const blob = await exp.encode(doc, { scope: c.scope, cropRect, defringe: desk.export.defringe });
         const r = await shareOrDownloadBlob(blob, `${session.name}-${stampNow()}.${exp.ext}`, exp.mime);
         setStatus(r.method === "share" ? t("tm.sharePanelOpened") : r.method === "cancel" ? t("tm.shareCancelled") : t("tm.extDownloadedUpper", { ext: exp.ext.toUpperCase() }));
       }
@@ -166,15 +166,18 @@ export function initExportImportMenu(ctx: AppContext) {
       const scopeSel = popup.querySelector('select[name="scope"]') as HTMLSelectElement;
       const tgtSel = popup.querySelector('select[name="tgt"]') as HTMLSelectElement;
       const clipEl = popup.querySelector('input[name="clipsel"]') as HTMLInputElement;
+      const defrEl = popup.querySelector('input[name="defringe"]') as HTMLInputElement;
       const proj = _isProjectFormat(fmtSel.value);
       if (proj) { scopeSel.value = "all"; tgtSel.value = "file"; }
       else if (scopeSel.value === "all") scopeSel.value = "merged";   // 「所有图层」仅项目格式可选
       scopeSel.disabled = proj; tgtSel.disabled = proj;
       clipEl.disabled = proj || !doc.selection;
+      defrEl.disabled = fmtSel.value !== "png";   // v0.9.13：只对 PNG 有意义（JPG 无 alpha；项目格式不碰像素）
       desk.export.format = fmtSel.value;
       desk.export.target = tgtSel.value;
       desk.export.layerMode = scopeSel.value;
       if (!clipEl.disabled) desk.export.clipSelection = clipEl.checked;
+      if (!defrEl.disabled) desk.export.defringe = defrEl.checked;
       _updateMenuSubLabels();
     };
     _openMenuConfigPopup(e.currentTarget as HTMLElement, `
@@ -201,6 +204,7 @@ export function initExportImportMenu(ctx: AppContext) {
       <div class="menu-config-section">
         <div class="menu-config-title">${t("tm.configRange")}</div>
         <label><input type="checkbox" name="clipsel" ${c.clipSelection ? "checked" : ""} ${(proj0 || !doc.selection) ? "disabled" : ""} /> ${t("tm.clipToSelection")}${doc.selection ? "" : `（${t("tm.noSelectionNow")}）`}</label>
+        <label><input type="checkbox" name="defringe" ${desk.export.defringe ? "checked" : ""} ${c.format !== "png" ? "disabled" : ""} /> ${t("tm.defringe")}</label>
       </div>
     `, applyLocks);
   });

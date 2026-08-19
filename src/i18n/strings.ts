@@ -68,6 +68,7 @@ export const S = {
   "nd.printA4Land":     { zh: "A4 横", en: "A4 landscape", ja: "A4 横", tok: "A4 (poka)" },
   "tm.configRange":     { zh: "裁剪", en: "Crop", ja: "切り抜き", tok: "kipisi" },
   "tm.clipToSelection": { zh: "裁到选区", en: "Clip to selection", ja: "選択範囲に切り抜き", tok: "o kipisi tawa ma wile" },
+  "tm.defringe":        { zh: "贴图防黑边（透明区回填边缘色，仅 PNG）", en: "Defringe for textures (extend edge colors under transparency, PNG only)", ja: "テクスチャ用フリンジ除去（透明部に縁色を延長、PNG のみ）", tok: "pona e selo (kule pi poka li tawa insa pi ala, PNG taso)" },
   "tm.noSelectionNow":  { zh: "当前无选区", en: "no selection", ja: "選択なし", tok: "ma wile li lon ala" },
   "sub.selection":      { zh: "选区", en: "selection", ja: "選択範囲", tok: "ma wile" },
   "menu.docGridCell":      { zh: "主栅格尺寸…", en: "Main grid size…", ja: "メイングリッドのサイズ…", tok: "suli pi kulupu leko…" }, 
