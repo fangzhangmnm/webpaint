@@ -3,6 +3,8 @@ import "./dom-shim-first.mjs";   // **必须第一**：在任何 import-Vue 之�
 import { run } from "./runner.mjs";
 import "./editor-session.test.mjs";   // 家族共享模块 editor-session 生命周期编排（mock store+editor）
 import "./checkpoint-policy.test.mjs";
+import "./clipboard-policy.test.mjs";     // v0.9.22 剪贴板正宫化：双击 Ctrl+C 判窗 + 大图护栏阈值（spec 20260819）
+import "./edit-mode-transient.test.mjs";  // v0.9.22 连贴收口=commit 钉子（applyPendingTransient 语义）
 import "./brush-rack-migrate.test.mjs";
 import "./engine-registry.test.mjs";
 import "./registry.test.mjs";
