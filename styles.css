@@ -1692,11 +1692,12 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   display: flex; flex-direction: column;
 }
 .adjust-panel.hidden { display: none; }
-/* 排版紧凑（2026-08-19 user）：标签列 100→76px（zh 滑条标签最长 5 字、ja 6 字@12px 都放得下，
-   长说明文案走 section title 整行不受限）+ 行字号 13→12（对齐 v0.5.23「浮窗字号与图层面板一致」）
-   + gap 8→6 —— 省下的全喂给 1fr 的 track。 */
+/* 排版紧凑（2026-08-19 user）：标签列 6.4em（=76px@12px；em 随字号缩放，user 拍板）。
+   宽度地板 = コントラスト / ボケ ⟷ 鮮鋭 / 模糊 ⟷ 锐化 三条 72px（playwright 实测），
+   其余标签已按语言缩写（cb 三轴 en/ja=CMY/RGB 单字母，v0.9.10）；长说明走 section title 整行。
+   行字号 13→12 对齐 v0.5.23「浮窗字号与图层面板一致」；gap 8→6——省下的全喂给 1fr 的 track。 */
 .adjust-panel .brush-slider-row {
-  grid-template-columns: 76px 1fr 30px;
+  grid-template-columns: 6.4em 1fr 2.5em;
   gap: 6px;
   font-size: 12px;
 }
