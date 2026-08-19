@@ -89,6 +89,12 @@ export declare const els: {
     newDocConfirm: HTMLElement;
     newDocCancel: HTMLElement;
     menuRename: HTMLElement;
+    menuTimelapse: HTMLButtonElement;
+    menuTimelapseState: HTMLElement;
+    tlRecChip: HTMLButtonElement;
+    tlPanel: HTMLElement;
+    tlPanelBody: HTMLElement;
+    tlPanelClose: HTMLButtonElement;
     menuSaveAs: HTMLElement;
     menuRevertToOpen: HTMLElement;
     menuEncrypt: HTMLElement;

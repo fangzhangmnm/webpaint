@@ -80,6 +80,10 @@ export declare class WebPaintBackend implements WebPaintBackendInterface {
     encodeOra(opts?: {
         editorSidecar?: object;
         referencePng?: Uint8Array;
+        timelapse?: {
+            json: string;
+            mp4: Uint8Array;
+        } | null;
     }): Promise<Uint8Array>;
     exportImage(fmt: "png" | "jpg"): Promise<Uint8Array>;
     docInfo(): BackendDocInfo;

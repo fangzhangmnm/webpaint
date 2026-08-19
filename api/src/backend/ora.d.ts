@@ -45,12 +45,18 @@ interface EncodeOpts {
     } | null;
     referenceImage?: Blob;
     desk?: object;
+    timelapse?: {
+        json: string;
+        mp4: Uint8Array;
+    } | null;
 }
 export interface DecodedPainting {
     data: PaintingData;
     _referenceBlob?: Blob;
     _webpaintState?: unknown;
     _editorState?: unknown;
+    _timelapseJson?: string;
+    _timelapseMp4?: Uint8Array;
     _wroteWith: string | null;
 }
 /** doc → Blob (.ora)

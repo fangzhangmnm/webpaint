@@ -390,6 +390,125 @@ export declare const S: {
         readonly ja: "ショートカット";
         readonly tok: "nena pi tenpo lili";
     };
+    readonly "menu.timelapse": {
+        readonly zh: "过程录像…";
+        readonly en: "Timelapse…";
+        readonly ja: "タイムラプス…";
+        readonly tok: "sitelen tawa…";
+    };
+    readonly "tl.title": {
+        readonly zh: "过程录像";
+        readonly en: "Timelapse";
+        readonly ja: "タイムラプス";
+        readonly tok: "sitelen tawa";
+    };
+    readonly "tl.rec": {
+        readonly zh: "录";
+        readonly en: "REC";
+        readonly ja: "録画";
+        readonly tok: "lukin";
+    };
+    readonly "tl.aspect": {
+        readonly zh: "画幅比例";
+        readonly en: "Aspect ratio";
+        readonly ja: "アスペクト比";
+    };
+    readonly "tl.longEdge": {
+        readonly zh: "分辨率（最长边）";
+        readonly en: "Resolution (long edge)";
+        readonly ja: "解像度（長辺）";
+    };
+    readonly "tl.start": {
+        readonly zh: "开始录制";
+        readonly en: "Start recording";
+        readonly ja: "録画開始";
+        readonly tok: "o open lukin";
+    };
+    readonly "tl.pause": {
+        readonly zh: "暂停";
+        readonly en: "Pause";
+        readonly ja: "一時停止";
+    };
+    readonly "tl.resume": {
+        readonly zh: "继续录制";
+        readonly en: "Resume";
+        readonly ja: "再開";
+    };
+    readonly "tl.preview": {
+        readonly zh: "预览";
+        readonly en: "Preview";
+        readonly ja: "プレビュー";
+    };
+    readonly "tl.export": {
+        readonly zh: "导出视频";
+        readonly en: "Export video";
+        readonly ja: "動画を書き出す";
+    };
+    readonly "tl.clear": {
+        readonly zh: "清除录像…";
+        readonly en: "Clear recording…";
+        readonly ja: "録画を消去…";
+    };
+    readonly "tl.clearConfirmTitle": {
+        readonly zh: "清除录像";
+        readonly en: "Clear recording";
+        readonly ja: "録画を消去";
+    };
+    readonly "tl.clearConfirmMsg": {
+        readonly zh: "已录的过程视频将被删除。此操作无法撤销（画作本身不受影响）。";
+        readonly en: "The recorded footage will be deleted. This cannot be undone (your artwork is unaffected).";
+        readonly ja: "録画した映像を削除します。この操作は元に戻せません（作品自体は影響を受けません）。";
+    };
+    readonly "tl.state.recording": {
+        readonly zh: "录制中";
+        readonly en: "Recording";
+        readonly ja: "録画中";
+    };
+    readonly "tl.state.paused": {
+        readonly zh: "已暂停";
+        readonly en: "Paused";
+        readonly ja: "一時停止中";
+    };
+    readonly "tl.state.off": {
+        readonly zh: "未录制";
+        readonly en: "Off";
+        readonly ja: "未録画";
+    };
+    readonly "tl.pendingFrames": {
+        readonly zh: "{n} 帧待保存";
+        readonly en: "{n} frames pending save";
+        readonly ja: "{n}フレーム保存待ち";
+    };
+    readonly "tl.lockedNote": {
+        readonly zh: "画幅与分辨率在开录时锁定；要更改请清除后重录。";
+        readonly en: "Aspect and resolution are locked when recording starts; clear the recording to change them.";
+        readonly ja: "アスペクト比と解像度は録画開始時に固定されます。変更するには消去して録り直してください。";
+    };
+    readonly "tl.unsupported": {
+        readonly zh: "此设备不支持视频编码（WebCodecs）";
+        readonly en: "Video encoding (WebCodecs) is not supported on this device";
+        readonly ja: "このデバイスは動画エンコード（WebCodecs）非対応です";
+    };
+    readonly "tl.probing": {
+        readonly zh: "正在检测设备编码能力…";
+        readonly en: "Checking encoder support…";
+        readonly ja: "エンコーダー対応を確認中…";
+    };
+    readonly "tl.saveToExport": {
+        readonly zh: "保存画作后即可预览/导出";
+        readonly en: "Save the artwork to preview/export";
+        readonly ja: "保存するとプレビュー／書き出しできます";
+    };
+    readonly "tl.restoreLost": {
+        readonly zh: "过程录像数据损坏，已重置（画作不受影响）";
+        readonly en: "Timelapse footage was corrupted and has been reset (artwork unaffected)";
+        readonly ja: "タイムラプスのデータが破損していたためリセットしました（作品は無事です）";
+    };
+    readonly "tl.captureHalted": {
+        readonly zh: "过程录像已暂停（编码器故障，已录素材已保留）";
+        readonly en: "Timelapse paused (encoder failure; existing footage kept)";
+        readonly ja: "タイムラプスを一時停止しました（エンコーダー障害・既存の映像は保持）";
+    };
     readonly "menu.resetRack": {
         readonly zh: "还原内置笔刷…";
         readonly en: "Restore built-in brushes…";
