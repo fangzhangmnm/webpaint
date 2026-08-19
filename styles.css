@@ -1676,11 +1676,13 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   border-color: var(--accent, #4c8bf5); font-weight: 600;
 }
 
-/* v110 颜色调整面板 (float)；adjust-panel + foot */
+/* v110 颜色调整面板 (float)；adjust-panel + foot
+   宽度 380px（280→380，2026-08-19 user QoL）：滑条列是 1fr，面板加宽 = 全部 adjust 滑条
+   track 变长 → 拖动精度高。positionPopup 按 offsetWidth 动态 clamp，窄屏不溢出。 */
 .adjust-panel {
   position: fixed;
   z-index: var(--z-window);
-  width: 280px;
+  width: min(380px, calc(100vw - 32px));
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -2605,6 +2607,10 @@ body[data-mode="gallery"] .board { display: none !important; }
 
 /* v0.6.48 裁剪·模板模式 */
 .crop-wh-input { width: 64px; }
+/* 模板下拉 compact（2026-08-19 user QoL）：<select> 天然被最长 option（如「A4 竖（2480 × 3508）」）
+   撑开，把 crop 工具条拉得怪长。收口只影响闭合态显示；展开列表仍是完整文案，
+   目标尺寸另有 cropDim 读数一直可见。 */
+#cropTemplateSel { max-width: 130px; text-overflow: ellipsis; }
 .crop-safety {
   position: absolute;
   /* inset 由 JS 设（均匀 2% 短边——CSS 百分比 inset 是按轴的，长边会出更多） */
