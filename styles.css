@@ -2709,9 +2709,10 @@ body[data-mode="gallery"] .board { display: none !important; }
 }
 .tl-preview-close svg { width: 20px; height: 20px; }
 
-/* timelapse 控制排 svg 图标化（user 2026-08-19） */
+/* timelapse 控制排 svg 图标化（user 2026-08-19；宽度均分好看） */
 .tl-icon-row { flex-wrap: nowrap; }
-.tl-icon-btn { display: flex; align-items: center; justify-content: center; padding: 8px 0; }
+.tl-icon-row .tl-btn { flex: 1 1 0; min-width: 0; }   /* 等宽均分（覆盖 .tl-more 的 min-width） */
+.tl-icon-btn { display: flex; align-items: center; justify-content: center; padding: 9px 0; }
 .tl-icon-btn svg { width: 20px; height: 20px; }
 .tl-menu-item.danger { color: #c0392b; }
 .tl-menu-item.danger:hover { background: color-mix(in srgb, #c0392b 12%, transparent); }

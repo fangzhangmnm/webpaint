@@ -1,6 +1,6 @@
 # 本 app 的图标
 
-127 icons · 提取自家族图标库 `../../../../20260708 SVG Icons/icons.svg` · 由 `extract-icons.py` 生成，别手改。
+133 icons · 提取自家族图标库 `../../../../20260708 SVG Icons/icons.svg` · 由 `extract-icons.py` 生成，别手改。
 
 用法：把 sprite 整段内联到 `<body>` 顶部，然后按 id 引用；
 ⚠ sprite 根自带的隐藏样式（1×1 + `opacity:0`）别换成 `display:none`——
@@ -102,6 +102,7 @@
 | `scale-free` | 自由缩放(矩形框+小方虚线) |
 | `scale-perspective` | 透视缩放·梯形包住虚框:虚框尺寸对齐旧版(7.5w x 12h, 旧版旋转后屏幕实测同值), 置左 x3.5-11 y6-18; 梯形左边窄=虚框左边两顶点(3.5, 6/18)完全重合, 右边宽 x21 y2.6-21.4 张开包住; 箭头指张开方向; 20260725 甲方定稿入库(旧版镜像+旋转构造退役) |
 | `scale-uniform` | 等比缩放(正方框+小方虚线) |
+| `reset-transform` | transform 浮层复位钮(WebPaint v0.7.37:尺寸回 lift 初始+画布居中+清旋转/透视):maximize-viewport 的同形别名 id(甲方 20260819 拍板「同图不同身份」, 心智同概念; 准星+回位弧/四角向心两案落选); 改动保持与 maximize-viewport 同几何 |
 
 ## selection
 
@@ -118,6 +119,7 @@
 | `selection-invert` | 反选:圆角方框沿对角线切开, 一半填实一半留空 —— 选区与非选区对调 |
 | `selection-new` | 虚线方框+加号 |
 | `selection-union` | 并集:后框被前框 mask 遮挡(留 gap)+加号 |
+| `fill-gap` | 魔棒容隙(WebPaint v0.7.24, 缺口宽<n px 处 flood 过不去):方形轮廓左边缺一小口+内部 0.18 淡填充(boolean 族实体区同语)——线稿有小缝, 颜色照样不漏; 甲方点题「方形左边 gap 一点」+fill 获赞; 前六案(断口虚线补段/漏口封口/拱桥/裂杯装水/塞楔子/放大镜检缝)均落选; 20260819 拍板入库 |
 
 ## edit
 
@@ -129,6 +131,15 @@
 | `clipboard` | 从剪切板新建:夹板+纸(夹子用 mask 遮挡板身边线) |
 | `copy` | 两个文件叠放 |
 | `move-to-file` | 文件+绕行箭头(移到文件) |
+
+## media
+
+| name | 说明 |
+|------|------|
+| `timelapse-record` | 过程录像(WebPaint timelapse 菜单入口, 语义=延时过程回放非拍摄):表盘外圈与实心录点同心+单针+右下双 chevron 快进, chevron 压表盘处 mask 留白; 甲方配方=表盘案的钟+录点案的同心圆点; 录点+chevron/表盘+角标/录点+加速弧三案落选; 20260819 拍板入库 |
+| `stop` | 停止:实心圆角方块 ⏹; WebPaint timelapse「暂停录制」也用它(record-pause 已驳回, stop 停段+record 续录=磁带机语义); 20260819 media 批入库 |
+| `record` | 录制:实心圆 ⏺(空心环版落选, 批内统一实心); 20260819 media 批入库 |
+| `replay` | 回放:ccw 回绕环箭头(rotate-ccw 同弧)+中心实心小三角(描边同色圆角); 与 refresh(cw)镜向区分, 语义=看回放非刷新; WebPaint timelapse 全屏回放钮(TODO 20260819); 20260819 甲方拍板候选1号入库 |
 
 ## file
 
@@ -198,7 +209,7 @@
 | name | 说明 |
 |------|------|
 | `grid` | 网格:直角外框 1.2 与内网格线同宽(20260725 甲方定稿; 原 rx1.6 圆角粗框版退役), 内部 4x4 细网格 |
-| `maximize-viewport` | 适配视口:四角向外的箭头 |
+| `maximize-viewport` | 适配视口:四角向外的箭头(reset-transform=同形别名 id, 改动保持同几何) |
 | `picture-in-picture` | 画中画:大框(主画布) + 右下角内嵌小窗(参考小窗自己) |
 
 ## ui

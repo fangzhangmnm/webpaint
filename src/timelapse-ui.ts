@@ -134,9 +134,10 @@ function _renderPanel(): void {
   body.appendChild(st);
 
   const noFootage = s.bytes === 0 && s.pendingFrames === 0;
-  // 一排 svg 图标钮（user 2026-08-19：全图标化）。pause/play/replay 现为烤字 stopgap，真图入库自动换。
+  // 一排 svg 图标钮（user 2026-08-19：全图标化；宽度均分）。图标语义按库仓拍板（63087ff）：
+  // 「暂停录制」= stop（record-pause 已驳回，磁带机语义 stop 停段 + record 续录）、续录 = record ⏺。
   const row = _div("tl-actions tl-icon-row");
-  row.appendChild(_iconBtn(s.on ? "pause" : "play", s.on ? t("tl.pause") : t("tl.resume"), s.on ? "" : "tl-primary", () => {
+  row.appendChild(_iconBtn(s.on ? "stop" : "record", s.on ? t("tl.pause") : t("tl.resume"), s.on ? "" : "tl-primary", () => {
     if (timelapseStatus().on) timelapsePause(); else timelapseResume();
   }));
   const replayBtn = _iconBtn("replay", t("tl.preview"), "", () => { void _replayFullscreen(); });

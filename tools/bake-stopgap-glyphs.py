@@ -47,21 +47,8 @@ def text_path(text, box, font='cjk'):
 
 # (id, 文字, 盒, 语义 note)
 SPECS = [
-    # 2026-07-28 晚：20260728 交付批入库（square/ellipse/line-snap/select-polygon/persp-iso 全真图），
-    # stopgap 再度**清零**。历史见 git（透视批/形状变体批）。
-    # 2026-07-29 裁剪定尺寸三枚（定/填/适）→ 2026-07-30 真图入库收货（a069c8c），stopgap 又清零。
-    # 2026-07-30 resample（采）当日提当日入库（AA 圆盘光栅化示意），stopgap 清零。
-    # 2026-07-30 拆色（explode-color-layers）当日入库，甲方定名 separate-colors（color 文氏图三圆分开），
-    # stopgap 清零。
-    ("fill-gap", "隙", (3, 3, 18, 18), "魔棒容隙 toggle（v0.7.24：缺口宽<n px 处 flood 过不去；EDT 受限 flood+回贴膨胀）。真图标建议=断口线条+跨缺口的桥/虚线补段（与 selection-expand 同笔重；区别于 auto-expand 的向外箭头语义）"),
-    # 2026-08-01 transform 行「复位」钮（v0.7.37）：浮层一键回初始尺寸+画布居中+清旋转/透视。
-    ("reset-transform", "回中", (2, 5, 20, 14), "浮层变换复位（v0.7.37：尺寸回 lift 初始、画布居中、缩放/旋转/透视清零、整数吸附保置换快路）。真图标建议=居中靶心/十字准星 + 回位弧箭头（与 rotate-ccw 区分：箭头指向中心点而非绕圈）"),
-    # 2026-08-19 timelapse 宣发轮（spec=ai-docs/20260819-timelapse-spec.md）：菜单「过程录像」入口。
-    ("timelapse-record", "录", (3, 3, 18, 18), "timelapse 过程录像菜单入口（opt-in per-doc、录制中右下角另有 CSS 红点 chip 不用图标）。真图标建议=录制圆点+表盘/快进箭头（与相机/摄像机区分：语义是延时过程回放不是拍摄）"),
-    # 2026-08-19 timelapse 控制排 svg 化（user：按钮一排全图标）。play/pause 是通用媒体图标，值得进库。
-    ("pause", "停", (3, 3, 18, 18), "暂停（通用媒体控制）。真图标=双竖条 ⏸（与 stop 方块区分）"),
-    ("play", "续", (3, 3, 18, 18), "播放/继续（通用媒体控制）。真图标=实心右向三角 ▶"),
-    ("replay", "放", (3, 3, 18, 18), "回放/重看（timelapse 全屏回放钮）。真图标建议=圆环回绕箭头+中心小三角（与 refresh 的双箭头区分：语义是看回放不是刷新）"),
+    # 2026-08-19 图标收货：fill-gap/reset-transform/timelapse-record/pause/play/replay 六枚真图入库
+    # （media 批 + 工单批，见库仓 63087ff），stopgap 再度**清零**。历史见 git。
 ]
 syms = []
 for sid, text, box, note in SPECS:
