@@ -97,7 +97,7 @@ function closeNewDocSheet() {
   els.newDocBackdrop.classList.add("hidden");
   els.newDocSheet.classList.add("hidden");
 }
-const DEFAULT_PRESET = "screen-2048sq";
+const DEFAULT_PRESET = "screen-1024sq";   // user 2026-08-19：2048 默认护栏没意义，每次都手动改回 1024
 let _presetVal = DEFAULT_PRESET;   // #21：preset 单一真相（confirm 读它）。值 = 模板 id 或 "custom"。
 // #21 终版（v0.5.10）：全部预设进一个下拉框（#newDocPreset，三 optgroup + 自定义）——chips 已删。
 // v0.7.32：option 由 canvas-templates.json 投影（不再手写在 index.html——那是和裁切分叉的第二份表）。
