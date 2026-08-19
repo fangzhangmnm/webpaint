@@ -23,6 +23,7 @@ import "./iso-frame.test.mjs";         // isometric 透视模式：纯平行三�
 import "./app-version.test.mjs";
 import "./cpu-tile-pool.test.mjs";
 import "./soft-gl2-port.test.mjs";   // C8 SoftGl2Port：真消费类（栅格/合成/烤定）无 GL 跑通 + 对表纪律
+import "./fill-lockalpha.test.mjs";  // v0.9.12 lockAlpha 真 atop：α 不动/α=0 不写隐形色/erase 不受锁（fill 像素路径首次进 npm test）
 import "./background-sync-jobs.test.mjs";
 import "./undo-stack.test.mjs";             // T1 workpiece v2（ADR-0008）：令牌/collector/自反 swap/配额/双计数
 import "./layer-tiles.test.mjs";            // T2 像素组件：写时扣押（Krita memento）/verbs/computed 白名单+双捕获/no-op 守卫（pixel-tx-noop 后继）

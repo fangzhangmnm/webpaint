@@ -128,14 +128,22 @@ function makeComposite(mode: BlendMode, src: "tiled" | "group" | "overlay", ovMo
         if (ou < 0 || ou > 1 || ovv < 0 || ovv > 1 || !overlay) ov4.fill(0);
         else sampleNearest(overlay, ou, ovv, ov4);
         let ovA = ov4[3] * ovOpacity;
-        if (ovLockAlpha === 1) ovA *= base[3];
         if (ovHasSel === 1) {
           const su = (docX - selOx) / selSw, sv = (docY - selOy) / selSh;
           if (su < 0 || su > 1 || sv < 0 || sv > 1 || !ovSel) ovA *= 0;
           else { sampleNearest(ovSel, su, sv, t); ovA *= t[0]; }
         }
         if (ovErase === 1) {
+          // erase 不受锁α影响（v242 CPU 像素笔：erase 分支优先）
           srcA = base[3] * (1 - ovA); Cs[0] = base[0]; Cs[1] = base[1]; Cs[2] = base[2];
+        } else if (ovLockAlpha === 1) {
+          // 锁α = 真 source-atop（v0.9.12，镜像 blend-glsl 同分支）：α 不动、α=0 处像素完全不变
+          const baseA = base[3];
+          srcA = baseA;
+          for (let k = 0; k < 3; k++) {
+            const ovBlend = (1 - baseA) * ov4[k] + baseA * blendChannel(ovMode, base[k], ov4[k]);
+            Cs[k] = baseA > 0 ? base[k] + (ovBlend - base[k]) * ovA : base[k];
+          }
         } else {
           const baseA = base[3];
           for (let k = 0; k < 3; k++) {
