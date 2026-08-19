@@ -23,6 +23,7 @@ import { setTool, updateLassoToolbar } from "./toolbar.ts";
 import { openChoiceSheet } from "./sheets.ts";
 import { setReferenceFromFile } from "./side-windows.ts";
 import { importGuardLimit, needsBigImportSheet } from "./clipboard-policy.ts";
+import { droppedOraHandle, consumeLaunchFiles } from "./local-file-session.ts";
 import { _suppressTransientPanels, _commitTransform, _cancelTransform } from "./transient-panels.ts";
 import type { AppContext } from "./app-context.ts";
 
@@ -227,6 +228,28 @@ export async function importImageAsLayer(file: File, opts: { center?: { x: numbe
   setStatus(t("mi.importedAsLayer", { name: file.name }));
 }
 
+// .ora 导入为**新身份**（v0.9.24 从 oraFileInput change-handler 提出，供 file-input / drop 降级 /
+// 无地入口的加密·外来 ora 回退共用）。首存 mode:"new"，撞名抛而不静默覆盖
+// （v415 前走 existing → 导入同名 .ora 会静默盖掉已有作品，活的数据丢失）。
+async function importOraFileAsNew(file: File) {
+  if (!(await session.leaveLocalFile())) return;   // 无地且脏 → 先问（adoptAsNew 是同步入口，门在这里过）
+  const nm = stripSessionExt(file.name) || t("nd.untitled");
+  // 外来文件可能是加密容器（可能用与图库不同的密码）→ busy 外解锁 + 显式密码解，
+  //   再按落库 name 记忆（onPasswordVerified：全局空→上位 / 否则 per-name 覆盖）。
+  let plain: Blob = file;
+  if (await _store.encryption.isEncryptedBlob(file)) {   // 便宜嗅探（不解密）→ 分流
+    // 解锁循环一次尝试 = 一次解密，成功那次的明文直接拿来用（旧版要全量解两遍）。
+    const got = await unlockImportedContainer(file);
+    if (!got) { setStatus(t("mi.importCancelledNeedPw"), true); return; }
+    plain = got.plain;
+    onPasswordVerified(nm, got.pw);
+  }
+  const loaded = await decodeOraToPainting(plain);
+  session.adoptAsNew(loaded, nm);
+  setStatus(t("mi.imported", { name: nm }));
+  setGalleryOpen(false);
+}
+
 export function initImportImage(ctx: AppContext) {
   doc = ctx.doc;
   board = ctx.board;
@@ -255,23 +278,7 @@ export function initImportImage(ctx: AppContext) {
     const isImage = (file.type || "").startsWith("image/");
     try {
       if (isOra) {
-        const nm = stripSessionExt(file.name) || t("nd.untitled");
-        // 外来文件可能是加密容器（可能用与图库不同的密码）→ busy 外解锁 + 显式密码解，
-        //   再按落库 name 记忆（onPasswordVerified：全局空→上位 / 否则 per-name 覆盖）。
-        let plain: Blob = file;
-        if (await _store.encryption.isEncryptedBlob(file)) {   // 便宜嗅探（不解密）→ 分流
-          // 解锁循环一次尝试 = 一次解密，成功那次的明文直接拿来用（旧版要全量解两遍）。
-          const got = await unlockImportedContainer(file);
-          if (!got) { setStatus(t("mi.importCancelledNeedPw"), true); return; }
-          plain = got.plain;
-          onPasswordVerified(nm, got.pw);
-        }
-        const loaded = await decodeOraToPainting(plain);
-        // ★新身份：首存走 mode:"new"，撞名抛而不静默覆盖。
-        //   v415 前这里走的是 existing → **导入同名 .ora 会静默盖掉已有作品**（活的数据丢失）。
-        session.adoptAsNew(loaded, nm);
-        setStatus(t("mi.imported", { name: nm }));
-        setGalleryOpen(false);
+        await importOraFileAsNew(file);
       } else if (isImage) {
         if (asNewDoc) {
           await importImageAsNewDoc(file);
@@ -295,8 +302,22 @@ export function initImportImage(ctx: AppContext) {
   });
   window.addEventListener("drop", async (e: DragEvent) => {
     const files = [...(e.dataTransfer?.files || [])];
+    // v0.9.24 无地（spec §7）：拖 .ora 进来 → 文件系统句柄 → 本地原位打开（图库里也可用，
+    //   openLocalFile 自己关图库）。⚠ droppedOraHandle 的句柄收集必须在本处理器**首个 await 之前**
+    //   同步发生（DataTransferItemList 随后失效）。拿不到句柄（浏览器不支持）/加密/外来 ora → 导入新身份。
+    const oraFile = files.find((f: File) => /\.ora$/i.test(f.name));
+    if (oraFile) {
+      e.preventDefault();
+      const handlePromise = droppedOraHandle(e.dataTransfer);   // 同步收集，await 在后
+      try {
+        const h = await handlePromise;
+        const fallback = h ? await session.openLocalFile(h) : oraFile;
+        if (fallback) await importOraFileAsNew(fallback);
+      } catch (err) { setStatus(t("mi.dropFailed", { err: errMsg(err) }), true); }
+      return;
+    }
     const img = files.find((f: File) => f.type && f.type.startsWith("image/"));
-    if (!img) return;                                  // 非图片（如 .ora）不拦，让默认行为
+    if (!img) return;                                  // 非图片（如 .zip 容器）不拦，让默认行为
     e.preventDefault();
     if (document.body.dataset.mode === "gallery") { setStatus(t("mi.exitGalleryBeforeDrop"), true); return; }
     const center = board.screenToDoc(e.clientX, e.clientY);
@@ -309,6 +330,19 @@ export function initImportImage(ctx: AppContext) {
       if (choice === "layer") await importImageAsLayer(img, { center });
       else await setReferenceFromFile(img);
     } catch (err) { setStatus(t("mi.dropFailed", { err: errMsg(err) }), true); }
+  });
+
+  // v0.9.24 无地入口的回退通道：topbar 菜单「打开本地文件」遇到加密/外来 ora → 派此事件走导入。
+  window.addEventListener("wp:importOraFile", (e: Event) => {
+    const file = (e as CustomEvent<File>).detail;
+    if (file) void importOraFileAsNew(file).catch((err) => setStatus(t("mi.importFailed", { err: errMsg(err) }), true));
+  });
+  // v0.9.24 安装态 PWA：双击 .ora 唤起（manifest file_handlers + launchQueue；非安装态静默 no-op）。
+  consumeLaunchFiles((h) => {
+    void (async () => {
+      const fallback = await session.openLocalFile(h);
+      if (fallback) await importOraFileAsNew(fallback);
+    })().catch((err) => reportError(new Error("[local-file] launch open failed: " + String(err)), "warning"));
   });
 
   // 图库「导入照片」入口（galleryAddPopup → addImportPhoto）设 _addImportAsNewDoc 经此函数。

@@ -76,6 +76,7 @@
 | .ora（有 WebPaint 痕迹） | 本地原位打开，不上传、无 store 身份 | Ctrl+S 原位写回 | **抢默认**【拍板】 |
 | .ora（外来，Krita 等） | 导入为新 doc | 只能另存 | （同一注册） |
 | .psd | 导入为新 doc | 另存，默认格式 = ora；psd 只出不进驻 | 注册 handler **不主张默认**（永不原位写 psd，注册无害） |
+| | ↑ 实施注（v0.9.24）：WebPaint 目前**没有 psd 解码器**（exporters 只有出口），psd 行保留为方向，未实装 | | |
 | png/jpg/webp | 导入为新 doc（现役 `importImageAsNewDoc`） | 只能另存 | 注册 handler 不抢默认 |
 
 - WebPaint 痕迹检测 = 拆 ora zip 看我们的扩展 sidecar 在场与否。

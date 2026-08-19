@@ -21,7 +21,8 @@ import { flattenViewLeaves } from "./backend/workpiece/painting-view.ts";
 import { tLatin } from "./i18n/index.ts";
 import { isSignedIn, store as _store } from "./app-store.ts";
 import type { EncryptedBlob } from "./app-store.ts";   // 密文 at-rest 字节（branded）；B2：类型经接缝转口
-import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
+import { openInputSheet, openConfirmSheet, openChoiceSheet, lockSyncGate } from "./sheets.ts";
+import { readHandleFile, writeHandleBlob, handleMtime, hasWebPaintTraces, type LocalFileHandle } from "./local-file-session.ts";
 import { pathFolder } from "./gallery/gallery-path.ts";
 import { sessionFileName, sessionBareName } from "./config.ts";
 import { serializedToolStatePatch, desk } from "./workbench-state.ts";
@@ -91,6 +92,95 @@ const _file = (name: string) => _store.file(toFull(name), { isZip: true, mode: "
 async function _refreshEncrypted() {
   try { _enc.encrypted = _activeSessionName ? await _file(_activeSessionName).isEncrypted() : false; }
   catch { _enc.encrypted = false; }
+}
+
+// ============ 无地本地文件模式（v0.9.24；spec ai-docs/20260819-clipboard-and-local-file-spec.md §7）============
+// doc 的家 = 本地文件句柄而非 store 身份。session 级零持久化托底（human 拍板）：不进图库、
+// 刷新即散、崩溃即丢（beforeunload 只拦 UI 层关闭，任务管理器/断电是拍板接受的逃生通道）。
+//
+// 【数据安全双墙】无地期间 _activeSessionName 恒 null → 所有 store 身份路径被既有守卫短路；
+// 但 es 仍持有上一个 store doc 的名字，若无地编辑标脏了它，autosave 会把**无地画布的像素**
+// encode 后写进旧 doc 名下（幽灵路径级事故，AtlasMaker 0.7.2 同类）。所以：
+//   墙① _localFile 在场 → es 的 onChange/markEdited 改走本地脏轨，es 永不标脏；
+//   墙② _esMuted 残影墙：无地退出后 canvas 像素 ≠ es._name 的内容，直到 es 重新绑定身份
+//       （openItem/newDoc/adopt/saveAs/restore 任一成功）之前 es 仍不许标脏。
+// Windows 对齐（拍板）：无自动保存、blur/pagehide 不落盘（es 干净 = persist 天然 no-op）、
+// Ctrl+S 显式写回 + mtime 陈旧对表；beforeunload 的偷存在无地降级为 no-op（静默写用户文件违背文件语义）。
+let _localFile: { handle: LocalFileHandle; fileName: string; lastModified: number; dirty: boolean } | null = null;
+let _esMuted = false;
+
+function _markLocalDirty() {
+  if (_localFile && !_localFile.dirty) { _localFile.dirty = true; updateSaveStatus(); }
+}
+/** es 重新绑定 store 身份（open/adopt/新建/另存成功）→ 解除残影墙。 */
+function _esRebound() { _esMuted = false; }
+
+/** 打开本地 .ora：明文 + 有 WebPaint 痕迹 → 原位打开（返回 null）；
+ *  加密容器 / 外来 ora → 不原位，把 File 还给调用方走导入路径（返回 File）。 */
+async function openLocalFile(handle: LocalFileHandle): Promise<File | null> {
+  const file = await readHandleFile(handle);
+  // 加密容器：原位模式 v1 不吃密文（解锁/记忆密码/落库语义全在导入路径）→ 交还导入。
+  if (await _store.encryption.isEncryptedBlob(file)) return file;
+  const loaded = await decodeOraToPainting(file) as LoadedDoc;
+  if (!hasWebPaintTraces(loaded)) return file;   // 外来 ora（Krita 等）→ 导入为新 doc，绝不原位覆写别人的文件
+  if (!(await leaveLocalFile())) return null;    // 已在无地且脏 → 先问（保存/丢弃/取消）
+  if (es.isDirty()) await saveNow();             // 旧 store doc 先落盘（openItem 同款；无地时已被上一行清场）
+  _esMuted = true;   // 墙②先立再换内容：adoptModel 之后 canvas 就不再是 es._name 的像素了
+  adoptModel(loaded);
+  _setActive(null); _isLazyBlankSession = false; _recomputePhase();
+  _enc.encrypted = false;
+  _localFile = { handle, fileName: file.name, lastModified: file.lastModified, dirty: false };
+  updateSaveStatus();
+  await setGalleryOpen(false);
+  setStatus(t("lf.opened", { name: file.name }));
+  return null;
+}
+
+/** Ctrl+S / save 按钮在无地模式的落点：encode → mtime 陈旧对表 → 原子写回句柄。 */
+async function saveLocalFileNow(): Promise<boolean> {
+  if (!_localFile) return false;
+  if (editMode.hasPendingTransient()) editMode.applyPendingTransient();
+  if (_loadedDocIsNewer && !_loadedDocNewerConfirmed) {
+    const ok = await openConfirmSheet(t("ss.overwriteNewerTitle"), t("ss.overwriteNewerMsg", { writer: String(_loadedDocWriterVer), version: WEBPAINT_VERSION }));
+    if (!ok) { setStatus(t("ss.saveCancelled")); return false; }
+    _loadedDocNewerConfirmed = true; updateNewerBanner();
+  }
+  try {
+    // 陈旧对表（FS Access 无 etag，mtime 是零成本的 freshness 检查）：文件在我们打开后被外部改过 → 问。
+    const mt = await handleMtime(_localFile.handle);
+    if (mt != null && mt !== _localFile.lastModified) {
+      const ok = await openConfirmSheet(t("lf.staleTitle"), t("lf.staleMsg", { name: _localFile.fileName }));
+      if (!ok) { setStatus(t("ss.saveCancelled")); return false; }
+    }
+    const { bytes } = await _encodeCurrentOraWithPeek();
+    await writeHandleBlob(_localFile.handle, bytes);
+    _localFile.lastModified = (await handleMtime(_localFile.handle)) ?? Date.now();
+    _localFile.dirty = false;
+    updateSaveStatus();
+    setStatus(t("lf.saved", { name: _localFile.fileName }));
+    return true;
+  } catch (e) {
+    reportError(new Error("[local-file] save failed: " + String(e)), "warning");
+    setStatus(t("lf.saveFailed", { error: errMsg(e) }), true);
+    return false;
+  }
+}
+
+/** 离开无地模式（回图库/开别的画/新建/导入前必过的门）。脏 → 问保存/丢弃；取消 → false（调用方中止）。
+ *  ⚠ 只清 _localFile，**不清 _esMuted**——残影墙要等 es 重新绑定身份（_esRebound）才解除。 */
+async function leaveLocalFile(): Promise<boolean> {
+  if (!_localFile) return true;
+  if (_localFile.dirty) {
+    const c = await openChoiceSheet<"save" | "discard">(t("lf.leaveTitle"), _localFile.fileName, [
+      { label: t("lf.leaveSave"), value: "save", primary: true },
+      { label: t("lf.leaveDiscard"), value: "discard" },
+    ]);
+    if (!c) return false;
+    if (c === "save" && !(await saveLocalFileNow())) return false;
+  }
+  _localFile = null;
+  updateSaveStatus();
+  return true;
 }
 
 // ============ 编辑器状态 I/O（v267b；T5/v0.8.21 拆双轨：旧轨 webpaint/state.json **停写**）============
@@ -257,9 +347,11 @@ function adoptAsExisting(loaded: LoadedDoc, name: string) {
   _adoptCommon(loaded, name, {});
 }
 function _adoptCommon(loaded: LoadedDoc, name: string, opts: { create?: boolean }) {
+  if (_localFile) _localFile = null;   // 同步入口无法弹确认——调用方（import-image 的 .ora 分支）已过 leaveLocalFile 门
   adoptModel(loaded);
   _setActive(name); _isLazyBlankSession = false; _recomputePhase();
   es.adopted(toFull(name), opts);
+  _esRebound();
   updateSaveStatus(); _refreshEncrypted();
 }
 
@@ -297,6 +389,9 @@ async function _dropCheckpoint(name: string) {
 
 // ---- 保存（本地）----
 async function saveNow(opts: { implicit?: boolean } = {}) {
+  // 无地分流：显式保存 → 写回本地文件；implicit（beforeunload 偷存等）→ no-op——
+  //   静默写用户磁盘文件违背 Windows 文件语义（Alt+F4 = 不保存，human 拍板）。
+  if (_localFile) { if (!opts.implicit) await saveLocalFileNow(); return; }
   if (!_activeSessionName) return;
   if (_docIsBlankUnnamed()) return;
   if (editMode.hasPendingTransient()) { if (opts.implicit) return; editMode.applyPendingTransient(); }
@@ -321,6 +416,7 @@ async function saveNow(opts: { implicit?: boolean } = {}) {
 //   没有它，保存瞬间 dirty 已翻 false、pushPending 还挂着 → 徽章闪「问号虚云」（unpushed 终态），语义不对。
 let _pushInFlight = false;
 async function saveAndPush() {
+  if (_localFile) { await saveLocalFileNow(); return; }   // 无地：Ctrl+S/save 按钮 = 写回本地文件（无云腿）
   if (!_activeSessionName) { setStatus(t("ss.noDocCannotSave"), true); return; }
   // 版本降级守卫：新版本文档未确认 → 只本地不推（saveNow 的 confirm 已挡本地覆盖，这里挡推）。
   if (_loadedDocIsNewer && !_loadedDocNewerConfirmed) {
@@ -391,6 +487,7 @@ async function decryptCurrent() {
 
 // ---- rename（UI 循环 + es.rename）----
 async function renameCurrentSession({ suggested, reason }: { suggested?: string; reason?: string } = {}) {
+  if (_localFile) { setStatus(t("lf.renameNotSupported"), true); return; }   // 无地：改名=文件系统操作，v1 不做（另存为可收编入库）
   editMode.applyPendingTransient();
   const oldName = _activeSessionName!;
   let candidate = suggested || oldName;
@@ -430,6 +527,7 @@ async function renameCurrentSession({ suggested, reason }: { suggested?: string;
 
 // ---- 退出到图库（推 + 保存失败重试环）----
 async function exitCanvasToGallery() {
+  if (!(await leaveLocalFile())) return;   // 无地且脏 → 问；取消 = 留在画布
   if (_activeSessionName) {
     // v409（D-Q6）：退出**只有内容脏/push-pending 才推**；只改 desk（无像素编辑）→ 不推不落本地，
     //   下次开 revert 到上次保存的快照。user 2026-07-14：「退出应该只有 contentdirty 才强制推云，workspace dirty 可抛」。
@@ -454,6 +552,7 @@ async function exitCanvasToGallery() {
 
 // ---- 新建 doc ----
 async function newDoc({ name, w, h, layer0Name, fillLayer0 }: { name: string; w: number; h: number; layer0Name?: string; fillLayer0?: (layer: unknown) => void }) {
+  if (!(await leaveLocalFile())) return;   // 无地且脏 → 问；取消 = 不新建
   if (es.isDirty()) await saveNow();
   timelapseDetach();   // 新建=新身份：旧录像绝不跟过来（per-doc 串扰墙）
   input.clearHistory();
@@ -472,6 +571,7 @@ async function newDoc({ name, w, h, layer0Name, fillLayer0 }: { name: string; w:
   applyEditorStateToUI();   // desk：新建 → 面板回默认（关）
   timelapseAdopt({});       // 新文档 = 健康空录制态（默认关；可在这张画上开录）
   es.adopted(toFull(name), { create: true });   // 新建画布/import：es 记为当前 + 脏；首存 mode:"new"（撞名不静默覆盖）。边界转全名。
+  _esRebound();
   updateSaveStatus();
   await saveNow();   // 落盘（tryPush:false；撞名 → saveNow try/catch surface）
   void _captureCheckpoint(name, "new-doc");   // 空白态封一份 → revert = 回到刚新建的样子
@@ -484,6 +584,7 @@ async function newDoc({ name, w, h, layer0Name, fillLayer0 }: { name: string; w:
 // ---- 打开图库 item ----
 async function openItem(item: GalleryItem) {
   if (item.name === _activeSessionName) { setGalleryOpen(false); return; }
+  if (!(await leaveLocalFile())) return;   // 无地且脏 → 问；取消 = 不开
   if (es.isDirty()) await saveNow();
   // 开画顺带把 4 个 settings/state collection 拉云对齐（v409，user 2026-07-14：「开画作的时候可以顺便
   //   并行 pullandreconcile 下，fire and forget 不用 await」）。**绝不 await**：对齐是锦上添花，
@@ -500,6 +601,7 @@ async function openItem(item: GalleryItem) {
     //   新名字、状态栏还报「已打开」——下次 autosave 就把上一张画的像素写进新身份，退出时推上 OneDrive
     //   覆盖掉目标那张画。es.open 现在失败即不改自身 _name，这里也必须不改活动名、留在图库。
     if (!(await es.open(toFull(item.name)))) { setStatus(t("ss.openFailed", { error: t("mi.lastNotFound", { name: item.name }) }), true); return; }
+    _esRebound();
     _setActive(item.name); _isLazyBlankSession = false; _recomputePhase(); _refreshEncrypted();
     void _captureCheckpoint(item.name, "gallery-open");
     setGalleryOpen(false); setStatus(t("ss.opened", { name: item.name }));
@@ -562,6 +664,7 @@ async function restoreSession(name: string): Promise<boolean> {
     //   store 侧的两半已有 node 覆盖（seal.test.ts：无密码写抛 LOCKED 绝不静默存明文；锁定读返 null）。
     if (await _file(name).isEncrypted()) { if (!(await ensureUnlocked(name))) return false; }
     if (!(await es.open(toFull(name)))) return false;   // 文件缺失/锁定 → 未装入。边界转全名。
+    _esRebound();
     _setActive(name); _isLazyBlankSession = false; _recomputePhase(); _refreshEncrypted();
     updateSaveStatus();
     return true;
@@ -569,12 +672,15 @@ async function restoreSession(name: string): Promise<boolean> {
 }
 
 // 另存为：当前内容写新身份（旧的不动）+ 切到新名继续编辑。
+// 无地模式下另存为 = **收编入库**：无地 doc 获得 store 身份，本地文件留在原处不再跟踪。
 async function saveAs(newName: string): Promise<void> {
   const { bytes, peek } = await _encodeCurrentOraWithPeek();
   // 另存为=写**新身份** → mode:"new"（撞名不静默覆盖；topbar 已 nameOccupied 预检，这里 store 层再兜底红线）。
   await _store.file(toFull(newName), { isZip: true, mode: "new" }).save(bytes, { tryPush: true, hint: peek ? { peek } : undefined });
+  if (_localFile) { _localFile = null; }   // 收编：内容已进库（就是刚写的字节），不算丢弃，无需问
   _setActive(newName); _isLazyBlankSession = false; _recomputePhase();
   es.adopted(toFull(newName));   // es 切到新名（内容即新名的；下轮 autosave 若跑=同内容 re-save，无害）。边界转全名。
+  _esRebound();
   void _captureCheckpoint(newName, "save-as");   // 新身份的「打开态」= 此刻
   updateSaveStatus(); gallery.refresh();
 }
@@ -600,10 +706,15 @@ export const session = {
   get loadingDoc() { return _loadingDoc; },
   get loadedDocIsNewer() { return _loadedDocIsNewer; },
   get loadedDocNewerConfirmed() { return _loadedDocNewerConfirmed; },
-  get dirty() { return es ? es.isDirty() : false; },            // 内存脏（save-status 徽章用）
+  get dirty() { return _localFile ? _localFile.dirty : (es ? es.isDirty() : false); },   // 内存脏（save-status/beforeunload 用；无地走本地轨）
   get pushPending() { return es ? es.isPushPending() : false; },   // 已落本地但没上云（徽章第四态；与 dirty 正交）
   get saving() { return _pushInFlight; },   // v0.5.9：saveAndPush 在飞（app 层过程态，徽章显转圈云）
-  markEdited() { if (es) es.markDirty(); },                     // app 驱动内容变化（revert 回滚；blender 冗余双标无害）→ 标脏。参考图已迁 wp:sidecarchange（S5）
+  // 无地本地文件模式（spec §7）：只读快照给 UI（save-status 徽章/守卫文案）。
+  get localFile() { return _localFile ? { name: _localFile.fileName, dirty: _localFile.dirty } : null; },
+  openLocalFile, leaveLocalFile,
+  // app 驱动内容变化（revert 回滚；blender 冗余双标无害）→ 标脏。参考图已迁 wp:sidecarchange（S5）。
+  // 无地走本地轨；残影墙期间（_esMuted）es 绝不标脏（防跨写，见无地节注释）。
+  markEdited() { if (_localFile) { _markLocalDirty(); return; } if (es && !_esMuted) es.markDirty(); },
   setName, restore: restoreSession, saveAs,
   save: saveNow, saveAndPush,
   // adopt 的两个意图显式分开（别再合成一个带 flag 的）：import=新身份 / revert=既有身份。
@@ -647,7 +758,12 @@ export function initSession(ctx: AppContext) {
       // ⚠ wp:histchange 在 **window** 上 dispatch（history.ts）——绑 document 收不到 → 打开的文档编辑永不标脏、
       //   保存静默 no-op、编辑丢失（2026-07-12 真机抓到的数据丢失根因；其余监听者都用 window）。
       onChange: (cb: () => void) => {
-        const h = () => { if (!_loadingDoc) cb(); };
+        const h = () => {
+          if (_loadingDoc) return;
+          if (_localFile) { _markLocalDirty(); return; }   // 墙①：无地编辑走本地脏轨，es 永不标脏
+          if (_esMuted) return;                            // 墙②：无地残影——es 身份未重绑前 canvas ≠ es._name，标脏=跨写
+          cb();
+        };
         window.addEventListener("wp:histchange", h);
         window.addEventListener("wp:sidecarchange", h);
       },

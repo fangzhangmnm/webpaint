@@ -29,6 +29,7 @@ export const S = {
   "nav.gallery":    { zh: "图库",              en: "Gallery",         ja: "ギャラリー", tok: "tomo sitelen" },
   // v0.6.14 workbench ☰ 文件页首项专用（user：「图库」两字看不出会关闭当前画；「退出」又太怪 → 回到图库）
   "menu.backToGallery": { zh: "回到图库",      en: "Back to gallery", ja: "ギャラリーに戻る", tok: "o tawa tomo sitelen" },
+  "menu.openLocalFile": { zh: "打开本地文件…", en: "Open local file…", ja: "ローカルファイルを開く…", tok: "o open e lipu lon ilo ni…" },
   "nav.trash":      { zh: "回收站",            en: "Trash",           ja: "ゴミ箱", tok: "poki jaki" },
   "save.tip":       { zh: "保存 / 上传",       en: "Save / Upload",   ja: "保存 / アップロード", tok: "awen / pana tawa poki sewi" },
   "enc.locked":     { zh: "已加密 · 点击解除加密", en: "Encrypted · tap to decrypt", ja: "暗号化済み · タップで解除", tok: "ni li len. sina luka e ni la len li weka." },
@@ -185,6 +186,8 @@ export const S = {
   "save.dirty":      { zh: "保存 + 推送 (Ctrl+S) · {name} · 未保存", en: "Save + push (Ctrl+S) · {name} · unsaved", ja: "保存＋アップロード (Ctrl+S) · {name} · 未保存", tok: "o awen (Ctrl+S) · {name} · awen ala" },
   "save.synced":     { zh: "已同步云端（上次保存时）· 点击检查是否有新版本 · {name}", en: "Synced to cloud (at last save) · tap to check for newer · {name}", ja: "クラウド同期済み（前回保存時）· タップで更新確認 · {name}", tok: "sitelen li lon poki sewi · sina luka la mi alasa e sin · {name}" },
   "save.localOnly":  { zh: "已存本地（IDB 易失，登录云端更安全） · {name}", en: "Saved locally (IDB is volatile; sign in for safety) · {name}", ja: "ローカル保存済み（IDBは揮発性、クラウド推奨） · {name}", tok: "sitelen li awen lon ilo ni taso · poki sewi li awen pona · {name}" },
+  "save.localFileDirty": { zh: "有未保存修改，Ctrl+S 写回 · {name}", en: "Unsaved changes — Ctrl+S writes back · {name}", ja: "未保存の変更あり、Ctrl+Sで書き戻し · {name}", tok: "ante li awen ala. o luka e Ctrl+S · {name}" },
+  "save.localFileSaved": { zh: "已保存到本地文件 · {name}", en: "Saved to local file · {name}", ja: "ローカルファイルに保存済み · {name}", tok: "sitelen li awen lon lipu ilo · {name}" },
   // 终态：存进本地了，但云端那条腿没成（离线/冲突取消/落地未确认）。必须和 synced 长得不一样——
   //   这正是「远端文件不一样而 UI 从没说过」的渲染面。
   "save.unpushed":   { zh: "已存本地，未上云（点击重试推送） · {name}", en: "Saved locally, not uploaded (tap to retry) · {name}", ja: "ローカル保存済み、クラウド未送信（タップで再試行） · {name}", tok: "awen lon ilo ni · pana tawa poki sewi li pakala · sina luka la mi pana sin · {name}" },
@@ -678,7 +681,17 @@ export const S = {
   "upd.dismiss":     { zh: "忽略", en: "Dismiss", ja: "閉じる", tok: "weka" },
 
   // ── 切片 5c：命令式散点 fan-out（session/topbar/blender/gallery-shell/cloud/rack/selection/import 等 8 簇）──
-  "ss.saveCancelled": { zh: "已取消保存", en: "Save cancelled", ja: "保存をキャンセルしました", tok: "awen li weka" }, 
+  "ss.saveCancelled": { zh: "已取消保存", en: "Save cancelled", ja: "保存をキャンセルしました", tok: "awen li weka" },
+  // ── 无地本地文件模式（v0.9.24，spec ai-docs/20260819-clipboard-and-local-file-spec.md §7）──
+  "lf.opened": { zh: "已打开本地文件（不入库、不自动保存，Ctrl+S 写回）· {name}", en: "Opened local file (not in gallery; no autosave — Ctrl+S writes back) · {name}", ja: "ローカルファイルを開きました（ギャラリー外・自動保存なし、Ctrl+Sで書き戻し）· {name}", tok: "lipu lon ilo ni li open. awen wawa li lon ala. o luka e Ctrl+S · {name}" },
+  "lf.saved": { zh: "已保存到 {name}", en: "Saved to {name}", ja: "{name} に保存しました", tok: "sitelen li awen lon {name}" },
+  "lf.saveFailed": { zh: "写回本地文件失败：{error}", en: "Failed to write back to local file: {error}", ja: "ローカルファイルへの書き戻しに失敗：{error}", tok: "awen tawa lipu ilo li pakala: {error}" },
+  "lf.staleTitle": { zh: "文件已被外部修改", en: "File changed outside WebPaint", ja: "ファイルが外部で変更されています", tok: "lipu li ante tan ilo ante" },
+  "lf.staleMsg": { zh: "{name} 在打开后被其他程序改过。继续保存会覆盖那些修改。", en: "{name} was modified by another program after it was opened. Saving will overwrite those changes.", ja: "{name} は開いた後に他のプログラムで変更されました。保存するとその変更を上書きします。", tok: "ilo ante li ante e {name}. awen la ante ona li weka." },
+  "lf.leaveTitle": { zh: "本地文件有未保存修改", en: "Local file has unsaved changes", ja: "ローカルファイルに未保存の変更", tok: "lipu ilo li jo e ante awen ala" },
+  "lf.leaveSave": { zh: "保存并继续", en: "Save and continue", ja: "保存して続行", tok: "o awen. o tawa." },
+  "lf.leaveDiscard": { zh: "丢弃修改", en: "Discard changes", ja: "変更を破棄", tok: "o weka e ante" },
+  "lf.renameNotSupported": { zh: "本地文件模式不支持重命名（可用「另存为」存入图库）", en: "Rename is not supported in local-file mode (use Save As to add it to the gallery)", ja: "ローカルファイルモードでは名前変更できません（「別名で保存」でギャラリーへ）", tok: "nimi sin li ken ala lon nasin lipu ilo. o kepeken「awen sama nimi ante」" }, 
   "ss.saved": { zh: "已保存：{name}", en: "Saved: {name}", ja: "保存しました：{name}", tok: "awen li pini: {name}" }, 
   "ss.saveFailed": { zh: "保存失败：{error}", en: "Save failed: {error}", ja: "保存に失敗しました：{error}", tok: "awen li pakala: {error}" }, 
   "ss.overwriteNewerTitle": { zh: "覆盖更新版本写的画？", en: "Overwrite artwork written by a newer version?", ja: "新しいバージョンで作成された作品を上書きしますか？", tok: "sitelen ni li tan ilo sin. sina wile ala wile awen e ona?" }, 

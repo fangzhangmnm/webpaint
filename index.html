@@ -1256,6 +1256,11 @@
         <button class="menu-item menu-item-with-icon" id="menuGallery" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#gallery"/></svg>
         <span class="menu-item-label" data-i18n="menu.backToGallery">回到图库</span>
       </button>
+        <!-- v0.9.24 无地本地文件（spec 20260819 §7）：FS Access 在场才由 topbar-menu 取消 hidden。
+             明文+有 WebPaint 痕迹的 .ora = 原位编辑（不入库不上传）；加密/外来 ora 自动转导入 -->
+        <button class="menu-item menu-item-with-icon" id="menuOpenLocalFile" type="button" role="menuitem" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#folder-open"/></svg>
+        <span class="menu-item-label" data-i18n="menu.openLocalFile">打开本地文件…</span>
+      </button>
         <!-- v0.6.22（user, high）：未登录导致离线时不用退回图库才能登录——editor 内直接给登录入口。
              未登录+已配置+在线才显示（cloud-auth-ui 派生）；文案复用 gal.menu.signIn -->
         <button class="menu-item menu-item-with-icon hidden" id="menuSignIn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#cloud"/></svg>

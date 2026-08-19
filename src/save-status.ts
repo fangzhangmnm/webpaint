@@ -53,6 +53,16 @@ function computeSaveState() {
   return isSignedIn() ? "synced" : "local-only";
 }
 export function updateSaveStatus() {
+  // v0.9.24 无地本地文件模式（spec §7）：徽章双态 = 脏盘（蓝盘+角点，点=写回文件）/ 灰盘（已保存到文件）。
+  //   dirty 可见是「弃自动保存」设计成立的硬前提之一（没有它就是煤气灯）。
+  const lf = session.localFile;
+  if (lf) {
+    els.topSaveBtn.dataset.state = lf.dirty ? "dirty" : "local-only";
+    els.topSaveBtn.style.opacity = ""; els.topSaveBtn.style.color = "";
+    els.topSaveBtn.innerHTML = ICON_DISK;
+    els.topSaveBtn.title = tLatin(lf.dirty ? "save.localFileDirty" : "save.localFileSaved", { name: lf.name });
+    return;
+  }
   // gallery-first: 没绑 session → 隐藏 save btn（没东西可保存）
   if (!session.name) {
     els.topSaveBtn.dataset.state = "none";

@@ -1,8 +1,15 @@
 import { type DecodedPainting } from "./backend/ora.ts";
 import type { EncryptedBlob } from "./app-store.ts";
+import { type LocalFileHandle } from "./local-file-session.ts";
 import type { AppContext } from "./app-context.ts";
 import type { GalleryItem } from "./gallery/gallery-model.ts";
 type LoadedDoc = DecodedPainting;
+/** 打开本地 .ora：明文 + 有 WebPaint 痕迹 → 原位打开（返回 null）；
+ *  加密容器 / 外来 ora → 不原位，把 File 还给调用方走导入路径（返回 File）。 */
+declare function openLocalFile(handle: LocalFileHandle): Promise<File | null>;
+/** 离开无地模式（回图库/开别的画/新建/导入前必过的门）。脏 → 问保存/丢弃；取消 → false（调用方中止）。
+ *  ⚠ 只清 _localFile，**不清 _esMuted**——残影墙要等 es 重新绑定身份（_esRebound）才解除。 */
+declare function leaveLocalFile(): Promise<boolean>;
 /** 外部导入：装入一个解好的 doc，作为**新身份**。首存 mode:"new"（撞名抛，不静默覆盖）。 */
 declare function adoptAsNew(loaded: LoadedDoc, name: string): void;
 /** revert 回滚：装入一个解好的 doc，身份**不变**（首存 mode:"existing"，就是要写回原文件）。
@@ -24,7 +31,7 @@ declare function decryptCurrent(): Promise<void>;
 declare function renameCurrentSession({ suggested, reason }?: {
     suggested?: string;
     reason?: string;
-}): Promise<string | null>;
+}): Promise<string | null | undefined>;
 declare function exitCanvasToGallery(): Promise<void>;
 declare function newDoc({ name, w, h, layer0Name, fillLayer0 }: {
     name: string;
@@ -54,6 +61,12 @@ export declare const session: {
     readonly dirty: boolean;
     readonly pushPending: boolean;
     readonly saving: boolean;
+    readonly localFile: {
+        name: string;
+        dirty: boolean;
+    } | null;
+    openLocalFile: typeof openLocalFile;
+    leaveLocalFile: typeof leaveLocalFile;
     markEdited(): void;
     setName: typeof setName;
     restore: typeof restoreSession;

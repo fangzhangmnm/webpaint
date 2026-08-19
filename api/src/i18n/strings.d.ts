@@ -96,6 +96,12 @@ export declare const S: {
         readonly ja: "ギャラリーに戻る";
         readonly tok: "o tawa tomo sitelen";
     };
+    readonly "menu.openLocalFile": {
+        readonly zh: "打开本地文件…";
+        readonly en: "Open local file…";
+        readonly ja: "ローカルファイルを開く…";
+        readonly tok: "o open e lipu lon ilo ni…";
+    };
     readonly "nav.trash": {
         readonly zh: "回收站";
         readonly en: "Trash";
@@ -857,6 +863,18 @@ export declare const S: {
         readonly en: "Saved locally (IDB is volatile; sign in for safety) · {name}";
         readonly ja: "ローカル保存済み（IDBは揮発性、クラウド推奨） · {name}";
         readonly tok: "sitelen li awen lon ilo ni taso · poki sewi li awen pona · {name}";
+    };
+    readonly "save.localFileDirty": {
+        readonly zh: "有未保存修改，Ctrl+S 写回 · {name}";
+        readonly en: "Unsaved changes — Ctrl+S writes back · {name}";
+        readonly ja: "未保存の変更あり、Ctrl+Sで書き戻し · {name}";
+        readonly tok: "ante li awen ala. o luka e Ctrl+S · {name}";
+    };
+    readonly "save.localFileSaved": {
+        readonly zh: "已保存到本地文件 · {name}";
+        readonly en: "Saved to local file · {name}";
+        readonly ja: "ローカルファイルに保存済み · {name}";
+        readonly tok: "sitelen li awen lon lipu ilo · {name}";
     };
     readonly "save.unpushed": {
         readonly zh: "已存本地，未上云（点击重试推送） · {name}";
@@ -3599,6 +3617,60 @@ export declare const S: {
         readonly en: "Save cancelled";
         readonly ja: "保存をキャンセルしました";
         readonly tok: "awen li weka";
+    };
+    readonly "lf.opened": {
+        readonly zh: "已打开本地文件（不入库、不自动保存，Ctrl+S 写回）· {name}";
+        readonly en: "Opened local file (not in gallery; no autosave — Ctrl+S writes back) · {name}";
+        readonly ja: "ローカルファイルを開きました（ギャラリー外・自動保存なし、Ctrl+Sで書き戻し）· {name}";
+        readonly tok: "lipu lon ilo ni li open. awen wawa li lon ala. o luka e Ctrl+S · {name}";
+    };
+    readonly "lf.saved": {
+        readonly zh: "已保存到 {name}";
+        readonly en: "Saved to {name}";
+        readonly ja: "{name} に保存しました";
+        readonly tok: "sitelen li awen lon {name}";
+    };
+    readonly "lf.saveFailed": {
+        readonly zh: "写回本地文件失败：{error}";
+        readonly en: "Failed to write back to local file: {error}";
+        readonly ja: "ローカルファイルへの書き戻しに失敗：{error}";
+        readonly tok: "awen tawa lipu ilo li pakala: {error}";
+    };
+    readonly "lf.staleTitle": {
+        readonly zh: "文件已被外部修改";
+        readonly en: "File changed outside WebPaint";
+        readonly ja: "ファイルが外部で変更されています";
+        readonly tok: "lipu li ante tan ilo ante";
+    };
+    readonly "lf.staleMsg": {
+        readonly zh: "{name} 在打开后被其他程序改过。继续保存会覆盖那些修改。";
+        readonly en: "{name} was modified by another program after it was opened. Saving will overwrite those changes.";
+        readonly ja: "{name} は開いた後に他のプログラムで変更されました。保存するとその変更を上書きします。";
+        readonly tok: "ilo ante li ante e {name}. awen la ante ona li weka.";
+    };
+    readonly "lf.leaveTitle": {
+        readonly zh: "本地文件有未保存修改";
+        readonly en: "Local file has unsaved changes";
+        readonly ja: "ローカルファイルに未保存の変更";
+        readonly tok: "lipu ilo li jo e ante awen ala";
+    };
+    readonly "lf.leaveSave": {
+        readonly zh: "保存并继续";
+        readonly en: "Save and continue";
+        readonly ja: "保存して続行";
+        readonly tok: "o awen. o tawa.";
+    };
+    readonly "lf.leaveDiscard": {
+        readonly zh: "丢弃修改";
+        readonly en: "Discard changes";
+        readonly ja: "変更を破棄";
+        readonly tok: "o weka e ante";
+    };
+    readonly "lf.renameNotSupported": {
+        readonly zh: "本地文件模式不支持重命名（可用「另存为」存入图库）";
+        readonly en: "Rename is not supported in local-file mode (use Save As to add it to the gallery)";
+        readonly ja: "ローカルファイルモードでは名前変更できません（「別名で保存」でギャラリーへ）";
+        readonly tok: "nimi sin li ken ala lon nasin lipu ilo. o kepeken「awen sama nimi ante」";
     };
     readonly "ss.saved": {
         readonly zh: "已保存：{name}";

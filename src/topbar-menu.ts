@@ -26,6 +26,8 @@ import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { setMenuOpen } from "./settings-menu.ts";
 import { signIn, isAuthConfigured } from "./app-store.ts";   // auth 是公共面（cloud-auth-ui 同款直连；v415 红线针对的是 sync store，不含 auth）
 import { sessionNameConflict } from "./session-name.ts";
+import { supportsFileSystemAccess, pickLocalOraFile } from "./local-file-session.ts";
+import { reportError } from "./error-badge.ts";
 import { decodeOraToPainting } from "./backend/ora.ts";
 import { t } from "./i18n/index.ts";
 import type { ViewLeaf } from "./backend/workpiece/painting-view.ts";
@@ -110,10 +112,13 @@ export function initTopbarMenu(ctx: AppContext) {
   //    至少有 dialog 那一两秒救了
   window.addEventListener("beforeunload", (e: BeforeUnloadEvent) => {
     if (_signInNav) return;   // v0.6.22：用户主动点了「登录」→ loginRedirect 是有意导航，别拿挽留框挡它
-    if (session.dirty) {
+    if (session.dirty) {   // session.dirty 已含无地本地文件模式的脏（v0.9.24）——同一道挽留门
       e.preventDefault();
       e.returnValue = "";
-      session.save().catch(() => {});   // 偷存本地（不 await 让 dialog 立刻起；saveNow 内部再判脏）
+      // 偷存本地（不 await 让 dialog 立刻起；saveNow 内部再判脏）。implicit：无地模式下降级为 no-op——
+      //   静默写用户磁盘文件违背 Windows 文件语义（Alt+F4=不保存，human 拍板 spec §7.1）；store 模式
+      //   的副作用是 transient 悬着/新版本未确认时偷存也让路（本就不该在关闭瞬间背着用户 commit 变换）。
+      session.save({ implicit: true }).catch(() => {});
     }
   });
 
@@ -175,6 +180,22 @@ export function initTopbarMenu(ctx: AppContext) {
     setMenuOpen(false);
     session.rename();
   });
+  // v0.9.24 无地本地文件（spec ai-docs/20260819-clipboard-and-local-file-spec.md §7）：
+  //   FS Access 在场才显示（Chromium 桌面；标签页即全功能，不依赖 PWA）。打开 = 明文+有痕迹 ora
+  //   原位编辑；加密/外来 ora 交还导入路径（wp:importOraFile 由 import-image 接，走既有解锁/新身份逻辑）。
+  const openLocalBtn = document.getElementById("menuOpenLocalFile") as HTMLButtonElement | null;
+  if (openLocalBtn && supportsFileSystemAccess()) {
+    openLocalBtn.hidden = false;
+    openLocalBtn.addEventListener("click", async () => {
+      setMenuOpen(false);
+      try {
+        const h = await pickLocalOraFile();
+        if (!h) return;   // 用户取消 picker
+        const fallback = await session.openLocalFile(h);
+        if (fallback) window.dispatchEvent(new CustomEvent("wp:importOraFile", { detail: fallback }));
+      } catch (e) { reportError(new Error("[local-file] open failed: " + String(e)), "warning"); }
+    });
+  }
   // v125 (user：「菜单加另存为（画库 + 名字冲突检查）」)
   //   "另存为" = 当前 doc 复制到新名字 session（原 session 保留）。
   //   完成后切到新 session 继续编辑（Photoshop 语义）。同名检查本地 + 云端。
