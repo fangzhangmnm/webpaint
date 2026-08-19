@@ -4,7 +4,7 @@
 //   importImageAsNewDoc()   图库「导入照片 / 剪贴板新建」语义：照片当新 doc 打底（doc 尺寸 = 照片，cap 8192）
 //   importImageAsLayer()    photobash / Ctrl+V 粘贴 / 桌面拖拽：图片叠为当前 doc 的新层（含自动 lift transform）
 // oraFileInput change-handler 按文件类型分流（.ora→session.adopt / image→As{NewDoc|ViewLeaf}）。
-// 大图（> 画布）走 _openBigImportSheet 询问 fit / 保原 / 自定义尺寸。
+// 大图（> 护栏 max(2048, 画布长边)，v0.9.22）走 _openBigImportSheet 询问 适配护栏 / 保原 / 自定义尺寸。
 // 与 app 经 ctx 绑核心单例（doc/board/input/...）；leaf 依赖直接 import（session/resample/ora/els）。
 // 「导入照片(新建)」复用 session.newDoc 骨架（fillLayer0 画照片），不再自建 PaintingView/做 doc 替换。
 
@@ -22,6 +22,7 @@ import { onPasswordVerified } from "./crypto-state.ts";
 import { setTool, updateLassoToolbar } from "./toolbar.ts";
 import { openChoiceSheet } from "./sheets.ts";
 import { setReferenceFromFile } from "./side-windows.ts";
+import { importGuardLimit, needsBigImportSheet } from "./clipboard-policy.ts";
 import { _suppressTransientPanels, _commitTransform, _cancelTransform } from "./transient-panels.ts";
 import type { AppContext } from "./app-context.ts";
 
@@ -81,10 +82,11 @@ export async function importImageAsNewDoc(file: File) {
 }
 
 // 把图片当一个新图层叠进当前 doc（photobash / 参考图工作流）。
-// 居中对齐；如果图片比 doc 大，按比例缩到 80% 短边，避免一上来就盖死。
-// v134 big-import sheet：图片 > 画布 弹询问
-//   resolve { w, h, mode } 或 null（取消）
-function _openBigImportSheet(ow: number, oh: number, docW: number, docH: number): Promise<BigImportChoice | null> {
+// v134 big-import sheet → v0.9.22「大图片导入」窗口（human 拍板，spec 20260819）：
+//   只在图片超**护栏**（max(2048, 画布长边)，undo 内存护栏——重采样在 lift 前才真省内存）时弹；
+//   不超护栏静默原尺寸进。fit 选项 = 适配护栏（fit-to-canvas 作废：photobash 常态是素材比画布大、
+//   摆位后裁溢出，进门先缩到画布 = 后续放大 = 糊）。resolve { w, h, mode } 或 null（取消）。
+function _openBigImportSheet(ow: number, oh: number, docW: number, docH: number, limit: number): Promise<BigImportChoice | null> {
   const backdrop = document.getElementById("bigImportBackdrop") as HTMLElement;
   const sheet = document.getElementById("bigImportSheet") as HTMLElement;
   const wIn = document.getElementById("bigImportW") as HTMLInputElement;
@@ -93,11 +95,11 @@ function _openBigImportSheet(ow: number, oh: number, docW: number, docH: number)
   const info = document.getElementById("bigImportInfo") as HTMLElement;
   const okBtn = document.getElementById("bigImportConfirm") as HTMLElement;
   const cancelBtn = document.getElementById("bigImportCancel") as HTMLElement;
-  // fit-to-canvas（保比例 = 短边贴齐）
-  const scale = Math.min(docW / ow, docH / oh);
+  // fit-to-guard（保比例缩进护栏方框内；调用方保证进来时至少一边超护栏 → scale < 1 恒成立）
+  const scale = Math.min(limit / ow, limit / oh);
   const fitW = Math.round(ow * scale);
   const fitH = Math.round(oh * scale);
-  info.textContent = t("mi.bigImportInfo", { ow, oh, docW, docH });
+  info.textContent = t("mi.bigImportInfo", { ow, oh, docW, docH, limit });
   wIn.value = String(fitW);
   hIn.value = String(fitH);
   // 默认 fit choice
@@ -154,10 +156,11 @@ export async function importImageAsLayer(file: File, opts: { center?: { x: numbe
   const bitmap = await decodeImageFile(file);
   const ow = bitmap.width, oh = bitmap.height;
   const docW = doc.width, docH = doc.height;
-  // v134 (user：「导入超大图片弹 sheet」) bitmap 比 doc 大 → 询问 fit / 保原 / 自定义
+  // v0.9.22（human 拍板，spec 20260819）：阈值从「比画布大」改「超护栏」——不超护栏静默原尺寸进
+  //   （连贴 2k 以下素材零打断），超护栏才弹「大图片导入」窗口问 适配护栏 / 保原 / 自定义。
   let w = ow, h = oh; let imgSmoothing: ImageSmoothingQuality = "high";
-  if (ow > docW || oh > docH) {
-    const choice = await _openBigImportSheet(ow, oh, docW, docH);
+  if (needsBigImportSheet(ow, oh, docW, docH)) {
+    const choice = await _openBigImportSheet(ow, oh, docW, docH, importGuardLimit(docW, docH));
     if (!choice) { (bitmap as ImageBitmap).close?.(); return; }   // user 取消
     w = choice.w; h = choice.h;
     imgSmoothing = choice.mode === "nearest" ? "low" : "high";

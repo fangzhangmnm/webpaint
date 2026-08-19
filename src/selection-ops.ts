@@ -1,10 +1,15 @@
 // 职责（单一）：选区 → 剪贴板 / 复制为浮层 / 提取选区像素。
 //   - _extractSelectionRegionBytes：当前层 ∩ 选区 → 裁好形状的 straight RGBA 字节（纯函数）。
 //   - selectionToNewLayer({move})：选区像素抽成新层（复制 / 移动），含 undo 记账。导出供 toolbar 等模块用。
-//   - v156 剪贴板 / 复制为浮层 快捷键：wp:copy / wp:paste / wp:duplicateFloat 三个 window 事件的逻辑。
+//   - v156 剪贴板 / 复制为浮层 快捷键：wp:copy / wp:paste / wp:duplicateFloat 等 window 事件的逻辑。
 //     入口在 input.ts KEYBOARD_SHORTCUTS（hub）；run 派发 window 事件，逻辑搬到这（要 doc/import/setColor）。
-//     Ctrl+T 直接复用 lassoTransformBtn.click()，不在此。Ctrl+C/V 仅走系统剪贴板，无内部 buffer / token。
-import { readImageFromClipboard, writeImageBlobToClipboard } from "./session.ts";
+//     Ctrl+T 直接复用 lassoTransformBtn.click()，不在此。剪贴板仅走系统剪贴板，无内部 buffer / token。
+//   - v0.9.22 剪贴板正宫化（spec ai-docs/20260819-clipboard-and-local-file-spec.md）：
+//     wp:copyMerged（Ctrl+Shift+C / 双击 Ctrl+C 升级）、wp:cut（Ctrl+X）、原生 paste 事件通道
+//     （粘贴主通道——clipboardData 免权限弹窗、白送 Shift+Insert；wp:paste 的 clipboard.read()
+//     留给按钮入口）。纯策略（双击窗口/护栏）在 clipboard-policy.ts。
+import { readImageFromClipboard, writeImageBlobToClipboard, copyImageToClipboard } from "./session.ts";
+import { isDoubleCopy } from "./clipboard-policy.ts";
 import { encodePngFromBytes } from "./backend/png-codec.ts";
 import { Selection } from "./backend/selection.ts";
 import { disposeViewSnap as disposeLayerSnap, type ViewLeafSnap as LayerSnap } from "./backend/workpiece/painting-view.ts";
@@ -18,8 +23,12 @@ import type { AppContext } from "./app-context.ts";
 // 错误信息提取（catch 子句 e 在 strict 下是 unknown）。
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
 
-// doc 活层的最小结构（只描述本文件用到的读面；像素全走字节口）。
-interface LayerLike { bboxX: number; bboxY: number; bboxW: number; bboxH: number; getImageData(x: number, y: number, w: number, h: number): ImageData; }
+// doc 活层的最小结构（只描述本文件用到的读/写面；像素全走字节口）。
+interface LayerLike {
+  bboxX: number; bboxY: number; bboxW: number; bboxH: number;
+  getImageData(x: number, y: number, w: number, h: number): ImageData;
+  editRegionBytes(x: number, y: number, w: number, h: number, fn: (buf: Uint8ClampedArray) => void): void;
+}
 interface TransientOpts { apply?: () => void; abort?: () => void; }
 
 // app 单例 / 跨模块函数（initSelectionOps 注入）
@@ -29,6 +38,7 @@ let editMode: AppContext["editMode"], history: AppContext["history"], layers: Ap
 let setStatus: AppContext["setStatus"], _afterDocChange: AppContext["afterDocChange"];
 let _commitTransform: AppContext["_commitTransform"], _cancelTransform: AppContext["_cancelTransform"], _suppressTransientPanels: AppContext["_suppressTransientPanels"];
 let importImageAsLayer: AppContext["importImageAsLayer"];
+let isMidOperation: AppContext["isMidOperation"];
 
 // 当前层 ∩ 选区（无交集 → null）→ 裁好选区形状的 straight RGBA 字节（仅剪贴板 PNG 编码用——
 // C3 债 b：编码走 encodePngFromBytes，全程零 canvas、零 premult 往返）。
@@ -96,38 +106,111 @@ export function initSelectionOps(ctx: AppContext) {
   _cancelTransform = ctx._cancelTransform;
   _suppressTransientPanels = ctx._suppressTransientPanels;
   importImageAsLayer = ctx.importImageAsLayer;
+  isMidOperation = ctx.isMidOperation;
 
-  // Ctrl+C：当前层 ∩ 选区（无选区 → 整层）→ 系统剪贴板 PNG
-  window.addEventListener("wp:copy", async () => {
+  // 提取「本次要复制的字节」：当前层 ∩ 选区（无选区 → 整层）。copy 和 cut 共用；失败已报状态行。
+  const grabActiveLayerBytes = (): { layer: LayerLike; px: { data: Uint8ClampedArray; w: number; h: number } } | null => {
     const layer = requireEditableLeaf(doc, setStatus) as LayerLike | null;   // 组 → 标准状态行（组 composite 复制是后话，先拒）
-    if (!layer) return;
+    if (!layer) return null;
     let px: { data: Uint8ClampedArray; w: number; h: number } | null;
     if (doc.selection) {
       px = _extractSelectionRegionBytes(layer, doc.selection as unknown as Selection);
-      if (!px) { setStatus(t("se.selectionOutsideLayer"), true); return; }
+      if (!px) { setStatus(t("se.selectionOutsideLayer"), true); return null; }
     } else {
-      if (layer.bboxW <= 0 || layer.bboxH <= 0) { setStatus(t("se.layerEmpty"), true); return; }
+      if (layer.bboxW <= 0 || layer.bboxH <= 0) { setStatus(t("se.layerEmpty"), true); return null; }
       px = { data: layer.getImageData(layer.bboxX, layer.bboxY, layer.bboxW, layer.bboxH).data, w: layer.bboxW, h: layer.bboxH };
     }
+    return { layer, px };
+  };
+  // lazy promise：blob 生成放进 ClipboardItem，保 Safari user-gesture
+  const writePngBytes = (px: { data: Uint8ClampedArray; w: number; h: number }) =>
+    writeImageBlobToClipboard(encodePngFromBytes(px.data, px.w, px.h).then((png) => new Blob([png as BlobPart], { type: "image/png" })));
+
+  // Ctrl+C：当前层 ∩ 选区（无选区 → 整层）→ 系统剪贴板 PNG。
+  // v0.9.22 双击升级（human 拍板）：短窗内第二次 = 合并复制覆写（第一下已照常入剪贴板，无丢失）。
+  let _lastCopyAt = 0;
+  window.addEventListener("wp:copy", async () => {
+    const now = Date.now();
+    const dbl = isDoubleCopy(_lastCopyAt, now);
+    _lastCopyAt = now;
+    if (dbl) { window.dispatchEvent(new CustomEvent("wp:copyMerged")); return; }
+    const got = grabActiveLayerBytes();
+    if (!got) return;
     try {
-      // lazy promise：blob 生成放进 ClipboardItem，保 Safari user-gesture
-      const { data, w, h } = px;
-      await writeImageBlobToClipboard(encodePngFromBytes(data, w, h).then((png) => new Blob([png as BlobPart], { type: "image/png" })));
+      await writePngBytes(got.px);
       setStatus(doc.selection ? t("se.copiedSelectionToClipboard") : t("se.copiedLayerToClipboard"));
     } catch (e) {
       reportError(new Error(t("se.copyFailed", { error: errMsg(e) })), "warning");   // #34：iPad 剪贴板权限被拒走 banner
     }
   });
-  // Ctrl+V：系统剪贴板图 → 新层，视口居中（复用 importImageAsLayer）
+  // Ctrl+Shift+C / 双击 Ctrl+C：合并复制——合成图 ∩ 选区 mask（无选区 = 整张合成图）。
+  // 零配置直出透明 PNG（不吃导出菜单 defringe/bg 配置——快捷键是反射动作，配置留给导出菜单）。
+  window.addEventListener("wp:copyMerged", async () => {
+    const sel = doc.selection as unknown as Selection | null;
+    const rect = sel ? { x: sel.bboxX, y: sel.bboxY, w: sel.bboxW, h: sel.bboxH } : null;
+    const mask = sel ? sel.materializeMaskRegion(sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH) : null;
+    try {
+      await copyImageToClipboard(doc as unknown as Parameters<typeof copyImageToClipboard>[0], "merged", rect, false, "transparent", mask);
+      setStatus(sel ? t("se.copiedMergedSelectionToClipboard") : t("se.copiedMergedToClipboard"));
+    } catch (e) {
+      reportError(new Error(t("se.copyFailed", { error: errMsg(e) })), "warning");
+    }
+  });
+  // Ctrl+X：剪切 = 复制 + 从活层擦除（选区形状 dst-out；无选区 = 清整层 bbox）。一次 undo。
+  // 复制失败就不擦——剪切绝不许退化成纯删除（数据安全词典序）。
+  window.addEventListener("wp:cut", async () => {
+    const got = grabActiveLayerBytes();
+    if (!got) return;
+    try { await writePngBytes(got.px); }
+    catch (e) { reportError(new Error(t("se.copyFailed", { error: errMsg(e) })), "warning"); return; }
+    const sel = doc.selection as unknown as Selection | null;
+    const layer = got.layer;
+    const r = history.withPoint("cutClip", {}, () => {
+      if (sel) {
+        sel.clearOnLayer(layer as unknown as Parameters<Selection["clearOnLayer"]>[0]);
+      } else {
+        layer.editRegionBytes(layer.bboxX, layer.bboxY, layer.bboxW, layer.bboxH, (buf) => {
+          for (let i = 3; i < buf.length; i += 4) buf[i] = 0;
+        });
+      }
+    });
+    if (!r.ok) { setStatus(errMsg(r.msg), true); return; }
+    board.invalidateAll();
+    setStatus(sel ? t("se.cutSelectionToClipboard") : t("se.cutLayerToClipboard"));
+  });
+  // 粘贴共用落点：blob → 新层，视口居中（复用 importImageAsLayer；新层 + 自动进 transform）
+  const pasteBlobAsLayer = async (blob: Blob) => {
+    const file = new File([blob], "paste.png", { type: blob.type || "image/png" });
+    const r = board.canvas.getBoundingClientRect();
+    const center = board.screenToDoc(r.left + r.width / 2, r.top + r.height / 2);
+    await importImageAsLayer(file, { center });
+  };
+  // 按钮入口（图层面板「导入剪贴板」/ lasso ⋯）：click 不产生原生 paste 事件 → 主动 clipboard.read()
   window.addEventListener("wp:paste", async () => {
     let blob;
     try { blob = await readImageFromClipboard(); }
     catch (e) { reportError(new Error(t("se.clipboardReadFailed", { error: errMsg(e) })), "warning"); return; }   // #34
     if (!blob) { setStatus(t("se.clipboardNoImage"), true); return; }
-    const file = new File([blob], "paste.png", { type: blob.type || "image/png" });
-    const r = board.canvas.getBoundingClientRect();
-    const center = board.screenToDoc(r.left + r.width / 2, r.top + r.height / 2);
-    await importImageAsLayer(file, { center });
+    await pasteBlobAsLayer(blob);
+  });
+  // v0.9.22 粘贴主通道 = 原生 paste 事件（spec：clipboardData 免权限弹窗；覆盖 Ctrl+V/Shift+Insert/
+  // iPad 三指捏合粘贴）。input.ts 的 Ctrl+V 表项改 display-only——keydown preventDefault 会杀掉本事件。
+  window.addEventListener("paste", (e: ClipboardEvent) => {
+    // 真文本输入里让原生粘贴走（同 input.ts _keydown 的豁免口径，v0.5.5）
+    const tgt = e.target as HTMLElement | null;
+    if (tgt) {
+      const tag = tgt.tagName;
+      const type = (tgt as HTMLInputElement).type;
+      if (tag === "TEXTAREA" || (tag === "INPUT" && type !== "range" && type !== "checkbox" && type !== "radio" && type !== "button") || tgt.isContentEditable) return;
+    }
+    if (document.body.dataset.mode === "gallery") return;    // 图库有自己的「从剪切板新建」入口
+    if (isMidOperation()) return;                            // iPad 三指误触护栏：笔画/变换拖动中不收
+    const items = e.clipboardData?.items;
+    let f: File | null = null;
+    if (items) for (const it of items) { if (it.kind === "file" && it.type.startsWith("image/")) { f = it.getAsFile(); if (f) break; } }
+    if (!f) { setStatus(t("se.clipboardNoImage"), true); return; }
+    e.preventDefault();
+    void pasteBlobAsLayer(f).catch((err) => reportError(new Error("[paste] import failed: " + String(err)), "warning"));
   });
   // Ctrl+D：当前选区 → 原位浮层（不挖洞）= 非破坏性 lift + transform
   window.addEventListener("wp:duplicateFloat", () => {

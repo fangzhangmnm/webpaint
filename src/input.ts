@@ -202,12 +202,27 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
     when: _editMode, run: (i) => i.redo() },
   { combo: "Ctrl+Y",           desc: "sc.redo",     category: "sc.cat.edit",
     when: _editMode, run: (i) => i.redo() },
-  // v156 剪贴板：逻辑在 app.js（doc/import/clipboard）→ run 派发 window 事件。
-  //   when=_editMode（不查选区）→ 始终匹配以 preventDefault，挡掉浏览器原生 copy/paste；run 内部再决定。
+  // v156 剪贴板：逻辑在 selection-ops → run 派发 window 事件。
+  //   copy/cut：when=_editMode（不查选区）→ 始终匹配以 preventDefault，挡掉浏览器原生 copy/cut；run 内部再决定。
+  // v0.9.22 剪贴板正宫化（spec ai-docs/20260819-clipboard-and-local-file-spec.md）：
+  //   合并复制 Ctrl+Shift+C（真机验证项：Google Docs 先例预期标签页可拦；翻车则双击 Ctrl+C 独挑）+
+  //   双击 Ctrl+C 升级（selection-ops 判窗）+ Ctrl+X 剪切。
+  { combo: "Ctrl+Shift+C",     desc: "sc.copyMergedClip", category: "sc.cat.edit",
+    when: _editMode, run: () => window.dispatchEvent(new CustomEvent("wp:copyMerged")) },
   { combo: "Ctrl+C",           desc: "sc.copyClip", category: "sc.cat.edit",
     when: _editMode, run: () => window.dispatchEvent(new CustomEvent("wp:copy")) },
+  { combo: "Ctrl+C ×2",        desc: "sc.copyMergedDouble", category: "sc.cat.edit",
+    when: () => false, run: () => {} },   // display-only：双击判定在 wp:copy 处理器里
+  { combo: "Ctrl+X",           desc: "sc.cutClip", category: "sc.cat.edit",
+    when: _editMode, run: () => window.dispatchEvent(new CustomEvent("wp:cut")) },
+  // v0.9.22：Ctrl+V 改走**原生 paste 事件**（selection-ops 监听；clipboardData 免权限弹窗，
+  //   白送 Shift+Insert / iPad 三指粘贴）。表项 display-only——keydown 若 preventDefault 会杀掉
+  //   原生 paste 事件本身，所以这里绝不能匹配。
   { combo: "Ctrl+V",           desc: "sc.pasteLayer",   category: "sc.cat.edit",
-    when: _editMode, run: () => window.dispatchEvent(new CustomEvent("wp:paste")) },
+    when: () => false, run: () => {} },
+  { combo: "Ctrl+E",           desc: "sc.mergeDown", category: "sc.cat.edit",
+    when: (i) => _editMode(i) && !_floating(i),
+    run: () => window.dispatchEvent(new CustomEvent("wp:mergeDown")) },
 
   // 套索 / 选区（在浮层时只 Enter/Esc，其它跳过）
   { combo: "Enter",            desc: "sc.applyTransform", category: "sc.cat.lasso",
@@ -245,6 +260,10 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
     when: (i) => _editMode(i) && !_floating(i),
     run: () => document.getElementById("lassoTransformBtn")?.click() },
   { combo: "Ctrl+J",           desc: "sc.floatCopy", category: "sc.cat.lasso",
+    when: (i) => _editMode(i) && !_floating(i),
+    run: () => window.dispatchEvent(new CustomEvent("wp:duplicateFloat")) },
+  // v0.9.22 Blender 别名（家规：尽量对齐 Blender 快捷键；新键位不用 Alt——user 键盘 Alt 有时不识别）
+  { combo: "Shift+D",          desc: "sc.floatCopy", category: "sc.cat.lasso",
     when: (i) => _editMode(i) && !_floating(i),
     run: () => window.dispatchEvent(new CustomEvent("wp:duplicateFloat")) },
 

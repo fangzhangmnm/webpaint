@@ -93,7 +93,10 @@ export async function thumbBlobFromBytes(merged: { data: Uint8ClampedArray; w: n
 // candidate 2：导出格式（png/jpg exporter）只负责把 doc 渲成 image blob；
 // 去向（分享/下载/剪贴板）是正交的 sink，见 shareOrDownloadBlob。故此函数公开。
 // #16（v0.5）：cropRect = 「仅导出选区范围」（选区 bbox，doc 坐标）；null/undefined = 全文档（旧行为）。
-export async function renderDocToImageBlob(doc: PaintingView, mime = "image/png", quality?: number, scope = "merged", cropRect?: { x: number; y: number; w: number; h: number } | null, defringe = false, bg = "transparent") {
+// v0.9.22 合并复制（spec ai-docs/20260819-clipboard-and-local-file-spec.md）：selMask = 选区形状
+//   gray8 mask（长度 = cropRect.w*h，0..255）——裁剪后逐像素 alpha×mask/255，mask 外透明
+//   （与 Ctrl+C 层复制的 alpha×mask 同口径，不是光裁 bbox）。仅 PNG 路径有意义（JPG flatten 无 alpha）。
+export async function renderDocToImageBlob(doc: PaintingView, mime = "image/png", quality?: number, scope = "merged", cropRect?: { x: number; y: number; w: number; h: number } | null, defringe = false, bg = "transparent", selMask?: Uint8Array | null) {
   // S9：合成走 GL（doc-render，与 display 同源，含 clip + 组隔离）。C3（债 d）：全字节管线——
   //   合成字节 → 裁剪/铺底全在字节上做；canvas 只剩 JPEG 编码边界（提案 §4 壳域合法名单）。
   //   scope==="active"：仅当前节点（组照常整树合成）；剥掉节点**自身**的 clippingMask（基底不在导出里，
@@ -115,6 +118,11 @@ export async function renderDocToImageBlob(doc: PaintingView, mime = "image/png"
       cut.set(plane.data.subarray(si, si + (x1 - x0) * 4), di);
     }
     plane = { data: cut, w: cw, h: ch };
+  }
+  // 选区形状 mask（见函数头注释）：在底色/defringe 之前落——mask 外先透明，再谈铺底。
+  if (selMask && selMask.length === plane.w * plane.h) {
+    const d = plane.data;
+    for (let i = 0; i < plane.w * plane.h; i++) d[i * 4 + 3] = Math.round(d[i * 4 + 3] * selMask[i] / 255);
   }
   // v0.9.14 导出底色（user 拍板：视图级，PNG 默认透明、JPG 默认白；与画板底色/UI 主题三分立不同步）。
   const bgRgb = parseExportBg(bg);
@@ -186,11 +194,11 @@ export async function shareOrDownloadBlob(blob: Blob, filename: string, mime?: s
 // ---- 剪贴板 IO ----
 
 /** 把 doc 合成图复制到剪贴板（PNG）。iPad Safari / 桌面都支持。 */
-export async function copyImageToClipboard(doc: PaintingView, scope = "merged", cropRect?: { x: number; y: number; w: number; h: number } | null, defringe = false, bg = "transparent") {
+export async function copyImageToClipboard(doc: PaintingView, scope = "merged", cropRect?: { x: number; y: number; w: number; h: number } | null, defringe = false, bg = "transparent", selMask?: Uint8Array | null) {
   // iOS Safari 要求 clipboard.write 在 user gesture 内"同步"触达；**不能**先 await blob 再 write
   // （那个 await 跨过 gesture 窗口 → NotAllowedError）。把 renderDocToImageBlob 的 Promise<Blob>
   // 直接交给 ClipboardItem（lazy promise 写法），复用 writeImageBlobToClipboard 同款路径。
-  const blobPromise = renderDocToImageBlob(doc, "image/png", undefined, scope, cropRect, defringe, bg)
+  const blobPromise = renderDocToImageBlob(doc, "image/png", undefined, scope, cropRect, defringe, bg, selMask)
     .then((blob) => { if (!blob) throw new Error("PNG generation failed"); return blob; });
   await writeImageBlobToClipboard(blobPromise);
 }

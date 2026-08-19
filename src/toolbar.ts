@@ -1131,6 +1131,12 @@ export function initToolbar(ctx: AppContext) {
     },
     // v0.7.38 送选区进填色（ADR-0004 修订 5 的 one-shot 携入；needs-sel 禁用兜底）
     toFill: () => { sendSelectionToFill(); closeSelEditUI(); },
+    // v0.9.22 剪贴板正宫化（spec 20260819）：⋯ 菜单露出——逻辑全在 selection-ops（window 事件）。
+    // 都不带 needs-sel：无选区时 copy/cut=整层、copyMerged=整张合成图、paste 恒可用。
+    copy: () => { window.dispatchEvent(new CustomEvent("wp:copy")); closeSelEditUI(); },
+    cut: () => { window.dispatchEvent(new CustomEvent("wp:cut")); closeSelEditUI(); },
+    copyMerged: () => { window.dispatchEvent(new CustomEvent("wp:copyMerged")); closeSelEditUI(); },
+    paste: () => { window.dispatchEvent(new CustomEvent("wp:paste")); closeSelEditUI(); },
   };
   for (const id of ["lassoSelEditMenu", "fillSelEditMenu"]) {
     document.getElementById(id)?.addEventListener("click", (e: Event) => {
@@ -1143,6 +1149,8 @@ export function initToolbar(ctx: AppContext) {
   //   老惯例（input.ts），hidden 态 .click() 仍触发 → 显隐不影响快捷键
   byId("lassoRow1SelectAllBtn").addEventListener("click", () => SEL_ACTIONS.selectAll());
   byId("lassoRow1InvertBtn").addEventListener("click", () => SEL_ACTIONS.invert());
+  // v0.9.22 合并复制 Row1 常驻钮（human 拍板：合并复制加按钮；兼作 Ctrl+Shift+C 被浏览器吞时的兜底）
+  byId("lassoCopyMergedBtn").addEventListener("click", () => SEL_ACTIONS.copyMerged());
 
   // 反选：在 docW×docH 上 mask 取反
 

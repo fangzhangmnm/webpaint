@@ -812,6 +812,9 @@ export function initLayersPanel(ctx: AppContext) {
   }, true);
 
   window.addEventListener("wp:toggleLayers", () => toggleLayersPanel());
+  // v0.9.22 Ctrl+E（input.ts 派 wp:mergeDown，spec 20260819）：向下合并当前层——
+  // 复用面板同款语义（mode-aware 合并；active 空层 = 当删；失败原因走 _MERGE_DOWN_STATUS 状态行）。
+  window.addEventListener("wp:mergeDown", () => _mergeDownLayer((doc.activeLayer ?? null) as LayerNode | null));
 
   els.layersBtn.addEventListener("click", () => toggleLayersPanel());
   els.layersPanelClose.addEventListener("click", () => toggleLayersPanel(false));

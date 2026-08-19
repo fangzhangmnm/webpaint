@@ -425,9 +425,9 @@ export declare const S: {
         readonly tok: "o open lukin";
     };
     readonly "tl.pause": {
-        readonly zh: "暂停";
-        readonly en: "Pause";
-        readonly ja: "一時停止";
+        readonly zh: "停止";
+        readonly en: "Stop";
+        readonly ja: "停止";
     };
     readonly "tl.resume": {
         readonly zh: "继续录制";
@@ -465,9 +465,9 @@ export declare const S: {
         readonly ja: "録画中";
     };
     readonly "tl.state.paused": {
-        readonly zh: "已暂停";
-        readonly en: "Paused";
-        readonly ja: "一時停止中";
+        readonly zh: "已停止";
+        readonly en: "Stopped";
+        readonly ja: "停止中";
     };
     readonly "tl.state.off": {
         readonly zh: "未录制";
@@ -2322,6 +2322,30 @@ export declare const S: {
         readonly ja: "クリップボードにコピー";
         readonly tok: "pana tawa poki kipisi";
     };
+    readonly "sc.copyMergedClip": {
+        readonly zh: "合并复制（合成图）";
+        readonly en: "Copy merged (composite)";
+        readonly ja: "結合コピー（合成画像）";
+        readonly tok: "pana e sitelen wan tawa poki kipisi";
+    };
+    readonly "sc.copyMergedDouble": {
+        readonly zh: "连按两次 = 合并复制";
+        readonly en: "Press twice = copy merged";
+        readonly ja: "2回押し＝結合コピー";
+        readonly tok: "luka tu la sitelen wan li tawa poki kipisi";
+    };
+    readonly "sc.cutClip": {
+        readonly zh: "剪切到剪贴板";
+        readonly en: "Cut to clipboard";
+        readonly ja: "クリップボードに切り取り";
+        readonly tok: "kipisi tawa poki kipisi";
+    };
+    readonly "sc.mergeDown": {
+        readonly zh: "向下合并图层";
+        readonly en: "Merge layer down";
+        readonly ja: "下のレイヤーと結合";
+        readonly tok: "wan e lipu anpa";
+    };
     readonly "sc.pasteLayer": {
         readonly zh: "粘贴为新层";
         readonly en: "Paste as new layer";
@@ -3180,6 +3204,30 @@ export declare const S: {
         readonly ja: "選択範囲を新規レイヤーに複製";
         readonly tok: "o pali e sama pi ma wile lon lipu sin";
     };
+    readonly "la.copyClip": {
+        readonly zh: "复制到剪贴板";
+        readonly en: "Copy to clipboard";
+        readonly ja: "クリップボードにコピー";
+        readonly tok: "pana tawa poki kipisi";
+    };
+    readonly "la.cutClip": {
+        readonly zh: "剪切到剪贴板";
+        readonly en: "Cut to clipboard";
+        readonly ja: "クリップボードに切り取り";
+        readonly tok: "kipisi tawa poki kipisi";
+    };
+    readonly "la.copyMerged": {
+        readonly zh: "合并复制（合成图）";
+        readonly en: "Copy merged (composite)";
+        readonly ja: "結合コピー（合成画像）";
+        readonly tok: "pana e sitelen wan tawa poki kipisi";
+    };
+    readonly "la.pasteClip": {
+        readonly zh: "粘贴为新层";
+        readonly en: "Paste as new layer";
+        readonly ja: "新規レイヤーとして貼り付け";
+        readonly tok: "kama jo tawa lipu sin";
+    };
     readonly "la.moveToLayer": {
         readonly zh: "选区移动到新层";
         readonly en: "Move selection to new layer";
@@ -3379,16 +3427,16 @@ export declare const S: {
         readonly tok: "kiwen (sitelen leko)";
     };
     readonly "ri.title": {
-        readonly zh: "图片比画布大";
-        readonly en: "Image larger than canvas";
-        readonly ja: "画像がキャンバスより大きい";
-        readonly tok: "sitelen li suli. supa li lili.";
+        readonly zh: "大图片导入";
+        readonly en: "Import large image";
+        readonly ja: "大きな画像の読み込み";
+        readonly tok: "sitelen suli li kama";
     };
     readonly "ri.fit": {
-        readonly zh: "缩到画布（默认）";
-        readonly en: "Fit to canvas (default)";
-        readonly ja: "キャンバスに合わせる（既定）";
-        readonly tok: "o lili tawa supa (nasin open)";
+        readonly zh: "适配护栏尺寸（默认）";
+        readonly en: "Fit within guard size (default)";
+        readonly ja: "ガードサイズに収める（既定）";
+        readonly tok: "o lili tawa selo awen (nasin open)";
     };
     readonly "ri.keep": {
         readonly zh: "保持原尺寸（layer 超出画布，可后调）";
@@ -5082,6 +5130,30 @@ export declare const S: {
         readonly ja: "現在のレイヤーをクリップボードにコピーしました";
         readonly tok: "lipu ni li tawa poki kipisi";
     };
+    readonly "se.copiedMergedToClipboard": {
+        readonly zh: "已复制合成图到剪贴板";
+        readonly en: "Copied merged image to clipboard";
+        readonly ja: "合成画像をクリップボードにコピーしました";
+        readonly tok: "sitelen wan li tawa poki kipisi";
+    };
+    readonly "se.copiedMergedSelectionToClipboard": {
+        readonly zh: "已复制选区合成图到剪贴板";
+        readonly en: "Copied merged selection to clipboard";
+        readonly ja: "選択範囲の合成画像をクリップボードにコピーしました";
+        readonly tok: "sitelen wan pi ma wile li tawa poki kipisi";
+    };
+    readonly "se.cutSelectionToClipboard": {
+        readonly zh: "已剪切选区到剪贴板";
+        readonly en: "Cut selection to clipboard";
+        readonly ja: "選択範囲をクリップボードに切り取りました";
+        readonly tok: "ma wile li kipisi tawa poki kipisi";
+    };
+    readonly "se.cutLayerToClipboard": {
+        readonly zh: "已剪切当前图层到剪贴板";
+        readonly en: "Cut current layer to clipboard";
+        readonly ja: "現在のレイヤーをクリップボードに切り取りました";
+        readonly tok: "lipu ni li kipisi tawa poki kipisi";
+    };
     readonly "se.copyFailed": {
         readonly zh: "复制失败：{error}";
         readonly en: "Copy failed: {error}";
@@ -5305,10 +5377,10 @@ export declare const S: {
         readonly tok: "sin tan sitelen: {name} ({w}×{h})";
     };
     readonly "mi.bigImportInfo": {
-        readonly zh: "图片 {ow}×{oh} · 画布 {docW}×{docH}";
-        readonly en: "Image {ow}×{oh} · Canvas {docW}×{docH}";
-        readonly ja: "画像 {ow}×{oh} · キャンバス {docW}×{docH}";
-        readonly tok: "sitelen {ow}×{oh} · supa {docW}×{docH}";
+        readonly zh: "图片 {ow}×{oh} · 画布 {docW}×{docH} · 护栏 {limit}px";
+        readonly en: "Image {ow}×{oh} · Canvas {docW}×{docH} · Guard {limit}px";
+        readonly ja: "画像 {ow}×{oh} · キャンバス {docW}×{docH} · ガード {limit}px";
+        readonly tok: "sitelen {ow}×{oh} · supa {docW}×{docH} · selo awen {limit}px";
     };
     readonly "mi.layerLimitImport": {
         readonly zh: "图层已达上限 ({max})，无法导入";
