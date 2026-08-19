@@ -134,29 +134,29 @@ function _renderPanel(): void {
   body.appendChild(st);
 
   const noFootage = s.bytes === 0 && s.pendingFrames === 0;
-  const row = _div("tl-actions");
-  row.appendChild(_btn(s.on ? t("tl.pause") : t("tl.resume"), s.on ? "" : "tl-primary", () => {
+  // 一排 svg 图标钮（user 2026-08-19：全图标化）。pause/play/replay 现为烤字 stopgap，真图入库自动换。
+  const row = _div("tl-actions tl-icon-row");
+  row.appendChild(_iconBtn(s.on ? "pause" : "play", s.on ? t("tl.pause") : t("tl.resume"), s.on ? "" : "tl-primary", () => {
     if (timelapseStatus().on) timelapsePause(); else timelapseResume();
   }));
-  const replayBtn = _btn(t("tl.preview"), "", () => { void _replayFullscreen(); });
-  const exportBtn = _btn(t("tl.export"), "", () => { void _exportFresh(); });
+  const replayBtn = _iconBtn("replay", t("tl.preview"), "", () => { void _replayFullscreen(); });
+  const exportBtn = _iconBtn("export", t("tl.export"), "", () => { void _exportFresh(); });
   replayBtn.disabled = exportBtn.disabled = noFootage;
   row.appendChild(replayBtn);
   row.appendChild(exportBtn);
-  const more = _btn("⋯", "tl-more", () => { _moreOpen = !_moreOpen; _renderPanel(); });
+  const more = _iconBtn("more", t("tl.title"), "tl-more", () => { _moreOpen = !_moreOpen; _renderPanel(); });
   more.setAttribute("aria-expanded", String(_moreOpen));
   row.appendChild(more);
   body.appendChild(row);
 
   if (_moreOpen) {
-    const overflow = _div("tl-actions");
-    overflow.appendChild(_btn(t("tl.clear"), "tl-danger", async () => {
+    // ⋯ 溢出：按菜单项规范（图标+文案；danger 红），不再是裸大按钮（user：清除太大）。
+    body.appendChild(_menuItem("trash-can", t("tl.clear"), "danger", async () => {
       const ok = await openConfirmSheet(t("tl.clearConfirmTitle"), t("tl.clearConfirmMsg"));
       if (!ok) return;
       timelapseClear();   // 不可 undo（非绘画操作）；下次保存时 ora 内 entry 随之消失
       _moreOpen = false;
     }));
-    body.appendChild(overflow);
   }
 }
 
@@ -219,6 +219,35 @@ function _note(text: string): HTMLDivElement { const d = _div("tl-note"); d.text
 function _btn(label: string, extraCls: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement("button");
   b.type = "button"; b.className = `tl-btn${extraCls ? " " + extraCls : ""}`; b.textContent = label;
+  b.addEventListener("click", onClick);
+  return b;
+}
+function _svgUse(icon: string): SVGSVGElement {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24"); svg.setAttribute("aria-hidden", "true");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", `#${icon}`);
+  svg.appendChild(use);
+  return svg;
+}
+/** 一排里的纯图标钮：图标承载语义，文案进 title/aria-label（tooltip 即提示）。 */
+function _iconBtn(icon: string, label: string, extraCls: string, onClick: () => void): HTMLButtonElement {
+  const b = document.createElement("button");
+  b.type = "button"; b.className = `tl-btn tl-icon-btn${extraCls ? " " + extraCls : ""}`;
+  b.title = label; b.setAttribute("aria-label", label);
+  b.appendChild(_svgUse(icon));
+  b.addEventListener("click", onClick);
+  return b;
+}
+/** 菜单项规范的行（图标+文案；复用全局 .menu-item 视觉）。 */
+function _menuItem(icon: string, label: string, extraCls: string, onClick: () => void): HTMLButtonElement {
+  const b = document.createElement("button");
+  b.type = "button"; b.className = `menu-item menu-item-with-icon tl-menu-item${extraCls ? " " + extraCls : ""}`;
+  b.setAttribute("role", "menuitem");
+  b.appendChild(_svgUse(icon));
+  const span = document.createElement("span");
+  span.className = "menu-item-label"; span.textContent = label;
+  b.appendChild(span);
   b.addEventListener("click", onClick);
   return b;
 }

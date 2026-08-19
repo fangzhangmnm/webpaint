@@ -2708,3 +2708,10 @@ body[data-mode="gallery"] .board { display: none !important; }
   display: flex; align-items: center; justify-content: center;
 }
 .tl-preview-close svg { width: 20px; height: 20px; }
+
+/* timelapse 控制排 svg 图标化（user 2026-08-19） */
+.tl-icon-row { flex-wrap: nowrap; }
+.tl-icon-btn { display: flex; align-items: center; justify-content: center; padding: 8px 0; }
+.tl-icon-btn svg { width: 20px; height: 20px; }
+.tl-menu-item.danger { color: #c0392b; }
+.tl-menu-item.danger:hover { background: color-mix(in srgb, #c0392b 12%, transparent); }
