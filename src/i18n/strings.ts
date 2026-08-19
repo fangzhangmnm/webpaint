@@ -170,6 +170,7 @@ export const S = {
   "lp.lockAlphaTip": { zh: "锁定不透明度：笔只改已有像素的颜色", en: "Lock alpha: brush only recolors existing pixels", ja: "不透明度をロック：既存ピクセルの色のみ変更", tok: "ilo sitelen li ken kule e ma sitelen taso. ma ante li awen kon." }, 
   "fm.commit":       { zh: "填充并清除选区", en: "Fill and clear selection", ja: "塗りつぶして選択解除", tok: "o kule e ma wile o weka e ona" },
   "fm.commitFailed": { zh: "填充提交失败", en: "Fill commit failed", ja: "塗りつぶしの確定に失敗しました", tok: "pali kule li pakala" },
+  "fm.exitNoFill":   { zh: "未填充（图层不可编辑），选区已清除", en: "Not filled (layer not editable) — selection cleared", ja: "塗りつぶし未実行（レイヤーは編集不可）。選択を解除しました", tok: "kule ala (lipu li ken ala ante) — ma wile li weka" },
   "lp.refTip":       { zh: "参考层：魔棒 / 填充读这一层", en: "Reference layer: magic wand / fill read this layer", ja: "参照レイヤー：自動選択 / 塗りつぶしがこの層を参照", tok: "lipu lukin: ilo pi ma sama en ilo pi kule ma li lukin e lipu ni" }, 
   "lp.layerMenu":    { zh: "图层菜单", en: "Layer menu",   ja: "レイヤーメニュー", tok: "nasin lipu" }, 
   "lp.rename":       { zh: "重命名…",  en: "Rename…",      ja: "名前を変更…", tok: "ante nimi…" }, 

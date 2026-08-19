@@ -85,12 +85,12 @@ export function commitFillNow(): void {
 // 像素 commit（+可选清选区）一个 compound 整点（= 一个令牌一步，ADR-0004 出入口语义不动）。
 //   v2（T2）：before 快照/ops.pixels 微步退役——commitFill 的 tile 换手由 LayerTiles collector
 //   写时扣押；compound 中途失败 = token.cancel 倒序回滚（像素/选区一体无痕）。
-function _doCommit(clearSelection: boolean): void {
+function _doCommit(clearSelection: boolean): boolean {
   _flushColorEntry(true);   // pending 换色先落栈——undo 顺序 = 先撤 fill 像素再撤换色
   const { doc, board, input, history, wp2, setStatus } = _ctx!;
   const fillColor = _fillColor();
   const layer = requireEditableLeaf(doc, setStatus) as ViewLeaf | null;
-  if (!layer || !doc.selection) return;
+  if (!layer || !doc.selection) return false;
   const st = history.withPoint("fill", {}, () => {
     const ok = board.commitFill({ color: fillColor, layer });
     if (!ok) throw new Error("GL fill merge not committed (no selection / pool exhausted)");
@@ -106,12 +106,13 @@ function _doCommit(clearSelection: boolean): void {
     reportError(new Error("[fill] commit failed: " + (st.msg || "?")), "warning");
     setStatus(t("fm.commitFailed"), true);
     board.invalidateAll();
-    return;
+    return false;   // ✓ 路径：选区保留可重试；切出路径：调用方负责清（不许泄漏进下个工具）
   }
   // 留在 fill（✓ 连续填下一块）：seed 用刚落地的色重新起步（导航态）——色窗/下一块不丢色。
   if (_ctx!.editMode.current() === "fill") wp2.pendingFill.begin(fillColor);
   board.invalidateAll();
   setStatus(t("se.filled", { color: fillColor }));
+  return true;
 }
 
 // fill 边界钩子。只认「持久模式 → 持久模式」的真切换；transient 括号（扩张 modal 等）不算。
@@ -141,11 +142,19 @@ function _onModeChange(): void {
   // 真切出 fill（v0.6.24 含回 lasso，无特例）：**先 commit 后清场**（v0.8.29 修——曾先
   //   pendingFill.clear() 再 _doCommit，_fillColor 落回笔刷色：预览是绿、落地成红）。
   //   预览确实挂着才 commit + 清选区（组/隐藏层本就没显示 → 静默跳过，但选区也要清——不互通）。
-  if (doc.selection && requireEditableLeaf(doc, null)) _doCommit(true);
-  else if (doc.selection) {
-    const { input, history, wp2 } = _ctx!;
+  if (doc.selection && requireEditableLeaf(doc, null)) {
+    if (!_doCommit(true) && doc.selection) {
+      // commit 失败（token 已回滚，选区还活着）：「切走 = 清」不变量对失败分支也成立——
+      // 否则幽灵选区泄漏进下个工具，下一笔被静默裁剪（v0.9.11 修；错误已由 _doCommit 上报）。
+      const { input, history, wp2 } = _ctx!;
+      const entry = input.lasso.setSelection(null);
+      if (entry) history.withPoint("selection", {}, () => wp2.selection.commitPreApplied(entry.before ?? null));
+    }
+  } else if (doc.selection) {
+    const { input, history, wp2, setStatus } = _ctx!;
     const entry = input.lasso.setSelection(null);
     if (entry) history.withPoint("selection", {}, () => wp2.selection.commitPreApplied(entry.before ?? null));
+    setStatus(t("fm.exitNoFill"), true);   // 组/隐藏层：预览本就没显示，但选区被清了要说一声（v0.9.11）
   }
   // pending 色退场：commit 分支里 clearRecorded 已清（切出路径不 re-seed），这里兜未 commit
   // 的残余（导航态）；残余防抖作废——预览已不在，记了也是幽灵步。
@@ -195,4 +204,20 @@ export function initFillMode(ctx: AppContext): void {
     ctx.board.requestRender();
   });
   window.addEventListener("wp:modechange", _onModeChange);
+  // fill 里 tap 出选区但活动层不可填（组/隐藏）：蚂蚁线和 ✓ 照常出现而预览隐形（provider 静默
+  // null）——曾经零提示直到按 ✓ 才报。选区一变就用标准 el.* 文案报状态行（v0.9.11）。
+  window.addEventListener("wp:lassochange", () => {
+    if (!_ctx || !fillPreviewActive()) return;
+    requireEditableLeaf(_ctx.doc, _ctx.setStatus);
+  });
+  // 载图/新建时 fill 工具还挂着（工具不随 doc 切换重置）：旧 doc 的 pending seed 已无意义，
+  // 用新 doc 的笔刷色重起步（导航态不记账）；防抖残余作废（v0.9.11——旧行为是 restore 的
+  // setColor 被 target 劫持写进 pending，seed 陈旧 + 存档色蒸发，色板三方不一致）。
+  window.addEventListener("wp:applyEditorState", () => {
+    if (!_ctx || _ctx.editMode.current() !== "fill") return;
+    _colorBase = null; clearTimeout(_colorTimer);
+    _ctx.wp2.pendingFill.begin(_ctx.state.color);
+    refreshColorDisplay();
+    _ctx.board.requestRender();
+  });
 }

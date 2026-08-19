@@ -2,7 +2,7 @@
 // 像素正确性不在这里——gl-smoke fillParity（golden/commit≡live/lockAlpha/导出不漏）。
 import { test, eq } from "./runner.mjs";
 import { initFillMode, fillPreviewActive, commitFillNow, sendSelectionToFill } from "../src/fill-mode.ts";
-import { currentPanelColor, setColor } from "../src/color-panel.ts";
+import { currentPanelColor, setColor, setBrushColor } from "../src/color-panel.ts";
 
 // 最小 fake ctx：fill-mode 只碰这些面。editMode 状态机用字段模拟 + 手动派 wp:modechange。
 function makeCtx() {
@@ -219,4 +219,47 @@ test("[fill-mode] v0.8.24 色板 target = fill 全程：无选区改色跟到 se
   eq(currentPanelColor(), "#00ff00", "色窗显示与预览一致");
   setMode(ctx, "brush");                   // 真切出：commit + pendingFill 清场
   eq(ctx.wp2.pendingFill.view(), null, "出 fill pendingFill 清场（色板回笔刷色）");
+});
+
+test("[fill-mode] v0.9.11 载图时 fill 挂着：setBrushColor 绕 target + applyEditorState 重 seed", () => {
+  const { ctx } = makeCtx();
+  initFillMode(ctx);
+  setMode(ctx, "brush");
+  setMode(ctx, "fill");
+  setColor("#00ff00");                       // fill 里换色 → 改 seed（target 语义）
+  eq(ctx.wp2.pendingFill.view().color, "#00ff00", "seed 已换");
+  setBrushColor("#123456");                  // restore 路径（载图/新建/重置）：显式写笔刷，不经 target
+  eq(ctx.wp2.pendingFill.view().color, "#00ff00", "setBrushColor 不碰 pendingFill（劫持修复锚——旧行为存档色被吞进 pending）");
+  ctx.state.color = "#123456";               // 模拟反应式跟进（真实链路 desk.brushTool.color → state.color）
+  window.dispatchEvent(new CustomEvent("wp:applyEditorState"));
+  eq(ctx.wp2.pendingFill.view().color, "#123456", "载图后 pending 用新 doc 笔刷色重 seed（旧 doc seed 作废）");
+  setMode(ctx, "brush");                     // 非 fill 工具下载图 = no-op
+  window.dispatchEvent(new CustomEvent("wp:applyEditorState"));
+  eq(ctx.wp2.pendingFill.view(), null, "非 fill 工具下 applyEditorState 不起 pending");
+});
+
+test("[fill-mode] v0.9.11 commit 失败切出：选区不泄漏进下个工具（切走=清 对失败分支也成立）", () => {
+  const { ctx } = makeCtx();
+  initFillMode(ctx);
+  setMode(ctx, "fill");
+  ctx.doc.selection = {};
+  ctx.board.commitFill = () => false;        // GL 失败（池到顶/context lost）→ token 回滚
+  setMode(ctx, "brush");
+  eq(ctx.doc.selection, null, "失败后选区也被清——否则幽灵选区静默裁剪下一笔");
+});
+
+test("[fill-mode] v0.9.11 不可填层的静默失败补反馈：tap 报状态行 + 切出清选区报 fm.exitNoFill", () => {
+  const { ctx } = makeCtx();
+  const msgs = [];
+  ctx.setStatus = (m) => msgs.push(String(m));
+  ctx.doc.activeEditableLeaf = () => ({ leaf: null, reason: "group" });   // 活动层 = 图层组
+  initFillMode(ctx);
+  setMode(ctx, "fill");
+  ctx.doc.selection = {};                    // tap 出了选区（蚂蚁线/✓ 都会出现，预览隐形）
+  window.dispatchEvent(new CustomEvent("wp:lassochange"));
+  eq(msgs.length >= 1, true, "tap 即报（曾静默到按 ✓ 才知道）");
+  const before = msgs.length;
+  setMode(ctx, "brush");                     // 切出：没得 commit，选区被清——要说一声
+  eq(ctx.doc.selection, null, "选区已清（不互通语义不变）");
+  eq(msgs.length > before, true, "清选区有提示（fm.exitNoFill）");
 });
