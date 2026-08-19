@@ -27,7 +27,7 @@
           if (!bar) {
             bar = document.createElement("div");
             bar.id = "__errBar";
-            bar.style.cssText = "position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 12px);z-index:9999;width:calc(100% - 24px);max-width:640px;box-sizing:border-box;padding:10px 14px;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.35);background:#c0392b;color:#fff;font:13px/1.4 system-ui;white-space:pre-wrap;word-break:break-word;max-height:50vh;overflow:auto";
+            bar.style.cssText = "position:fixed;left:50%;transform:translateX(-50%);bottom:max(env(safe-area-inset-bottom,0px), 12px);z-index:9999;width:calc(100% - 24px);max-width:640px;box-sizing:border-box;padding:10px 14px;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.35);background:#c0392b;color:#fff;font:13px/1.4 system-ui;white-space:pre-wrap;word-break:break-word;max-height:50vh;overflow:auto";
             bar.addEventListener("click", function () { bar.remove(); });
             (document.body || document.documentElement).appendChild(bar);
           }

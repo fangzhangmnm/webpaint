@@ -16,7 +16,7 @@ const BANNER_COLOR: Record<"error" | "warning", string> = {
 // v0.9.4 底部浮卡（原顶部通栏会压 iPad 无框顶栏）：居中限宽、让开 home indicator、不贴边所以右下 HUD
 //   （版本水印/状态——排错时要看的）仍可见。改这里要同步 index.html 内联 bootstrap 那份早期兜底。
 const BANNER_CSS =
-  "position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 12px);" +
+  "position:fixed;left:50%;transform:translateX(-50%);bottom:max(env(safe-area-inset-bottom,0px), 12px);" +
   "z-index:9999;width:calc(100% - 24px);max-width:640px;box-sizing:border-box;padding:10px 14px;" +
   "border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.35);color:#fff;" +
   "font:13px/1.4 system-ui;white-space:pre-wrap;word-break:break-word;max-height:50vh;overflow:auto;cursor:pointer";
