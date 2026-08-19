@@ -26,6 +26,8 @@ export declare class TimelapseDocState {
     lastMp4: Uint8Array | null;
     /** 回读出过什么问题（报 info 级 badge 用；null=健康）。 */
     restoreIssue: TimelapseRestoreIssue | null;
+    /** motion 里已经进过 lastMp4 的前缀长度（「待保存帧数」= motion.length - 这个；冻结保存不动它）。 */
+    savedMotionCount: number;
     /** 开录：pin 取景框。已有录像时不准换设置（要换=先 clear，UI 负责引导）。 */
     startRecording(s: TimelapseSettings): void;
     pause(): void;

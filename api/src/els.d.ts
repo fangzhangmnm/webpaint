@@ -93,6 +93,7 @@ export declare const els: {
     menuTimelapseState: HTMLElement;
     tlRecChip: HTMLButtonElement;
     tlPanel: HTMLElement;
+    tlPanelHead: HTMLElement;
     tlPanelBody: HTMLElement;
     tlPanelClose: HTMLButtonElement;
     menuSaveAs: HTMLElement;

@@ -111,6 +111,7 @@ export const els = {
   menuTimelapseState: byId("menuTimelapseState"),
   tlRecChip: byId<HTMLButtonElement>("tlRecChip"),
   tlPanel: byId("tlPanel"),
+  tlPanelHead: byId("tlPanelHead"),
   tlPanelBody: byId("tlPanelBody"),
   tlPanelClose: byId<HTMLButtonElement>("tlPanelClose"),
   menuSaveAs: byId("menuSaveAs"),

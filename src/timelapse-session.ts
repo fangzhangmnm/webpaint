@@ -141,7 +141,7 @@ export interface TimelapseStatus {
   on: boolean;
   settings: TimelapseSettings | null;
   bytes: number;                  // 上次落盘录像大小（裸字节；显示层再 KiB/MiB）
-  pendingFrames: number;          // 未落盘的运动帧数（提示「保存后生效」用）
+  pendingFrames: number;          // 还没进 lastMp4 的帧数 = 未 mux 的 motion + 编码器管线里的（回放/导出前先保存的依据）
   restoreIssue: string | null;
 }
 
@@ -152,7 +152,7 @@ export function timelapseStatus(): TimelapseStatus {
     on: _st.on,
     settings: _st.settings ? { ..._st.settings } : null,
     bytes: _st.byteSize,
-    pendingFrames: _st.motion.length,
+    pendingFrames: (_st.motion.length - _st.savedMotionCount) + (_mEnc?.pendingCount ?? 0),
     restoreIssue: _st.restoreIssue,
   };
 }

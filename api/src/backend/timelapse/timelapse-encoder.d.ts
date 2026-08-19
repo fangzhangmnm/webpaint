@@ -45,6 +45,8 @@ export declare class TimelapseMotionEncoder {
     constructor(width: number, height: number, bitrate: number, forcedKeyInterval: number);
     /** frame = VideoFrame（shell 构造并负责 close）。forceKey：断片重开/冷启动。 */
     encode(frame: unknown, forceKey?: boolean): void;
+    /** 已编好、还没被 drain 走的样本数（UI「待保存」计数用）。 */
+    get pendingCount(): number;
     /** flush 并取走积攒的样本（保存前调；返回后 pending 清空）。 */
     drain(): Promise<TimelapseSample[]>;
     close(): void;

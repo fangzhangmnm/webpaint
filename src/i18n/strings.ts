@@ -112,7 +112,6 @@ export const S = {
                           en: "Video encoding (WebCodecs) is not supported on this device",
                           ja: "このデバイスは動画エンコード（WebCodecs）非対応です" },
   "tl.probing":         { zh: "正在检测设备编码能力…", en: "Checking encoder support…", ja: "エンコーダー対応を確認中…" },
-  "tl.saveToExport":    { zh: "保存画作后即可预览/导出", en: "Save the artwork to preview/export", ja: "保存するとプレビュー／書き出しできます" },
   "tl.restoreLost":     { zh: "过程录像数据损坏，已重置（画作不受影响）",
                           en: "Timelapse footage was corrupted and has been reset (artwork unaffected)",
                           ja: "タイムラプスのデータが破損していたためリセットしました（作品は無事です）" },

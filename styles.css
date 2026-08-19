@@ -2688,3 +2688,23 @@ body[data-mode="gallery"] .board { display: none !important; }
 .tl-statusline { font-size: 12px; color: var(--ink-soft); display: flex; align-items: center; gap: 6px; }
 .tl-note { font-size: 11px; color: var(--ink-soft); opacity: 0.8; }
 .tl-video { width: 100%; border-radius: 8px; border: 1px solid var(--line); background: #000; }
+
+/* timelapse 二轮返工（user 2026-08-19）：一行控制 + 全屏回放 overlay */
+.tl-btn.tl-more { flex: 0 0 auto; min-width: 40px; }
+.tl-preview-overlay {
+  position: fixed; inset: 0; z-index: 9000;
+  background: rgba(0, 0, 0, 0.88);
+  display: flex; align-items: center; justify-content: center;
+}
+.tl-preview-overlay.hidden { display: none; }
+.tl-preview-video {
+  max-width: min(96vw, 100%); max-height: 92vh;
+  background: #000; border-radius: 6px;
+}
+.tl-preview-close {
+  position: absolute; top: max(env(safe-area-inset-top, 0px), 12px); right: max(env(safe-area-inset-right, 0px), 12px);
+  width: 40px; height: 40px; border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.3); background: rgba(0,0,0,0.5); color: #fff; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.tl-preview-close svg { width: 20px; height: 20px; }

@@ -99,6 +99,9 @@ export class TimelapseMotionEncoder {
     try { this.enc.encode(frame, { keyFrame: key }); } catch (e) { this.dead = e; }
   }
 
+  /** 已编好、还没被 drain 走的样本数（UI「待保存」计数用）。 */
+  get pendingCount(): number { return this.pending.length; }
+
   /** flush 并取走积攒的样本（保存前调；返回后 pending 清空）。 */
   async drain(): Promise<TimelapseSample[]> {
     if (!this.dead) { try { await this.enc.flush(); } catch (e) { this.dead = e; } }

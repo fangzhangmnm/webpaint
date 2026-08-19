@@ -35,6 +35,8 @@ export class TimelapseDocState {
   lastMp4: Uint8Array | null = null;
   /** 回读出过什么问题（报 info 级 badge 用；null=健康）。 */
   restoreIssue: TimelapseRestoreIssue | null = null;
+  /** motion 里已经进过 lastMp4 的前缀长度（「待保存帧数」= motion.length - 这个；冻结保存不动它）。 */
+  savedMotionCount = 0;
 
   /** 开录：pin 取景框。已有录像时不准换设置（要换=先 clear，UI 负责引导）。 */
   startRecording(s: TimelapseSettings): void {
@@ -54,6 +56,7 @@ export class TimelapseDocState {
   clear(): void {
     this.settings = null; this.on = false; this.sampler = null;
     this.motion = []; this.avcC = null; this.lastMp4 = null; this.restoreIssue = null;
+    this.savedMotionCount = 0;
   }
 
   /** 录制中收到一个有可见变化的 commit：返回要不要采这帧。 */
@@ -83,6 +86,7 @@ export class TimelapseDocState {
     if (this.on && tail && this.avcC) {
       mp4 = muxTimelapse(this.motion, tail, this.avcC, frameW, frameH);
       this.lastMp4 = mp4;
+      this.savedMotionCount = this.motion.length;
     }
     if (!mp4) {
       // 开了录但一帧都没编出来（如编码器还没吐出首帧就保存）：只落 json 记住开关与设置。
@@ -134,6 +138,7 @@ export class TimelapseDocState {
       st.motion = d.samples.slice(0, j.motionSamples);   // 截掉尾帧（每次保存重新现编）
       st.avcC = d.avcC;
       st.lastMp4 = mp4Bytes;
+      st.savedMotionCount = st.motion.length;   // 回读来的都已在盘上
     } catch (e) {
       const fresh = new TimelapseDocState();
       fresh.restoreIssue = e instanceof Error && e.message === "sample-count" ? "sample-count-mismatch" : "corrupt-mp4";

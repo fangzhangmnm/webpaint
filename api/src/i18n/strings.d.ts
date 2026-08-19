@@ -494,11 +494,6 @@ export declare const S: {
         readonly en: "Checking encoder support…";
         readonly ja: "エンコーダー対応を確認中…";
     };
-    readonly "tl.saveToExport": {
-        readonly zh: "保存画作后即可预览/导出";
-        readonly en: "Save the artwork to preview/export";
-        readonly ja: "保存するとプレビュー／書き出しできます";
-    };
     readonly "tl.restoreLost": {
         readonly zh: "过程录像数据损坏，已重置（画作不受影响）";
         readonly en: "Timelapse footage was corrupted and has been reset (artwork unaffected)";

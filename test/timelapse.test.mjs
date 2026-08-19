@@ -182,6 +182,20 @@ describe("timelapse · 录制态", () => {
     eq(st.serializeForSave(null, 512, 512), null);
   });
 
+  it("待保存计数：mux 归零、再推帧回涨、冻结保存不动、restore 归零（回放先保存的依据）", () => {
+    const st = mkState();
+    eq(st.motion.length - st.savedMotionCount, 2, "未保存=2");
+    const out = st.serializeForSave({ bytes: nalu(9), key: true }, 512, 512);
+    eq(st.motion.length - st.savedMotionCount, 0, "mux 后归零");
+    st.pushMotionSample({ bytes: nalu(3), key: false });
+    eq(st.motion.length - st.savedMotionCount, 1, "新帧回涨");
+    st.pause();
+    st.serializeForSave({ bytes: nalu(8), key: true }, 512, 512);   // 冻结 passthrough
+    eq(st.motion.length - st.savedMotionCount, 1, "冻结保存不吞未保存帧");
+    const back = TimelapseDocState.restore(out.json, out.mp4);
+    eq(back.motion.length - back.savedMotionCount, 0, "回读来的都已在盘上");
+  });
+
   it("自愈：烂 json / mp4 缺失 / 烂 mp4 → 空态 + issue 标记，绝不 throw", () => {
     eq(TimelapseDocState.restore("{oops", null).restoreIssue, "corrupt-json");
     const st = mkState();
