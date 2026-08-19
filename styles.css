@@ -1677,9 +1677,11 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
 }
 
 /* v110 颜色调整面板 (float)；adjust-panel + foot
-   宽度 380px（280→380，2026-08-19 user QoL）：滑条列是 1fr，面板加宽 = 全部 adjust 滑条
-   track 变长 → 拖动精度高。positionPopup 按 offsetWidth 动态 clamp，窄屏不溢出。 */
-.adjust-panel {
+   宽度 380px（2026-08-19 user QoL）：滑条列是 1fr，面板加宽 = 全部 adjust 滑条
+   track 变长 → 拖动精度高。positionPopup 按 offsetWidth 动态 clamp，窄屏不溢出。
+   选择器带 .float-panel 是特异度需要：通用 .float-panel { width:264px } 在本规则之后，
+   单靠 .adjust-panel 会被盖掉（v0.9.7 就这么哑火的——面板从来不是 280 而是 264）。 */
+.float-panel.adjust-panel {
   position: fixed;
   z-index: var(--z-window);
   width: min(380px, calc(100vw - 32px));
@@ -1690,10 +1692,18 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   display: flex; flex-direction: column;
 }
 .adjust-panel.hidden { display: none; }
+/* 排版紧凑（2026-08-19 user）：标签列 100→76px（zh 滑条标签最长 5 字、ja 6 字@12px 都放得下，
+   长说明文案走 section title 整行不受限）+ 行字号 13→12（对齐 v0.5.23「浮窗字号与图层面板一致」）
+   + gap 8→6 —— 省下的全喂给 1fr 的 track。 */
+.adjust-panel .brush-slider-row {
+  grid-template-columns: 76px 1fr 30px;
+  gap: 6px;
+  font-size: 12px;
+}
 .adjust-panel-foot {
   display: flex; gap: 8px; justify-content: flex-end;
-  margin-top: 10px;
-  padding-top: 10px;
+  margin-top: 4px;
+  padding-top: 6px;
   border-top: 1px solid var(--line);
 }
 .adjust-panel-foot > button {
@@ -1710,7 +1720,7 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
 /* v131 filter 面板：section title / curves canvas / curves tabs */
 .adjust-section-title {
   font-size: 11px; color: var(--ink-muted, #888);
-  margin: 8px 0 4px;
+  margin: 6px 0 2px;
   padding-bottom: 2px;
   border-bottom: 1px solid var(--line);
   letter-spacing: 0.5px;
