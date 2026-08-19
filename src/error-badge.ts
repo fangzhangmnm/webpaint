@@ -1,7 +1,7 @@
 // 统一 error report（universal error banner）——全 app + store 的错误唯一汇拢点。
 //   职责：把一条错误按 severity 分流到正确的 UI 面，并作为**最终消费者** console.log（层层上报只有这里 log）。
-//   - "error"   → 顶层红条 banner（#__errBar，z-9999，盖过 gallery overlay/busy/gate/modal）+ console.error
-//   - "warning" → 顶层琥珀条 banner + console.warn
+//   - "error"   → 底部红色浮卡 banner（#__errBar，z-9999，盖过 gallery overlay/busy/gate/modal）+ console.error
+//   - "warning" → 底部琥珀浮卡 banner + console.warn
 //   - "info"    → 状态栏（setStatus，瞬态）
 //   - "log"     → 只 console.log（良性 offline/fallback：funnel 但不打扰用户）
 //   banner 复用 index.html 内联 bootstrap 落下的 #__errBar 那一档（那份内联 = bundle 加载前的早期兜底；
@@ -13,8 +13,12 @@ const BANNER_COLOR: Record<"error" | "warning", string> = {
   error: "#c0392b",
   warning: "#b7791f",
 };
+// v0.9.4 底部浮卡（原顶部通栏会压 iPad 无框顶栏）：居中限宽、让开 home indicator、不贴边所以右下 HUD
+//   （版本水印/状态——排错时要看的）仍可见。改这里要同步 index.html 内联 bootstrap 那份早期兜底。
 const BANNER_CSS =
-  "position:fixed;left:0;right:0;top:0;z-index:9999;padding:8px 12px;color:#fff;" +
+  "position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 12px);" +
+  "z-index:9999;width:calc(100% - 24px);max-width:640px;box-sizing:border-box;padding:10px 14px;" +
+  "border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.35);color:#fff;" +
   "font:13px/1.4 system-ui;white-space:pre-wrap;word-break:break-word;max-height:50vh;overflow:auto;cursor:pointer";
 
 let statusSink: ((text: string, persist?: boolean) => void) | null = null;

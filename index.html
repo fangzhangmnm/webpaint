@@ -19,14 +19,15 @@
           }
         } catch (_) {}
       })();
-      // iPad 没 devtools — 任何脚本错误顶上糊一条红条，方便远程诊断
+      // iPad 没 devtools — 任何脚本错误糊一张底部红色浮卡，方便远程诊断
+      //   （v0.9.4 从顶部通栏挪到底部浮卡，别压无框顶栏；样式和 src/error-badge.ts BANNER_CSS 保持同步）
       (function () {
         function show(text) {
           var bar = document.getElementById("__errBar");
           if (!bar) {
             bar = document.createElement("div");
             bar.id = "__errBar";
-            bar.style.cssText = "position:fixed;left:0;right:0;top:0;z-index:9999;padding:8px 12px;background:#c0392b;color:#fff;font:13px/1.4 system-ui;white-space:pre-wrap;word-break:break-word;max-height:50vh;overflow:auto";
+            bar.style.cssText = "position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 12px);z-index:9999;width:calc(100% - 24px);max-width:640px;box-sizing:border-box;padding:10px 14px;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.35);background:#c0392b;color:#fff;font:13px/1.4 system-ui;white-space:pre-wrap;word-break:break-word;max-height:50vh;overflow:auto";
             bar.addEventListener("click", function () { bar.remove(); });
             (document.body || document.documentElement).appendChild(bar);
           }
