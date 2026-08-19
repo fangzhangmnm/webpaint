@@ -12,13 +12,15 @@ import {
   TimelapseMotionEncoder, encodeTailFrame, timelapseProbeSupport,
 } from "./backend/timelapse/timelapse-encoder.ts";
 import type { DecodedPainting } from "./backend/ora.ts";
-import { renderNodesToBytes } from "./backend/doc-render.ts";
+import { muxTimelapse } from "./backend/timelapse/timelapse-mux.ts";
 import { reportError } from "./error-badge.ts";
 import { t } from "./i18n/index.ts";
 
 interface DocViewLike { layers: readonly unknown[]; width: number; height: number }
+type RenderBytesFn = (nodes: readonly unknown[], w: number, h: number) => { data: Uint8ClampedArray; w: number; h: number } | null;
 
 let _doc: DocViewLike | null = null;
+let _renderDisplay: RenderBytesFn = () => null;
 let _st = new TimelapseDocState();
 let _mEnc: TimelapseMotionEncoder | null = null;
 let _needKey = true;          // 冷启动 / 断片重开 / 文档切换 → 下一帧 IDR
@@ -31,9 +33,11 @@ function _notifyUi(): void {
   if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("wp:timelapse-changed"));
 }
 
-/** boot 接线：doc 视图 + commit 钩子。probe 异步跑，结果前录制项灰。 */
-export function initTimelapse(doc: DocViewLike): void {
+/** boot 接线：doc 视图 + 显示等价合成面（含 fill 预览/调整替身的 WYSIWYG——「录的是画画步骤看到的样子」，
+ *  user 2026-08-19；save/export 的干净合成面不受影响）+ commit 钩子。probe 异步跑，结果前录制项灰。 */
+export function initTimelapse(doc: DocViewLike, renderDisplay: RenderBytesFn): void {
   _doc = doc;
+  _renderDisplay = renderDisplay;
   window.addEventListener("wp:histchange", () => { _onCommit(); });
   void timelapseProbeSupport(512, 512).then((ok) => {
     _supported = ok;
@@ -75,7 +79,7 @@ async function _captureFrame(): Promise<void> {
   _captureBusy = true;
   try {
     const doc = _doc!; const s = _st.settings!;
-    const merged = renderNodesToBytes(doc.layers, doc.width, doc.height);
+    const merged = _renderDisplay(doc.layers, doc.width, doc.height);
     if (!merged) return;                     // GL lost：静默跳帧，画画优先
     const { w, h } = timelapseFrameDims(s);
     const rgba = composeTimelapseFrame(merged.data, merged.w, merged.h, w, h);
@@ -182,3 +186,36 @@ export function timelapseClear(): void {
 
 /** 导出/预览用：上次落盘的完整 mp4（含尾帧定格；null=还没落过盘）。 */
 export function timelapseMp4(): Uint8Array | null { return _st.lastMp4; }
+
+/**
+ * 回放/导出的**新鲜快照**：drain 编码器 → 现编尾帧 → 内存里临时 mux（muxTimelapse 是纯函数，
+ * 不需要落盘就能出可播字节）。**不写 lastMp4/savedMotionCount/ora——保存节律零改动**
+ * （v0.9.17 曾在回放前静默 session.save()，user 否决：save 是 user consent 的事，2026-08-19）。
+ * 暂停态 = 冻结语义 → 直接给上次落盘字节；任何失败也回落 lastMp4。
+ */
+export async function timelapseSnapshotMp4(): Promise<Uint8Array | null> {
+  if (!_st.settings) return null;
+  if (!_st.on) return _st.lastMp4;
+  try {
+    if (_mEnc) {
+      const drained = await _mEnc.drain();
+      for (const smp of drained) _st.pushMotionSample(smp, _mEnc.avcC);
+      if (_mEnc.dead) _dropEncoder("motion encoder died at snapshot drain");
+    }
+    if (!_st.avcC || !_doc) return _st.lastMp4;
+    const s = _st.settings;
+    const { w, h } = timelapseFrameDims(s);
+    const merged = _renderDisplay(_doc.layers, _doc.width, _doc.height);
+    if (!merged) return _st.lastMp4;
+    const rgba = composeTimelapseFrame(merged.data, merged.w, merged.h, w, h);
+    const frame = new VideoFrame(rgba.buffer as ArrayBuffer, { format: "RGBA", codedWidth: w, codedHeight: h, timestamp: 0 });
+    let tail;
+    try { tail = (await encodeTailFrame(frame, w, h, timelapseTier(s.longEdge).tailBps)).sample; }
+    finally { frame.close(); }
+    _notifyUi();   // pendingFrames（drain 挪进 motion 后口径不变，但体积/状态可能想刷）
+    return muxTimelapse(_st.motion, tail, _st.avcC, w, h);
+  } catch (e) {
+    reportError("[timelapse] snapshot mux failed; falling back to last saved footage: " + String(e), "log");
+    return _st.lastMp4;
+  }
+}

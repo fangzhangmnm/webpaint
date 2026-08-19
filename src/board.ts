@@ -864,6 +864,14 @@ export class Board {
     return this._glBoard.compositeToBytes(nodes as unknown as Parameters<GLBoard["compositeToBytes"]>[0], docW, docH);
   }
 
+  // timelapse 采帧专用（v0.9.18，user：「录的应该是画画步骤看到的样子」）：一次性合成 + 调整替身 +
+  //   fill 预览 overlay——与吸管 pickColor 同款 WYSIWYG 待遇。**save/export 仍走上面的干净面**，预览不漏进落盘物。
+  compositeDisplayBytes(nodes: readonly unknown[], docW: number, docH: number): { data: Uint8ClampedArray; w: number; h: number } | null {
+    if (!this._glBoard) return null;
+    return this._glBoard.compositeToBytes(nodes as unknown as Parameters<GLBoard["compositeToBytes"]>[0], docW, docH,
+      this._glSurrogate(), this._glFillOverlay());
+  }
+
   // 吸管 composite 取色（S8c，spec:243-244）：GL 一次性合成（compositeOnce，不建缓存）+ 1px readback。
   //   走 GPU 的动机：合成组是没有 CPU tile 的（spec:244），CPU 全量 compositeLayers 缓存随之退役。
   //   GL 失败态返 null（v351 起无 WebGL2 = 无画布）。底与显示同源（棋盘/背景色）。

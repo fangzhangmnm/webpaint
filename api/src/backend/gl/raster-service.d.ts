@@ -28,7 +28,7 @@ export declare class RasterService {
         dstY: number;
     } | null;
     compositeOnce(nodes: DocNode[], docW: number, docH: number, bg?: Background, surrogate?: SurrogateInput | null, overlay?: OverlayInput | null): PooledFBO;
-    compositeToBytes(nodes: DocNode[], docW: number, docH: number): {
+    compositeToBytes(nodes: DocNode[], docW: number, docH: number, surrogate?: SurrogateInput | null, overlay?: OverlayInput | null): {
         data: Uint8ClampedArray;
         w: number;
         h: number;

@@ -1,8 +1,8 @@
 // Timelapse UI（spec=ai-docs/20260819-timelapse-spec.md §3；user 2026-08-19 二轮返工）：
 //   菜单「过程录像…」入口 + 面板（可拖）。未开录=设置面（比例 chips / 最长边 + ≈体积参考）；
 //   已开录=**一行控制**：[暂停|继续] [回放] [导出] [⋯→清除]（user：清除太显眼，藏进 ⋯）。
-//   回放 = 画布全屏 overlay；回放/导出前**先 session.save() 落盘**——录像字节只在保存时 mux，
-//   不先存就会看到旧版本（v0.9.16 真机反馈「resume 之后没录上」的根因：预览的是上次保存的 mp4）。
+//   回放 = 画布全屏 overlay；回放/导出 = timelapseSnapshotMp4 内存临时 mux（新鲜且零落盘——
+//   v0.9.17 曾静默 session.save()，user 否决：save 节律不许被回放劫持）。
 // 体积显示 = 单位双层制的 UX 层：1024 进位 + MiB 标签（GB 以下永远 MiB、<0.1MiB 兜底；spec §4）。
 import { els } from "./els.ts";
 import { t } from "./i18n/index.ts";
@@ -10,9 +10,8 @@ import { setMenuOpen } from "./settings-menu.ts";
 import { openConfirmSheet } from "./sheets.ts";
 import { triggerDownload } from "./session.ts";
 import { reportError } from "./error-badge.ts";
-import { session } from "./session-state.ts";
 import {
-  timelapseStatus, timelapseStart, timelapsePause, timelapseResume, timelapseClear, timelapseMp4,
+  timelapseStatus, timelapseStart, timelapsePause, timelapseResume, timelapseClear, timelapseSnapshotMp4,
 } from "./timelapse-session.ts";
 import { TIMELAPSE_ASPECTS, TIMELAPSE_LONG_EDGES, TIMELAPSE_DEFAULT_SETTINGS, timelapseTier } from "./backend/timelapse/timelapse-core.ts";
 
@@ -161,10 +160,10 @@ function _renderPanel(): void {
   }
 }
 
-/** 拿**新鲜**的 mp4：录像字节只在保存时 mux → 先落盘再取（脏门在 save 内部，干净时≈no-op）。 */
+/** 拿**新鲜**的 mp4：内存临时 mux（纯函数零落盘）——绝不静默 save（save 是 user consent 的事，
+ *  user 2026-08-19 否决了 v0.9.17 的回放前自动落盘）。 */
 async function _freshMp4(): Promise<Uint8Array | null> {
-  try { await session.save(); } catch (e) { reportError(e, "warning"); }
-  return timelapseMp4();
+  return await timelapseSnapshotMp4();
 }
 
 async function _exportFresh(): Promise<void> {

@@ -351,7 +351,7 @@ initTransientPanels(ctx);
 initSideWindows(ctx);
 initPlatformGuards(ctx);
 // timelapse（宣发轮 2026-08-19）：commit 钩子=wp:histchange；per-doc 串扰墙在 session-state adopt 两端。
-initTimelapse(doc);
+initTimelapse(doc, (nodes, w, h) => board.compositeDisplayBytes(nodes, w, h));   // 采帧=WYSIWYG（含 fill 预览/调整替身）
 initTimelapseUi(() => session.name || t("nd.untitled"));
 
 // 笔架异步 boot（fire-and-forget；ctx 已建好）。

@@ -135,8 +135,11 @@ export class RasterService {
 
   // S9 字节合成面（v0.6.39 去 canvas 化）：compositeOnce → 整幅 readPixels 直接返回 straight 字节
   //   （merge-down / collapse / stamp-all 等「字节进出」op 用——硬原则：字节进出不走 canvas）。
-  compositeToBytes(nodes: DocNode[], docW: number, docH: number): { data: Uint8ClampedArray; w: number; h: number } {
-    const fbo = this.compositeOnce(nodes, docW, docH);
+  //   surrogate/overlay（v0.9.18 timelapse 采帧 WYSIWYG）：与 pickColor 同款待遇——调整替身/fill 预览
+  //   显示什么就合成什么。**save/export 路径不传**（预览不漏进落盘物，原语义零变化）。
+  compositeToBytes(nodes: DocNode[], docW: number, docH: number,
+                   surrogate: SurrogateInput | null = null, overlay: OverlayInput | null = null): { data: Uint8ClampedArray; w: number; h: number } {
+    const fbo = this.compositeOnce(nodes, docW, docH, undefined, surrogate, overlay);
     const px = this._room.glctx.readPixels(fbo, 0, 0, docW, docH);
     this._room.glctx.returnFBO(fbo);
     return { data: new Uint8ClampedArray(px.buffer), w: docW, h: docH };

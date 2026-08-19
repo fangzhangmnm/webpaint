@@ -41,7 +41,7 @@ export declare class GLBoard {
         ty: number;
     }[]): boolean;
     rasterizeStampsToBytes(stamps: Parameters<RasterService["rasterizeStampsToBytes"]>[0], shape: Parameters<RasterService["rasterizeStampsToBytes"]>[1], bx: number, by: number, bw: number, bh: number): Uint8ClampedArray | null;
-    compositeToBytes(nodes: DocNode[], docW: number, docH: number): {
+    compositeToBytes(nodes: DocNode[], docW: number, docH: number, surrogate?: SurrogateInput | null, overlay?: OverlayInput | null): {
         data: Uint8ClampedArray;
         w: number;
         h: number;

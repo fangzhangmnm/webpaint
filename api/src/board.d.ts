@@ -277,6 +277,11 @@ export declare class Board {
         w: number;
         h: number;
     } | null;
+    compositeDisplayBytes(nodes: readonly unknown[], docW: number, docH: number): {
+        data: Uint8ClampedArray;
+        w: number;
+        h: number;
+    } | null;
     pickCompositeColor(ix: number, iy: number): [number, number, number, number] | null;
     _drawLassoOverlay(ctx: Ctx2D, scale: number): void;
     _syncGrid(): void;

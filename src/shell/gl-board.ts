@@ -68,9 +68,11 @@ export class GLBoard {
 
   // 字节合成面（v0.6.39）：merge-down/collapse/导出等字节 op 用；GL lost → null。
   //   （C1：canvas 包装面 compositeToCanvas 撤出 src/gl——屏显域 canvas 归壳，board.ts 自包字节。）
-  compositeToBytes(nodes: DocNode[], docW: number, docH: number): { data: Uint8ClampedArray; w: number; h: number } | null {
+  //   surrogate/overlay（v0.9.18 timelapse 采帧 WYSIWYG，同 pickColor 待遇）：save/export 不传，语义不变。
+  compositeToBytes(nodes: DocNode[], docW: number, docH: number,
+                   surrogate: SurrogateInput | null = null, overlay: OverlayInput | null = null): { data: Uint8ClampedArray; w: number; h: number } | null {
     if (this._glctx.isLost) return null;
-    return this._raster.compositeToBytes(nodes, docW, docH);
+    return this._raster.compositeToBytes(nodes, docW, docH, surrogate, overlay);
   }
 
   // S8 吸管：一次性合成（compositeOnce，不建缓存）+ 1px readback。bg 语义同 render 的 docBg。
