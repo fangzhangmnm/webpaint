@@ -70,15 +70,13 @@ function _wireDrag(): void {
   });
 }
 
-// ---- HUD 红点 chip（安全护栏：录制中全局常驻可见；暂停=灰点不呼吸）----
+// ---- HUD 红点 chip（安全护栏：**正在录才显示**）----
+// user 2026-08-19 拍板：没有「暂停态」——stop 就是没在录（无红点无 chip），只是录像留着可 resume。
 function _renderChip(): void {
   const s = timelapseStatus();
-  const show = s.exists;   // 开过录就常驻（含暂停态——用户得知道这张画身上有录像）
+  const show = s.exists && s.on;
   els.tlRecChip.classList.toggle("hidden", !show);
-  els.tlRecChip.classList.toggle("tl-paused", show && !s.on);
-  // 文案随状态走（user：中文有宽度写全「录制中」；暂停时写「录制中」=谎报，动态换「已暂停」）。
-  // 不挂 data-i18n：换语言=reload（i18n 架构约定），boot 重渲即正确。
-  els.tlRecLabel.textContent = s.on ? t("tl.rec") : t("tl.state.paused");
+  els.tlRecLabel.textContent = t("tl.rec");   // 「录制中」写全（中文有宽度）；不挂 data-i18n（换语言=reload）
 }
 
 function _renderMenuState(): void {

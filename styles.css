@@ -2662,7 +2662,6 @@ body[data-mode="gallery"] .board { display: none !important; }
   background: #e5484d;
   animation: tl-breathe 2s ease-in-out infinite;
 }
-.tl-rec-chip.tl-paused .tl-rec-dot { background: var(--ink-soft); animation: none; }
 @keyframes tl-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .tl-rec-dot { animation: none; } }
 
