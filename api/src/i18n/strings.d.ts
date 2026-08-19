@@ -403,9 +403,9 @@ export declare const S: {
         readonly tok: "sitelen tawa";
     };
     readonly "tl.rec": {
-        readonly zh: "录";
+        readonly zh: "录制中";
         readonly en: "REC";
-        readonly ja: "録画";
+        readonly ja: "録画中";
         readonly tok: "lukin";
     };
     readonly "tl.aspect": {
