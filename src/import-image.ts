@@ -9,6 +9,7 @@
 // 「导入照片(新建)」复用 session.newDoc 骨架（像素经 layer0Pixels 走 wp2.load 正门，v0.9.33），不再自建 PaintingView/做 doc 替换。
 
 import { els } from "./els.ts";
+import { withBusy } from "./fullscreen-busy.ts";
 import { reportError } from "./error-badge.ts";
 import { t } from "./i18n/index.ts";
 import { session } from "./session-state.ts";
@@ -60,19 +61,25 @@ export function _openImagePicker() {
 // 「导入照片」语义：用照片新建一个 doc（doc 尺寸 = 照片尺寸，cap 8192），
 // 单层就是这张照片。和"导入图片 / .ora"（叠新图层到当前 doc）不同。
 export async function importImageAsNewDoc(file: File, opts?: { nameOverride?: string }) {
-  const bitmap = await decodeImageFile(file);
-  const w = Math.min(8192, bitmap.width);
-  const h = Math.min(8192, bitmap.height);
-  const stem = file.name.replace(/\.[^.]+$/, "") || t("mi.defaultImportName");
-  // nameOverride（图库孪生语义，v0.9.34）：调用方已定好带夹路径的目标裸名（如 "夹A/foo"）——
-  //   仍过 uniqueNameFor（归一化 + 撞名后缀双保险；孪生调用方已查过不存在，命中后缀 = 并发乌龙照样安全）。
-  const name = await uniqueNameFor(opts?.nameOverride ?? stem);
-  // v0.6.46 字节管线：解码边界读出一次 → 面积平均缩小（缩小正解）/双三次放大。
-  // v0.9.33：像素先算好、经 newDoc 的 layer0Pixels 走 wp2.load 正门（令牌+suspend，不入 undo）——
-  //   旧 fillLayer0 回调在 load 后裸写 = C7 硬化后的违章（LayerTiles tokenless throw，云盘导入首暴）。
-  const px = imageSourceToBytes(bitmap as ImageBitmap);
-  const out = (w !== px.w || h !== px.h) ? resampleBytes(px.data, px.w, px.h, w, h, "auto") : px.data;
-  (bitmap as ImageBitmap).close?.();
+  // busy 普查（v0.10.3）：解码/重采样是秒级重活，包 busy；下面 session.newDoc 的交互门（无地脏
+  //   确认 sheet）必须在 busy 外（sheets 守卫会 throw），其非交互落盘段由 newDoc 自己包 busy。
+  const prep = await withBusy(t("mi.importingBusy", { name: file.name }), async () => {
+    const bitmap = await decodeImageFile(file);
+    const w = Math.min(8192, bitmap.width);
+    const h = Math.min(8192, bitmap.height);
+    const stem = file.name.replace(/\.[^.]+$/, "") || t("mi.defaultImportName");
+    // nameOverride（图库孪生语义，v0.9.34）：调用方已定好带夹路径的目标裸名（如 "夹A/foo"）——
+    //   仍过 uniqueNameFor（归一化 + 撞名后缀双保险；孪生调用方已查过不存在，命中后缀 = 并发乌龙照样安全）。
+    const name = await uniqueNameFor(opts?.nameOverride ?? stem);
+    // v0.6.46 字节管线：解码边界读出一次 → 面积平均缩小（缩小正解）/双三次放大。
+    // v0.9.33：像素先算好、经 newDoc 的 layer0Pixels 走 wp2.load 正门（令牌+suspend，不入 undo）——
+    //   旧 fillLayer0 回调在 load 后裸写 = C7 硬化后的违章（LayerTiles tokenless throw，云盘导入首暴）。
+    const px = imageSourceToBytes(bitmap as ImageBitmap);
+    const out = (w !== px.w || h !== px.h) ? resampleBytes(px.data, px.w, px.h, w, h, "auto") : px.data;
+    (bitmap as ImageBitmap).close?.();
+    return { name, w, h, out };
+  });
+  const { name, w, h, out } = prep;
   // 共用 session.newDoc 骨架（消 survey rec #4 孪生）：doc 替换/全部重置/落盘/checkpoint 归 session。
   // 照片导入因此与空白新建完全对齐（清 selection/参考窗 + color 归黑 + 加密归明文 + 关图库）
   // ——human 定：之前不重置这些反而是小 bug。
@@ -153,7 +160,8 @@ function _openBigImportSheet(ow: number, oh: number, docW: number, docH: number,
 export async function importImageAsLayer(file: File, opts: { center?: { x: number; y: number } } = {}) {
   // v0.5.38（user 拍板）：导入会 lift 新浮层——先把悬着的 transient 按 apply 收口（丢失变换的原始报告场景）。
   if (editMode.hasPendingTransient()) editMode.applyPendingTransient();
-  const bitmap = await decodeImageFile(file);
+  // busy 普查（v0.10.3）：解码是重活包 busy；big-import sheet（交互）在两段 busy 之间的窗口弹。
+  const bitmap = await withBusy(t("mi.importingBusy", { name: file.name }), () => decodeImageFile(file));
   const ow = bitmap.width, oh = bitmap.height;
   const docW = doc.width, docH = doc.height;
   // v0.9.22（human 拍板，spec 20260819）：阈值从「比画布大」改「超护栏」——不超护栏静默原尺寸进
@@ -186,9 +194,12 @@ export async function importImageAsLayer(file: File, opts: { center?: { x: numbe
   const bx = Math.floor(ccx - w / 2);
   const by = Math.floor(ccy - h / 2);
   // v0.6.46 字节管线：imgSmoothing="low"（像素画）→ 最近邻；否则缩小=面积平均/放大=双三次
-  const px = imageSourceToBytes(bitmap as ImageBitmap);
-  const mode = imgSmoothing === "low" ? "nearest" : "auto";
-  const out = (w !== px.w || h !== px.h) ? resampleBytes(px.data, px.w, px.h, w, h, mode) : px.data;
+  // busy 段②（v0.10.3）：重采样大图是秒级 CPU 重活；后面落层/lift 是快操作，不占 busy。
+  const out = await withBusy(t("mi.importingBusy", { name: file.name }), async () => {
+    const px = imageSourceToBytes(bitmap as ImageBitmap);
+    const mode = imgSmoothing === "low" ? "nearest" : "auto";
+    return (w !== px.w || h !== px.h) ? resampleBytes(px.data, px.w, px.h, w, h, mode) : px.data;
+  });
   // v0.9.2 修「选原大小导入的是被画布裁过的图」：图层像素是 doc 边界的（putRegion 与 doc 求交，
   //   越界不产生 tile）——落图层再 lift，画布外那圈在写入那一刻就没了，缩小回来也回不来。
   //   会越界就跳过图层、字节直接成浮层（浮层像素 v0.9.2 起是本地坐标，装得下画布外）。
@@ -242,8 +253,11 @@ async function importOraFileAsNew(file: File) {
     plain = got.plain;
     onPasswordVerified(nm, got.pw);
   }
-  const loaded = await decodeOraToPainting(plain);
-  session.adoptAsNew(loaded, nm);
+  // busy 普查（v0.10.3）：解码大 ora + adopt（wp2.load 灌入）是重活；上面的解锁循环（交互）已在 busy 外。
+  await withBusy(t("mi.importingBusy", { name: nm }), async () => {
+    const loaded = await decodeOraToPainting(plain);
+    session.adoptAsNew(loaded, nm);
+  });
   setStatus(t("mi.imported", { name: nm }));
   setGalleryOpen(false);
 }

@@ -562,27 +562,35 @@ async function exitCanvasToGallery() {
 async function newDoc({ name, w, h, layer0Name, layer0Pixels }: { name: string; w: number; h: number; layer0Name?: string; layer0Pixels?: Uint8ClampedArray }): Promise<boolean> {
   if (!(await leaveLocalFile())) return false;   // 无地且脏 → 问；取消 = 不新建
   if (es.isDirty()) await saveNow();
-  timelapseDetach();   // 新建=新身份：旧录像绝不跟过来（per-doc 串扰墙）
-  input.clearHistory();
-  wp2.load({
-    width: w, height: h,
-    nodes: [{ name: layer0Name ?? `${tLatin("doc.layerName")} 1`, visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false,
-      pixels: layer0Pixels ? { rect: { x: 0, y: 0, w, h }, bytes: layer0Pixels } : null }],
+  // 新 doc = 本版现写：清掉**旧 doc** 残留的「新版本写的」旗标（adoptModel 才复位它，newDoc 路径
+  //   此前不清 → 下面 busy 内的 saveNow 会为一张全新的画弹「覆盖新版本文档」确认 —— 旗标跨 doc 泄漏，
+  //   同时也是 sheets 的 busy 内弹窗守卫炸点）。
+  _loadedDocIsNewer = false; _loadedDocNewerConfirmed = false; updateNewerBanner();
+  // busy 普查（v0.10.3）：load 灌入 + 首存 encode 是重活（照片导入的 layer0Pixels 是整幅位图）；
+  //   交互门（上面的无地确认/脏保存）已过，此段无 sheet。
+  return await withBusy(t("ss.creatingDocBusy", { name }), async () => {
+    timelapseDetach();   // 新建=新身份：旧录像绝不跟过来（per-doc 串扰墙）
+    input.clearHistory();
+    wp2.load({
+      width: w, height: h,
+      nodes: [{ name: layer0Name ?? `${tLatin("doc.layerName")} 1`, visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false,
+        pixels: layer0Pixels ? { rect: { x: 0, y: 0, w, h }, bytes: layer0Pixels } : null }],
+    });
+    doc.clearSelectionOnLoad();
+    els.canvasSizeLabel.textContent = `${w}×${h}`;
+    _setActive(name); _recomputePhase();
+    _enc.encrypted = false; board.invalidateAll(); board.fitToScreen(); renderLayersPanel();
+    resetEditorState();
+    applyEditorStateToUI();   // desk：新建 → 面板回默认（关）
+    timelapseAdopt({});       // 新文档 = 健康空录制态（默认关；可在这张画上开录）
+    es.adopted(toFull(name), { create: true });   // 新建画布/import：es 记为当前 + 脏；首存 mode:"new"（撞名不静默覆盖）。边界转全名。
+    _esRebound();
+    updateSaveStatus();
+    await saveNow();   // 落盘（tryPush:false；撞名 → saveNow try/catch surface）
+    void _captureCheckpoint(name, "new-doc");   // 空白态封一份 → revert = 回到刚新建的样子
+    setGalleryOpen(false);
+    return true;
   });
-  doc.clearSelectionOnLoad();
-  els.canvasSizeLabel.textContent = `${w}×${h}`;
-  _setActive(name); _recomputePhase();
-  _enc.encrypted = false; board.invalidateAll(); board.fitToScreen(); renderLayersPanel();
-  resetEditorState();
-  applyEditorStateToUI();   // desk：新建 → 面板回默认（关）
-  timelapseAdopt({});       // 新文档 = 健康空录制态（默认关；可在这张画上开录）
-  es.adopted(toFull(name), { create: true });   // 新建画布/import：es 记为当前 + 脏；首存 mode:"new"（撞名不静默覆盖）。边界转全名。
-  _esRebound();
-  updateSaveStatus();
-  await saveNow();   // 落盘（tryPush:false；撞名 → saveNow try/catch surface）
-  void _captureCheckpoint(name, "new-doc");   // 空白态封一份 → revert = 回到刚新建的样子
-  setGalleryOpen(false);
-  return true;
 }
 
 // pullCloudPath 已删（v415）：零调用者。打开云端项走 openItem —— es.open → store.file.open，

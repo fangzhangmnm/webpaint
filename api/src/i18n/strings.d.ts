@@ -4020,6 +4020,12 @@ export declare const S: {
         readonly ja: "{name} を保存しています…";
         readonly tok: "mi awen e {name}…";
     };
+    readonly "ss.creatingDocBusy": {
+        readonly zh: "正在新建 {name}…";
+        readonly en: "Creating {name}…";
+        readonly ja: "{name} を作成中…";
+        readonly tok: "mi pali e {name}…";
+    };
     readonly "ss.localSaveIncompleteTitle": {
         readonly zh: "本地保存未完成";
         readonly en: "Local save incomplete";
@@ -5633,6 +5639,12 @@ export declare const S: {
         readonly en: "Imported: {name}";
         readonly ja: "インポート済み：{name}";
         readonly tok: "kama jo li pini: {name}";
+    };
+    readonly "mi.importingBusy": {
+        readonly zh: "正在导入 {name}…";
+        readonly en: "Importing {name}…";
+        readonly ja: "{name} をインポート中…";
+        readonly tok: "mi kama jo e {name}…";
     };
     readonly "mi.unsupportedFileType": {
         readonly zh: "不支持的文件类型：{type}";
