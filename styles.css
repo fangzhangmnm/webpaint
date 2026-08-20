@@ -2290,9 +2290,12 @@ body[data-mode="gallery"] .board { display: none !important; }
 .gallery-tile.folder .gallery-tile-name {
   font-weight: 500;
 }
-/* 图片文件次级 tile（v0.9.34 拍板：可见但视觉降级，与画作一眼可分；点击=孪生开画） */
-.gallery-tile.image-file { opacity: 0.72; }
-.gallery-tile.image-file:hover { opacity: 1; }
+/* 图片文件次级 tile（v0.9.34 拍板：可见但视觉降级，与画作一眼可分；点击=孪生开画）
+   v0.9.35（QA 1）：降级只罩缩略图+名字行——罩整 tile 会连坐 ⋯ 菜单弹层（iPad 无 hover 恢复不了） */
+.gallery-tile.image-file .gallery-tile-thumb,
+.gallery-tile.image-file .gallery-tile-name-row { opacity: 0.72; }
+.gallery-tile.image-file:hover .gallery-tile-thumb,
+.gallery-tile.image-file:hover .gallery-tile-name-row { opacity: 1; }
 .gallery-tile.image-file .gallery-tile-thumb {
   /* 素材图整图看全（contain）；画作 thumb 维持既有裁切规则不动 */
   object-fit: contain;

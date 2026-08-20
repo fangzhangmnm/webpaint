@@ -373,6 +373,13 @@ function makeGallery(host: GalleryHost) {
         const twin = imageTwinBareName(folder.value, img.name);
         const existing = data.files.find((it) => it.name === twin);
         if (existing) { await session.open(existing); return; }
+        // 竞态窗（v0.9.35，QA 3）：云端帧未到时孪生可能不在当前帧 → store.nameOccupied 权威补查
+        //   （本地命中即短路；在线含云端一次往返）。session.open 只消费 item.name（openItem 已核实），
+        //   最小 item 即可——别猜 local/cloud 腿的形状。
+        if (await _store.files.nameOccupied(sessionFileName(twin))) {
+          await session.open({ name: twin, local: null, cloud: null, dirty: false, ghost: false, pendingGone: false } as unknown as GItem);
+          return;
+        }
         try {
           const blob = await host.busy(t("cp.downloading", { name: img.name }), () => openCloudImage(img.path));
           if (!blob) { host.status(t("cp.downloadFailed", { name: img.name }), true); return; }

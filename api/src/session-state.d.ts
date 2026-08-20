@@ -39,7 +39,7 @@ declare function newDoc({ name, w, h, layer0Name, layer0Pixels }: {
     h: number;
     layer0Name?: string;
     layer0Pixels?: Uint8ClampedArray;
-}): Promise<void>;
+}): Promise<boolean>;
 declare function openItem(item: GalleryItem): Promise<void>;
 declare function pushItem(item: GalleryItem): Promise<void>;
 declare function unloadItem(item: GalleryItem): Promise<void>;

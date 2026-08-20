@@ -554,8 +554,10 @@ async function exitCanvasToGallery() {
 // layer0Pixels（导入图片/剪贴板为新文档）：整幅 RGBA（w*h*4），经 wp2.load 的 pixels 正门灌入
 //   （令牌+suspend，不入 undo）。旧 fillLayer0 回调已废（v0.9.33）：它在 load **之后**裸写像素，
 //   C7 焊死「留给 load 灌入」的静默口后就是违章（真机 LayerTiles tokenless throw，云盘导入首暴）。
-async function newDoc({ name, w, h, layer0Name, layer0Pixels }: { name: string; w: number; h: number; layer0Name?: string; layer0Pixels?: Uint8ClampedArray }) {
-  if (!(await leaveLocalFile())) return;   // 无地且脏 → 问；取消 = 不新建
+// 返 boolean（v0.9.35，QA 2）：false = 没建（无地脏离开确认被取消）——调用方**必须看**，别在
+//   取消路径照报「已新建」（谎报）。
+async function newDoc({ name, w, h, layer0Name, layer0Pixels }: { name: string; w: number; h: number; layer0Name?: string; layer0Pixels?: Uint8ClampedArray }): Promise<boolean> {
+  if (!(await leaveLocalFile())) return false;   // 无地且脏 → 问；取消 = 不新建
   if (es.isDirty()) await saveNow();
   timelapseDetach();   // 新建=新身份：旧录像绝不跟过来（per-doc 串扰墙）
   input.clearHistory();
@@ -577,6 +579,7 @@ async function newDoc({ name, w, h, layer0Name, layer0Pixels }: { name: string; 
   await saveNow();   // 落盘（tryPush:false；撞名 → saveNow try/catch surface）
   void _captureCheckpoint(name, "new-doc");   // 空白态封一份 → revert = 回到刚新建的样子
   setGalleryOpen(false);
+  return true;
 }
 
 // pullCloudPath 已删（v415）：零调用者。打开云端项走 openItem —— es.open → store.file.open，

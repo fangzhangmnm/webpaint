@@ -6,7 +6,7 @@
 // oraFileInput change-handler 按文件类型分流（.ora→session.adopt / image→As{NewDoc|ViewLeaf}）。
 // 大图（> 护栏 max(2048, 画布长边)，v0.9.22）走 _openBigImportSheet 询问 适配护栏 / 保原 / 自定义尺寸。
 // 与 app 经 ctx 绑核心单例（doc/board/input/...）；leaf 依赖直接 import（session/resample/ora/els）。
-// 「导入照片(新建)」复用 session.newDoc 骨架（fillLayer0 画照片），不再自建 PaintingView/做 doc 替换。
+// 「导入照片(新建)」复用 session.newDoc 骨架（像素经 layer0Pixels 走 wp2.load 正门，v0.9.33），不再自建 PaintingView/做 doc 替换。
 
 import { els } from "./els.ts";
 import { reportError } from "./error-badge.ts";
@@ -76,7 +76,8 @@ export async function importImageAsNewDoc(file: File, opts?: { nameOverride?: st
   // 共用 session.newDoc 骨架（消 survey rec #4 孪生）：doc 替换/全部重置/落盘/checkpoint 归 session。
   // 照片导入因此与空白新建完全对齐（清 selection/参考窗 + color 归黑 + 加密归明文 + 关图库）
   // ——human 定：之前不重置这些反而是小 bug。
-  await session.newDoc({ name, w, h, layer0Name: file.name.replace(/\.[^.]+$/, "") || t("mi.defaultImageName"), layer0Pixels: out });
+  // 返回值必须看（QA 2）：无地脏离开确认被取消 → 什么都没建，别谎报「已新建」。
+  if (!(await session.newDoc({ name, w, h, layer0Name: file.name.replace(/\.[^.]+$/, "") || t("mi.defaultImageName"), layer0Pixels: out }))) return;
   setStatus(t("mi.newFromPhoto", { name, w, h }));
 }
 

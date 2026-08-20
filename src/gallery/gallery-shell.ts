@@ -362,7 +362,8 @@ export function initGalleryShell(ctx: AppContext) {
     const name = await uniqueNameFor(nameRaw);
     closeNewDocSheet();
     // doc 替换 + 落盘 + 切指针 + checkpoint + 关库全在 session.newDoc（session-state.ts）。
-    await session.newDoc({ name, w, h });
+    // 返回值必须看（QA 2）：无地脏离开确认被取消 → 什么都没建，别谎报「已新建」。
+    if (!(await session.newDoc({ name, w, h }))) return;
     setStatus(t("gs.created", { name, w, h }));
   });
 
