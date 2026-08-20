@@ -96,11 +96,23 @@ export declare const S: {
         readonly ja: "ギャラリーに戻る";
         readonly tok: "o tawa tomo sitelen";
     };
+    readonly "menu.newArtwork": {
+        readonly zh: "新建…";
+        readonly en: "New…";
+        readonly ja: "新規…";
+        readonly tok: "sitelen sin…";
+    };
     readonly "menu.openLocalFile": {
         readonly zh: "打开本地文件…";
         readonly en: "Open local file…";
         readonly ja: "ローカルファイルを開く…";
         readonly tok: "o open e lipu lon ilo ni…";
+    };
+    readonly "menu.installApp": {
+        readonly zh: "安装 WebPaint 到桌面";
+        readonly en: "Install WebPaint";
+        readonly ja: "WebPaint をインストール";
+        readonly tok: "o pana e WebPaint tawa supa ilo";
     };
     readonly "nav.trash": {
         readonly zh: "回收站";
