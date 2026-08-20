@@ -21,7 +21,7 @@ import { session } from "../session-state.ts";
 import { reportError } from "../error-badge.ts";
 import { els } from "../els.ts";
 import { readImageFromClipboard } from "../session.ts";
-import { sessionFileName, sessionBareName } from "../config.ts";   // 边界：裸 session 名 → 库全名（占用检查按库身份查）
+import { uniqueBareName } from "./gallery-model.ts";   // 撞名后缀兜底（纯·已 pin）；占用检查按库身份（全名 X.ora）查
 import { isSignedIn } from "../app-store.ts";
 import { anchorPopupToBtn } from "../anchored-popup.ts";
 import { wireInlineSelect } from "../inline-select.ts";
@@ -183,14 +183,9 @@ function humanSize(b: number | null | undefined): string {
 //   ⚠ 返回**归一化后**的裸名（v437）：以前查占用用 sessionFileName(stem)（归一）却把**原始** stem
 //   返回去，于是 newDoc 拿着 `a:b` 当活动名，而 store/gallery 那边是 `a_b` → 五处 `===` 比较失配。
 //   归一化必须发生在名字**诞生的地方**，不是比较的地方。
+// 逻辑本体 = gallery-model.uniqueBareName（纯·已 pin）；此处只绑 store 的占用谓词。
 export async function uniqueNameFor(stem: string) {
-  const base = sessionBareName(stem);
-  if (!(await _store.files.nameOccupied(sessionFileName(base)))) return base;
-  for (let i = 1; i < 20; i++) {
-    const candidate = `${base} ${i}`;
-    if (!(await _store.files.nameOccupied(sessionFileName(candidate)))) return candidate;
-  }
-  return `${base} ${Date.now()}`;
+  return uniqueBareName(stem, (n) => _store.files.nameOccupied(n));
 }
 
 export function initGalleryShell(ctx: AppContext) {

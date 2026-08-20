@@ -1,8 +1,8 @@
 // Gallery 路径代数 + 展示纯函数验收（A2 出生；C3 瘦身：merge/slice/classify 系列已被 store 库收编，
 // 锚随迁 store 侧测试——listing/trash-merge/reconcile/store-folder-listing）。纯数据。
-import { describe, it, eq } from "./runner.mjs";
+import { describe, it, eq, assert } from "./runner.mjs";
 import { pathFolder, pathBasename, pathJoin } from "../src/gallery/gallery-path.ts";
-import { copyTargetName } from "../src/gallery/gallery-model.ts";
+import { copyTargetName, uniqueBareName } from "../src/gallery/gallery-model.ts";
 
 describe("gallery-path", () => {
   it("pathFolder", () => { eq(pathFolder("a"), ""); eq(pathFolder("f/a"), "f"); eq(pathFolder("f/g/a"), "f/g"); });
@@ -33,3 +33,36 @@ describe("gallery-model · copyTargetName（复制项目目标名）", () => {
   });
 });
 
+
+// v0.10.4：uniqueBareName——「不静默覆盖旧画」链的 app 侧兜底层（第 1 层=调用方预检、
+// 第 3 层=store mode:"new" 首存护栏抛 CloudNameCollisionError，后者 pin 在库仓
+// store-folder-listing/cloud-sync 测试；editor-session 的 mode 传递 pin 在 editor-session.test）。
+describe("gallery-model · uniqueBareName（撞名后缀兜底）", () => {
+  const occupiedSet = (...names) => async (fullName) => names.includes(fullName);
+
+  it("未占用 → 原裸名直用；占用谓词收到的是库全名 X.ora（身份接缝 pin）", async () => {
+    const asked = [];
+    const name = await uniqueBareName("猫", async (n) => { asked.push(n); return false; });
+    eq(name, "猫");
+    eq(asked.length, 1); eq(asked[0], "猫.ora", "查占用必须按库全名（sessionFileName），不是裸名");
+  });
+  it("占用 → 依次试「base 1」「base 2」…取首个空位", async () => {
+    eq(await uniqueBareName("猫", occupiedSet("猫.ora")), "猫 1");
+    eq(await uniqueBareName("猫", occupiedSet("猫.ora", "猫 1.ora", "猫 2.ora")), "猫 3");
+  });
+  it("带夹路径整名参与占用检查（孪生 nameOverride 场景：夹A/foo）", async () => {
+    eq(await uniqueBareName("夹A/foo", occupiedSet("夹A/foo.ora")), "夹A/foo 1");
+  });
+  it("恒占用（1+19 个候选全撞）→ 时间戳兜底，绝不返回已占用名", async () => {
+    const asked = [];
+    const name = await uniqueBareName("X", async (n) => { asked.push(n); return true; });
+    eq(asked.length, 20, "base + 19 个后缀候选全试过");
+    assert(/^X \d{12,}$/.test(name), `时间戳兜底形状（得到 ${name}）`);
+  });
+  it("裸名先归一化（sessionBareName）再查占用（v437 教训：查归一名却返原始名 = 身份分叉）", async () => {
+    const asked = [];
+    const name = await uniqueBareName("  猫  ", async (n) => { asked.push(n); return false; });
+    eq(name.includes("  "), false, "返回的是归一化后的裸名");
+    eq(asked[0], `${name}.ora`, "查的名和返回的名是同一个身份");
+  });
+});

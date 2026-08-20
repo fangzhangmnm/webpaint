@@ -15,3 +15,4 @@ export interface GalleryItem {
 }
 export declare function itemTime(it: GalleryItem): number;
 export declare function copyTargetName(sourceName: string, taken: (name: string) => boolean): string;
+export declare function uniqueBareName(stem: string, occupied: (fullName: string) => Promise<unknown>): Promise<string>;

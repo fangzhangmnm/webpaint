@@ -6,6 +6,7 @@
 
 // 本模块只读这些字段；local session / cloud file 本体仍是未类型化 .js。
 import { t } from "../i18n/index.ts";
+import { sessionBareName, sessionFileName } from "../config.ts";
 
 export interface LocalSession { name: string; updatedAt?: number; }
 export interface CloudFile { path: string; name?: string; lastModifiedDateTime?: string; }
@@ -33,4 +34,19 @@ export function copyTargetName(sourceName: string, taken: (name: string) => bool
     if (!taken(candidate)) return candidate;
   }
   return join(`${base} ${SUF}${Date.now()}`);
+}
+
+// 新身份的唯一裸名（v0.10.4 从 gallery-shell 提出成纯函数供 pin）。
+//   「不静默覆盖旧画」链的第 2 层兜底：第 1 层 = 调用方预检（如 openImageTile 的孪生占用门），
+//   第 3 层 = store 首存 mode:"new" 护栏（占用抛 CloudNameCollisionError，绝不覆盖）。
+//   base（sessionBareName 归一化后）未占用即用；占用 → "base 1"…"base 19"；全占 → 时间戳兜底。
+//   occupied(fullName) 收**库全名 X.ora**（store.files.nameOccupied 的入参约定）；异步（在线含云端一跳）。
+export async function uniqueBareName(stem: string, occupied: (fullName: string) => Promise<unknown>): Promise<string> {
+  const base = sessionBareName(stem);
+  if (!(await occupied(sessionFileName(base)))) return base;
+  for (let i = 1; i < 20; i++) {
+    const candidate = `${base} ${i}`;
+    if (!(await occupied(sessionFileName(candidate)))) return candidate;
+  }
+  return `${base} ${Date.now()}`;
 }
