@@ -954,6 +954,7 @@ export const S = {
   "se.copiedMergedSelectionToClipboard": { zh: "已复制选区合成图到剪贴板", en: "Copied merged selection to clipboard", ja: "選択範囲の合成画像をクリップボードにコピーしました", tok: "sitelen wan pi ma wile li tawa poki kipisi" },
   "se.cutSelectionToClipboard": { zh: "已剪切选区到剪贴板", en: "Cut selection to clipboard", ja: "選択範囲をクリップボードに切り取りました", tok: "ma wile li kipisi tawa poki kipisi" },
   "se.cutLayerToClipboard": { zh: "已剪切当前图层到剪贴板", en: "Cut current layer to clipboard", ja: "現在のレイヤーをクリップボードに切り取りました", tok: "lipu ni li kipisi tawa poki kipisi" },
+  "se.floatBeforeClipboard": { zh: "浮层未落地：Enter 应用或 Esc 取消后再用剪贴板", en: "Floating transform pending: press Enter to apply or Esc to cancel first", ja: "浮遊変形が未確定です：Enterで適用、Escで取消してから", tok: "lipu sewi li awen ala. o luka e Enter anu Esc lon tenpo open." },
   "se.copyFailed": { zh: "复制失败：{error}", en: "Copy failed: {error}", ja: "コピーに失敗しました：{error}", tok: "pali sama li pakala: {error}" }, 
   "se.clipboardReadFailed": { zh: "读取剪贴板失败：{error}", en: "Failed to read clipboard: {error}", ja: "クリップボードの読み取りに失敗しました：{error}", tok: "lukin pi poki kipisi li pakala: {error}" }, 
   "se.clipboardNoImage": { zh: "剪贴板里没有图片", en: "No image in the clipboard", ja: "クリップボードに画像がありません", tok: "sitelen li lon ala poki kipisi" }, 

@@ -134,9 +134,11 @@ export function initSelectionOps(ctx: AppContext) {
     const dbl = isDoubleCopy(_lastCopyAt, now);
     _lastCopyAt = now;
     if (dbl) { window.dispatchEvent(new CustomEvent("wp:copyMerged")); return; }
-    // v0.9.26（user 真机反馈 2026-08-20：「float 没落地的时候 ctrl c 无反应」）：按决定性动作惯例
-    //   （saveNow/导入收口同款）先 commit 悬着的 transform 再复制——用户按 Ctrl+C 的意图是"拿走现在看到的"。
-    if (editMode.hasPendingTransient()) editMode.applyPendingTransient();
+    // v0.9.27（user 勘误 2026-08-20：「ctrl c 在浮层时反而不应该 commit」，推翻 v0.9.26 的收口）：
+    //   复制是**读操作，零副作用**——把 commit 变换当 Ctrl+C 的副作用很怪（PS 变换期 copy 直接置灰）。
+    //   浮层期软拒 + 明确 toast（v0.9.26 之前的问题是「无反应」，修的是反馈缺失不是语义）。
+    //   收口惯例只属于**写操作**：粘贴（importImageAsLayer 连贴自动 enter）、保存（saveNow）。
+    if (input.lasso.hasFloating()) { setStatus(t("se.floatBeforeClipboard"), true); return; }
     const got = grabActiveLayerBytes();
     if (!got) return;
     try {
@@ -149,7 +151,9 @@ export function initSelectionOps(ctx: AppContext) {
   // Ctrl+Shift+C / 双击 Ctrl+C：合并复制——合成图 ∩ 选区 mask（无选区 = 整张合成图）。
   // 零配置直出透明 PNG（不吃导出菜单 defringe/bg 配置——快捷键是反射动作，配置留给导出菜单）。
   window.addEventListener("wp:copyMerged", async () => {
-    if (editMode.hasPendingTransient()) editMode.applyPendingTransient();   // 浮层先落地：合成里才有它（v0.9.26）
+    // v0.9.27 浮层期软拒（同 Ctrl+C，复制零副作用）。另有诚实性理由：浮层不在 doc.layers 合成树里，
+    //   照常合并复制会拿到**没有浮层**的合成图——所见非所得，宁可拒绝也不说谎。
+    if (input.lasso.hasFloating()) { setStatus(t("se.floatBeforeClipboard"), true); return; }
     const sel = doc.selection as unknown as Selection | null;
     const rect = sel ? { x: sel.bboxX, y: sel.bboxY, w: sel.bboxW, h: sel.bboxH } : null;
     const mask = sel ? sel.materializeMaskRegion(sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH) : null;
@@ -163,7 +167,8 @@ export function initSelectionOps(ctx: AppContext) {
   // Ctrl+X：剪切 = 复制 + 从活层擦除（选区形状 dst-out；无选区 = 清整层 bbox）。一次 undo。
   // 复制失败就不擦——剪切绝不许退化成纯删除（数据安全词典序）。
   window.addEventListener("wp:cut", async () => {
-    if (editMode.hasPendingTransient()) editMode.applyPendingTransient();   // 浮层先落地再剪（v0.9.26，同 Ctrl+C）
+    // v0.9.27 浮层期软拒（同 Ctrl+C；剪切在浮层期动手比复制更危险——半路剪掉源层像素）
+    if (input.lasso.hasFloating()) { setStatus(t("se.floatBeforeClipboard"), true); return; }
     const got = grabActiveLayerBytes();
     if (!got) return;
     try { await writePngBytes(got.px); }
