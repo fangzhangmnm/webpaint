@@ -47,3 +47,7 @@ dist-components/
 workbench/
 node_modules
 journals/
+
+# private 口袋（毕业分拣制 2026-08-20）：AI 可写的私域，不入公开仓；语义同 journal 之于人类区。
+# 惰性创建——第一次真要写私密内容才建仓（届时自己 git init + OneDrive bare 远端）。
+private/
