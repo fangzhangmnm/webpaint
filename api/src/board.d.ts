@@ -150,7 +150,6 @@ export declare class Board {
     _showCursor: boolean;
     _voidColor: string;
     _voidDotColor: string;
-    _docFrameColor: string;
     _showCheckerboard: boolean;
     _pixelGridEnabled: boolean;
     _docGridOn: boolean;
@@ -190,10 +189,9 @@ export declare class Board {
     setPixelGridEnabled(on: boolean): void;
     getPixelGridEnabled(): boolean;
     setDocGrid(on: boolean, cell: number): void;
-    setThemeColors({ voidColor, voidDotColor, docFrameColor }: {
+    setThemeColors({ voidColor, voidDotColor }: {
         voidColor?: string;
         voidDotColor?: string;
-        docFrameColor?: string;
     }): void;
     markDocDirty(_x0: number, _y0: number, _x1: number, _y1: number): void;
     _docCenterScreen(): {

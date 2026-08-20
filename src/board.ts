@@ -128,8 +128,7 @@ export class Board {
   _cursor: Cursor | null;
   _showCursor: boolean;
   _voidColor: string;
-  _voidDotColor: string;    // 透明显示模式的点网格色（CSS --void-dot，微不可见的低对比）
-  _docFrameColor: string;   // 透明显示模式的 doc 细框色（CSS --doc-frame，白@日/黑@夜）
+  _voidDotColor: string;    // 透明显示模式：点网格色 + doc 细框色（CSS --void-dot，微不可见的低对比；框点同色同软度，user 2026-08-20）
   _showCheckerboard: boolean;
   _pixelGridEnabled: boolean;
   _docGridOn: boolean;      // #10 主栅格（per-doc，desk.grid）
@@ -177,8 +176,7 @@ export class Board {
 
     // 主题色：从 CSS 变量取
     this._voidColor = "#e6e2d6";
-    this._voidDotColor = "#d6d1c2";
-    this._docFrameColor = "#ffffff";
+    this._voidDotColor = "#cec8b8";
     // 棋盘背景：开后底层用半透明灰白格替代白纸显示常量。
     // 适合做透明素材 / 看图层 alpha 通道。
     this._showCheckerboard = false;
@@ -281,10 +279,9 @@ export class Board {
     this._gridSig = "";
     this.requestRender();
   }
-  setThemeColors({ voidColor, voidDotColor, docFrameColor }: { voidColor?: string; voidDotColor?: string; docFrameColor?: string }) {
+  setThemeColors({ voidColor, voidDotColor }: { voidColor?: string; voidDotColor?: string }) {
     if (voidColor) this._voidColor = voidColor;
     if (voidDotColor) this._voidDotColor = voidDotColor;
-    if (docFrameColor) this._docFrameColor = docFrameColor;
     this.requestRender();
   }
 
@@ -647,16 +644,28 @@ export class Board {
       liveSync as unknown as GLLeaf | null, this._glSurrogate(),
       transparentBg ? { dotColor: this._voidDotColor, stepPx: 24 * this.dpr, radiusPx: 1.25 * this.dpr } : null,
     );
-    // 2D 叠层（透明底）：lasso 蚂蚁线/handles + doc 边框（透明显示=主题细框 白@日/黑@夜；白纸=淡黑）
+    // 2D 叠层（透明底）：lasso 蚂蚁线/handles + doc 边框（透明显示=与点网格同色同软度；白纸=淡黑）
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, W, H);
     this._applyDocTransform(ctx);
     const { scale } = this.viewport;
     this._drawLassoOverlay(ctx, scale);
     this._drawPerspGizmo(ctx, scale);
-    ctx.strokeStyle = transparentBg ? this._docFrameColor : "rgba(0,0,0,0.18)";
-    ctx.lineWidth = 1 / scale;
-    ctx.strokeRect(0, 0, this.doc.width, this.doc.height);
+    if (transparentBg) {
+      // 框=点色（--void-dot）+ 点的软度：2D 轴对齐细线默认硬边，芯线+低α晕近似点网格的 smoothstep 羽化
+      const w = 1.5 / scale;   // 芯线 ≈1.5 CSS px（点直径 2.5 CSS px 的同族粗细）
+      ctx.strokeStyle = this._voidDotColor;
+      ctx.globalAlpha = 0.35;
+      ctx.lineWidth = w * 2;
+      ctx.strokeRect(0, 0, this.doc.width, this.doc.height);
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = w;
+      ctx.strokeRect(0, 0, this.doc.width, this.doc.height);
+    } else {
+      ctx.strokeStyle = "rgba(0,0,0,0.18)";
+      ctx.lineWidth = 1 / scale;
+      ctx.strokeRect(0, 0, this.doc.width, this.doc.height);
+    }
   }
 
   // ADR-0006 VP 编辑模式的 gizmo（淡地平线 + 参考点射线 + VP 圈；只在编辑模式非空，

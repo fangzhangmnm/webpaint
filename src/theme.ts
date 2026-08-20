@@ -33,8 +33,7 @@ function readCssColor(name: string) {
 function applyThemeColorsToBoard() {
   board.setThemeColors({
     voidColor: readCssColor("--void"),
-    voidDotColor: readCssColor("--void-dot"),     // 透明显示模式：点网格色
-    docFrameColor: readCssColor("--doc-frame"),   // 透明显示模式：doc 细框（白@日/黑@夜）
+    voidDotColor: readCssColor("--void-dot"),     // 透明显示模式：点网格色 + doc 细框（框点同色）
   });
 }
 
