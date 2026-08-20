@@ -14,5 +14,8 @@ export declare function thumbTargetSize(w: number, h: number, max: number): {
     w: number;
     h: number;
 };
+/** 拿一个不占用的 `${base}.${ext}` / `${base} N.${ext}`（导出到云盘用；兜底加时间戳保证必返回）。
+ *  isOccupied = store.files.nameOccupied 注入（本模块保持零 store 依赖可测）。 */
+export declare function nextFreeExportName(base: string, ext: string, isOccupied: (name: string) => Promise<boolean>, fallbackStamp?: () => number): Promise<string>;
 /** RGBA 平铺到白底（就地写，返回同一 buffer）：jpeg 无 alpha，透明区不平铺会糊成黑。 */
 export declare function flattenOntoWhite(data: Uint8ClampedArray): Uint8ClampedArray;

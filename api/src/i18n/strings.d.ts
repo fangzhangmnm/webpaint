@@ -840,6 +840,12 @@ export declare const S: {
         readonly ja: "印刷";
         readonly tok: "ilo lipu";
     };
+    readonly "sub.cloud": {
+        readonly zh: "云盘";
+        readonly en: "Cloud";
+        readonly ja: "クラウド";
+        readonly tok: "poki sewi";
+    };
     readonly "sub.file": {
         readonly zh: "文件";
         readonly en: "File";
@@ -4439,6 +4445,30 @@ export declare const S: {
         readonly en: "Print";
         readonly ja: "印刷";
         readonly tok: "ilo lipu";
+    };
+    readonly "tm.targetCloud": {
+        readonly zh: "云盘（画所在文件夹）";
+        readonly en: "Cloud (artwork's folder)";
+        readonly ja: "クラウド（作品のフォルダー）";
+        readonly tok: "poki sewi";
+    };
+    readonly "tm.exportedCloud": {
+        readonly zh: "已导出到云盘：{name}";
+        readonly en: "Exported to cloud: {name}";
+        readonly ja: "クラウドへエクスポートしました：{name}";
+        readonly tok: "mi pana e {name} tawa poki sewi";
+    };
+    readonly "tm.exportedCloudLocal": {
+        readonly zh: "已存本地：{name}（联网后自动上云）";
+        readonly en: "Saved locally: {name} (will upload when online)";
+        readonly ja: "ローカルに保存：{name}（オンライン時に自動アップロード）";
+        readonly tok: "mi awen e {name} lon ilo ni. ilo li kama lon poki sewi la ona li tawa.";
+    };
+    readonly "tm.exportEncryptedNoCloud": {
+        readonly zh: "加密作品不导出明文到云盘——请用「文件」下载";
+        readonly en: "Encrypted artwork won't export plaintext to cloud — use \"File\" download instead";
+        readonly ja: "暗号化作品は平文をクラウドへ出力しません——「ファイル」でダウンロードしてください";
+        readonly tok: "sitelen len li pana ala e open tawa poki sewi. o kepeken nasin lipu.";
     };
     readonly "tm.configSource": {
         readonly zh: "来源";

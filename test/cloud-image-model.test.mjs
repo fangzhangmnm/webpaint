@@ -4,7 +4,7 @@
 import { describe, it, assert, eq } from "./runner.mjs";
 import {
   isDocPath, isImagePath, imageBasename, mimeForImageName,
-  imageThumbToken, thumbTargetSize, flattenOntoWhite,
+  imageThumbToken, thumbTargetSize, flattenOntoWhite, nextFreeExportName,
 } from "../src/gallery/cloud-image-model.ts";
 import { encodeJpegFromBytes } from "../src/backend/jpeg-codec.ts";
 
@@ -49,6 +49,19 @@ describe("cloud-image · 缩略图 token/尺寸（错了会缓存不失效或糊
     eq(JSON.stringify(thumbTargetSize(512, 1024, 128)), JSON.stringify({ w: 64, h: 128 }));
     eq(JSON.stringify(thumbTargetSize(100, 50, 128)), JSON.stringify({ w: 100, h: 50 }), "小图不放大");
     eq(JSON.stringify(thumbTargetSize(10000, 1, 128)), JSON.stringify({ w: 128, h: 1 }), "极端条状不塌成 0");
+  });
+});
+
+describe("cloud-image · 导出到云盘的撞名后缀（v0.9.30）", () => {
+  it("不占用 → 原名；占用 → 空格数字后缀递增", async () => {
+    const occupied = new Set(["画/a-20260820-1200.png", "画/a-20260820-1200 1.png"]);
+    const probe = (n) => Promise.resolve(occupied.has(n));
+    eq(await nextFreeExportName("画/b-20260820-1200", "png", probe), "画/b-20260820-1200.png");
+    eq(await nextFreeExportName("画/a-20260820-1200", "png", probe), "画/a-20260820-1200 2.png");
+  });
+  it("20 连撞 → 时间戳兜底（保证必返回）", async () => {
+    const name = await nextFreeExportName("x", "psd", () => Promise.resolve(true), () => 777);
+    eq(name, "x-777.psd");
   });
 });
 

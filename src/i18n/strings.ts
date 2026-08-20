@@ -181,6 +181,7 @@ export const S = {
   "sub.merged":      { zh: "合并",     en: "Merged",       ja: "統合", tok: "wan pi lipu ale" },
   "sub.clipboard":   { zh: "剪切板",   en: "Clipboard",    ja: "クリップボード", tok: "poki kipisi" },
   "sub.print":       { zh: "打印",     en: "Print",        ja: "印刷", tok: "ilo lipu" },
+  "sub.cloud":       { zh: "云盘",     en: "Cloud",        ja: "クラウド", tok: "poki sewi" },
   "sub.file":        { zh: "文件",     en: "File",         ja: "ファイル", tok: "lipu" },
   "sub.newLayer":    { zh: "新图层",   en: "New layer",    ja: "新規レイヤー", tok: "lipu sin" },
   // ── 顶栏保存按钮 tooltip（save-status.ts 按态动态设，{name}=作品名）──
@@ -823,6 +824,10 @@ export const S = {
   "tm.targetFile": { zh: "文件", en: "File", ja: "ファイル", tok: "lipu" },
   "tm.targetClipboard": { zh: "剪切板", en: "Clipboard", ja: "クリップボード", tok: "poki kipisi" },
   "tm.targetPrint": { zh: "打印", en: "Print", ja: "印刷", tok: "ilo lipu" },
+  "tm.targetCloud": { zh: "云盘（画所在文件夹）", en: "Cloud (artwork's folder)", ja: "クラウド（作品のフォルダー）", tok: "poki sewi" },
+  "tm.exportedCloud": { zh: "已导出到云盘：{name}", en: "Exported to cloud: {name}", ja: "クラウドへエクスポートしました：{name}", tok: "mi pana e {name} tawa poki sewi" },
+  "tm.exportedCloudLocal": { zh: "已存本地：{name}（联网后自动上云）", en: "Saved locally: {name} (will upload when online)", ja: "ローカルに保存：{name}（オンライン時に自動アップロード）", tok: "mi awen e {name} lon ilo ni. ilo li kama lon poki sewi la ona li tawa." },
+  "tm.exportEncryptedNoCloud": { zh: "加密作品不导出明文到云盘——请用「文件」下载", en: "Encrypted artwork won't export plaintext to cloud — use \"File\" download instead", ja: "暗号化作品は平文をクラウドへ出力しません——「ファイル」でダウンロードしてください", tok: "sitelen len li pana ala e open tawa poki sewi. o kepeken nasin lipu." },
   "tm.configSource": { zh: "来源", en: "Source", ja: "ソース", tok: "tan" }, 
   "bl.connected": { zh: "已连接", en: "Connected", ja: "接続済み", tok: "toki li lon" }, 
   "bl.connecting": { zh: "连接中…", en: "Connecting…", ja: "接続中…", tok: "mi open e toki…" }, 

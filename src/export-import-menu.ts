@@ -21,6 +21,8 @@ import { triggerDownload, shareOrDownloadBlob, copyImageToClipboard, readImageFr
 import { importImageAsLayer } from "./import-image.ts";
 import { desk } from "./workbench-state.ts";
 import { reportError } from "./error-badge.ts";
+import { store } from "./app-store.ts";
+import { nextFreeExportName } from "./gallery/cloud-image-model.ts";
 
 import type { AppContext } from "./app-context.ts";
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
@@ -49,17 +51,30 @@ function _selCropRect(): { x: number; y: number; w: number; h: number } | null {
 }
 // v0.5.20：导出图片/导出项目合并为一个「导出」入口——format=ora/psd 即项目语义（所有图层·文件）。
 function _isProjectFormat(fmt: string): boolean { return (getExporter(fmt)?.kind ?? "image") === "project"; }
+
+// v0.9.30 导出到云盘（spec 20260820 补章，user 拍板：image+psd 开放 / 落画所在夹+时间戳）：
+//   第四个 target sink——落点 = 画所在夹（session.name 自带夹前缀），名 = <画名>-<stamp>.<ext>，
+//   撞名自动后缀（mode:"new" 首存护栏仍兜底）。save 默认 best-effort push：
+//   toast 按 pushed 事实说话（在线=已上云 / 离线=已存本地待补推），不谎报。
+//   ⚠ 加密作品软拒（调用方拦）：加密模型的承诺=明文字节不落云端，明文导出请走文件下载。
+async function _exportBlobToCloud(blob: Blob, ext: string): Promise<void> {
+  const name = await nextFreeExportName(`${session.name}-${stampNow()}`, ext, (n) => store.files.nameOccupied(n).then(Boolean));
+  const r = await store.file(name, { isZip: false, mode: "new" }).save(blob);
+  setStatus(r.pushed ? t("tm.exportedCloud", { name }) : t("tm.exportedCloudLocal", { name }), true);
+}
 function _updateMenuSubLabels() {
   const ei = _getExpImg();
   const eiEl = document.getElementById("menuExportImageSub");
   if (!eiEl) return;
   if (_isProjectFormat(ei.format)) {
-    eiEl.textContent = `.${(getExporter(ei.format) || getExporter("ora")).ext} · ${t("tm.scopeAllLayers")} · ${t("sub.file")}`;
+    // psd 可选云盘去向（v0.9.30）；ora 恒 file
+    const tgtLabel = ei.format === "psd" && ei.target === "cloud" ? t("sub.cloud") : t("sub.file");
+    eiEl.textContent = `.${(getExporter(ei.format) || getExporter("ora")).ext} · ${t("tm.scopeAllLayers")} · ${tgtLabel}`;
   } else {
     // v0.9.14：底色非透明时 sub-label 带一眼（色名系统给人话：「白」「藏青」；词库未到 = hex 兜底）
     const bgRgb = parseExportBg(desk.export.bg);
     const bgTail = bgRgb ? ` · ${colorNameOf(bgRgb.r, bgRgb.g, bgRgb.b)}` : "";
-    eiEl.textContent = `${ei.format.toUpperCase()} · ${ei.scope === "active" ? t("sub.activeLayer") : t("sub.merged")} · ${ei.target === "clipboard" ? t("sub.clipboard") : ei.target === "print" ? t("sub.print") : t("sub.file")}${ei.clipSelection ? " · " + t("sub.selection") : ""}${bgTail}`;
+    eiEl.textContent = `${ei.format.toUpperCase()} · ${ei.scope === "active" ? t("sub.activeLayer") : t("sub.merged")} · ${ei.target === "clipboard" ? t("sub.clipboard") : ei.target === "print" ? t("sub.print") : ei.target === "cloud" ? t("sub.cloud") : t("sub.file")}${ei.clipSelection ? " · " + t("sub.selection") : ""}${bgTail}`;
   }
 }
 
@@ -112,6 +127,14 @@ export function initExportImportMenu(ctx: AppContext) {
           setStatus(t("tm.dotExtDownloaded", { ext: "ora.zip" }));
           return;
         }
+        // v0.9.30：psd + 云盘去向（ora 锁 file 不进这里；加密件软拒——明文不落云端）。
+        if (c.target === "cloud" && exp.id === "psd") {
+          if (session.enc.encrypted) { setStatus(t("tm.exportEncryptedNoCloud"), true); return; }
+          if (exp.busyHint) setStatus(exp.busyHint, true);
+          const blob = await exp.encode(doc);
+          await _exportBlobToCloud(blob, exp.ext);
+          return;
+        }
         // 加密 + .psd：格式不支持加密 → 出明文（user 已 consent：「导出 psd/png 就当 consent 了」）。
         if (exp.busyHint) setStatus(exp.busyHint, true);
         const blob = await exp.encode(doc);
@@ -142,6 +165,13 @@ export function initExportImportMenu(ctx: AppContext) {
           await printImageBlob(blob, () => board.invalidateAll());
           setStatus(t("tm.popupBlockedInlinePrint"));
         }
+      } else if (c.target === "cloud") {
+        // v0.9.30 导出到云盘（加密件软拒——明文不落云端；导出配置 defringe/底色/选区裁剪全生效）
+        if (session.enc.encrypted) { setStatus(t("tm.exportEncryptedNoCloud"), true); return; }
+        const exp = getExporter(c.format) || getExporter("png");
+        if (exp.busyHint) setStatus(exp.busyHint, true);
+        const blob = await exp.encode(doc, { scope: c.scope, cropRect, defringe: desk.export.defringe, bg: desk.export.bg });
+        await _exportBlobToCloud(blob, exp.ext);
       } else {
         // 文件/分享——以及 #23：iOS/iPad 上「打印」也走这里（分享面板自带打印；PWA 里 window.open 打印脆弱）
         const exp = getExporter(c.target === "print" ? (c.format === "jpg" ? "jpg" : "png") : c.format) || getExporter("png");
@@ -165,6 +195,8 @@ export function initExportImportMenu(ctx: AppContext) {
     e.stopPropagation();
     const c = _getExpImg();
     const proj0 = _isProjectFormat(c.format);
+    const proj0Ora = proj0 && c.format !== "psd";   // v0.9.30：psd 去向可选 file/cloud；ora 锁 file
+    const tgt0 = proj0Ora ? "file" : (proj0 && (c.target === "clipboard" || c.target === "print")) ? "file" : (c.target || "file");
     const bg0 = desk.export.bg;
     const bgCustom0 = bg0 !== "transparent" && bg0 !== "#ffffff" && bg0 !== "#000000";
     const fmtOptions = [...listExportersByKind("image"), ...listExportersByKind("project")].map((exp) =>
@@ -176,9 +208,13 @@ export function initExportImportMenu(ctx: AppContext) {
       const clipEl = popup.querySelector('input[name="clipsel"]') as HTMLInputElement;
       const defrEl = popup.querySelector('input[name="defringe"]') as HTMLInputElement;
       const proj = _isProjectFormat(fmtSel.value);
-      if (proj) { scopeSel.value = "all"; tgtSel.value = "file"; }
+      const projOra = proj && fmtSel.value !== "psd";   // v0.9.30：psd 开放 file/cloud 去向；ora（及其他 project 格式）仍锁 file
+      if (projOra) { scopeSel.value = "all"; tgtSel.value = "file"; }
+      else if (proj) { scopeSel.value = "all"; if (tgtSel.value === "clipboard" || tgtSel.value === "print") tgtSel.value = "file"; }   // psd 无剪贴板/打印语义
       else if (scopeSel.value === "all") scopeSel.value = "merged";   // 「所有图层」仅项目格式可选
-      scopeSel.disabled = proj; tgtSel.disabled = proj;
+      scopeSel.disabled = proj; tgtSel.disabled = projOra;
+      (tgtSel.querySelector('option[value="clipboard"]') as HTMLOptionElement).disabled = proj;
+      (tgtSel.querySelector('option[value="print"]') as HTMLOptionElement).disabled = proj;
       clipEl.disabled = proj || !doc.selection;
       desk.export.format = fmtSel.value;
       desk.export.target = tgtSel.value;
@@ -220,10 +256,11 @@ export function initExportImportMenu(ctx: AppContext) {
       </div>
       <div class="menu-config-section">
         <div class="menu-config-title">${t("tm.configTarget")}</div>
-        <select name="tgt" class="menu-config-select" ${proj0 ? "disabled" : ""}>
-          <option value="file" ${proj0 || c.target === "file" ? "selected" : ""}>${t("tm.targetFile")}</option>
-          <option value="clipboard" ${!proj0 && c.target === "clipboard" ? "selected" : ""}>${t("tm.targetClipboard")}</option>
-          <option value="print" ${!proj0 && c.target === "print" ? "selected" : ""}>${t("tm.targetPrint")}</option>
+        <select name="tgt" class="menu-config-select" ${proj0Ora ? "disabled" : ""}>
+          <option value="file" ${tgt0 === "file" ? "selected" : ""}>${t("tm.targetFile")}</option>
+          <option value="clipboard" ${tgt0 === "clipboard" ? "selected" : ""} ${proj0 ? "disabled" : ""}>${t("tm.targetClipboard")}</option>
+          <option value="print" ${tgt0 === "print" ? "selected" : ""} ${proj0 ? "disabled" : ""}>${t("tm.targetPrint")}</option>
+          <option value="cloud" ${tgt0 === "cloud" ? "selected" : ""}>${t("tm.targetCloud")}</option>
         </select>
       </div>
       <div class="menu-config-section">

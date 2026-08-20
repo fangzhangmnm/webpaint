@@ -28,6 +28,22 @@ export function thumbTargetSize(w: number, h: number, max: number): { w: number;
   return { w: Math.max(1, Math.round(w * k)), h: Math.max(1, Math.round(h * k)) };
 }
 
+/** 拿一个不占用的 `${base}.${ext}` / `${base} N.${ext}`（导出到云盘用；兜底加时间戳保证必返回）。
+ *  isOccupied = store.files.nameOccupied 注入（本模块保持零 store 依赖可测）。 */
+export async function nextFreeExportName(
+  base: string, ext: string,
+  isOccupied: (name: string) => Promise<boolean>,
+  fallbackStamp: () => number = () => Date.now(),
+): Promise<string> {
+  const first = `${base}.${ext}`;
+  if (!(await isOccupied(first))) return first;
+  for (let i = 1; i < 20; i++) {
+    const cand = `${base} ${i}.${ext}`;
+    if (!(await isOccupied(cand))) return cand;
+  }
+  return `${base}-${fallbackStamp()}.${ext}`;
+}
+
 /** RGBA 平铺到白底（就地写，返回同一 buffer）：jpeg 无 alpha，透明区不平铺会糊成黑。 */
 export function flattenOntoWhite(data: Uint8ClampedArray): Uint8ClampedArray {
   for (let i = 0; i < data.length; i += 4) {

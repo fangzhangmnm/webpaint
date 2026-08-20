@@ -81,6 +81,20 @@
 - 双文件语义：导入云盘图后 `foo.png` 原件**留在原地**（gallery 看不见，管理走 OneDrive）；
   不做自动清理、不做配对显示——自动删原件撞数据安全红线。
 
+## 7.5 导出到云盘（v0.9.30 补章，user 2026-08-20 追加拍板）
+
+- **cloud = 第四个导出去向 sink**（file/clipboard/print/cloud，🔧 popup 选、sticky per-doc）。
+  exporter 字节管线不动；sink 写 `store.file(name,{mode:"new"}).save()`（首存护栏/离线补推全走库）。
+- 【拍板】开放范围 = **image 组（png/jpg，吃全套导出配置）+ psd**；ora 仍锁 file（ora 上云本身
+  就是同步的本职）。psd 的剪贴板/打印选项灰掉。
+- 【拍板】落点 = **随画所在夹**（session.name 自带夹前缀），命名 = `<画名>-<YYYYMMDD-HHMM>.<ext>`
+  （与下载导出同款时间戳；多次导出留历史），撞名自动 ` 1` ` 2` 后缀（纯函数 nextFreeExportName）。
+- **诚实 toast**：按 save() 返回的 pushed 事实说话——「已导出到云盘」vs「已存本地（联网后自动上云）」。
+- **加密件软拒**（AI 按红线精神定，user 可翻）：加密模型承诺=明文字节不落云端；
+  明文导出（png/jpg/psd）+ cloud 去向 → 状态行拒绝，指去「文件」下载。
+- 已知副作用：导出的 png 会出现在 import picker（它就是夹里的图片，对 CC 工作流正是目的）；
+  psd 非图片扩展名，两边都不显示（CC 从 OneDrive 直取）。
+
 ## 8. 真机验证项（攒批）
 
 1. iPad：三入口各走一遍（云盘图 → 新画 / 叠层 / 参考窗）。

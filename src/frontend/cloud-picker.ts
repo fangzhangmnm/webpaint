@@ -150,8 +150,10 @@ export class WpCloudPicker extends HTMLElement {
       this.#emitNavigate(this.#folder.includes("/") ? this.#folder.slice(0, this.#folder.lastIndexOf("/")) : "");
     });
     (this.#root.querySelector('[data-act="close"]') as HTMLElement).addEventListener("click", () => this.#emitClose());
-    // backdrop 点击关（点在 :host 本体 = panel 之外）
-    this.addEventListener("pointerdown", (e) => { if (e.target === this) this.#emitClose(); });
+    // backdrop 点击关（点在 :host 本体 = panel 之外）。
+    // ⚠ 必须用 composedPath()[0]：shadow 内部事件冒到 host 时 e.target 被**重定向**成 host 本身，
+    //   用 e.target 判会把 panel 内的一切点击（含子夹导航）都当 backdrop 关窗（2026-08-20 真机 bug）。
+    this.addEventListener("pointerdown", (e) => { if (e.composedPath()[0] === this) this.#emitClose(); });
   }
 
   // ---- 属性下灌（程序性 set 不发事件）----
