@@ -34,6 +34,7 @@ import { isUnlocked, lock, setPassword, promptPassword } from "../crypto-state.t
 import { hasVerifier, checkVerifier, clearVerifier } from "../password-verifier.ts";
 import { t } from "../i18n/index.ts";
 import { loadCanvasTemplates, fillTemplateSelect, templateById, templatePx } from "../canvas-templates.ts";
+import { bindInstallButton } from "../install-prompt.ts";
 
 import type { AppContext } from "../app-context.ts";
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
@@ -254,6 +255,9 @@ export function initGalleryShell(ctx: AppContext) {
     const lockLabel = els.galleryMenuLock?.querySelector(".menu-item-label");
     if (lockLabel) lockLabel.textContent = isUnlocked() ? t("gs.lockLabel") : t("gs.unlockLabel");
   });
+
+  // v0.9.26 PWA 安装入口（user 2026-08-20；capture 在 settings-menu init 挂，这里只绑图库那颗按钮）
+  bindInstallButton(document.getElementById("galleryMenuInstallApp"), () => els.galleryMenuPopup.classList.add("hidden"));
 
   // 加密作品 解锁/锁定（ADR-0012 统一图库密码；密码只在内存，锁定 = 清掉）
   els.galleryMenuLock?.addEventListener("click", async () => {

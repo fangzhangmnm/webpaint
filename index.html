@@ -516,6 +516,10 @@
         <button class="menu-lang-select menu-inline-select" id="galleryLanguageBtn" type="button" aria-haspopup="true"><span id="galleryLanguageBtnLabel">中文</span><svg class="menu-inline-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M1.4 2.8 L4 5.6 L6.6 2.8" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       </label>
       <!-- v0.6.14：gen-AI 开关撤出图库菜单（user：它不影响图库，不该出现在这）；开关只在主菜单设置页 -->
+      <!-- v0.9.26 PWA 安装入口（user 2026-08-20）：与主菜单设置页那颗同源（install-prompt.ts 管显隐） -->
+      <button class="menu-item menu-item-with-icon" id="galleryMenuInstallApp" type="button" role="menuitem" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#download"/></svg>
+        <span class="menu-item-label" data-i18n="menu.installApp">安装 WebPaint 到桌面</span>
+      </button>
       <button class="menu-item menu-item-with-icon" id="galleryMenuLock" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#unlock"/></svg>
         <span class="menu-item-label" data-i18n="gal.menu.unlock">解锁加密作品…</span>
       </button>
@@ -1338,6 +1342,10 @@
       </button>
       </div>
       <div class="menu-page hidden" data-menu-page="settings">
+        <!-- v0.9.26 PWA 安装入口（user 2026-08-20）：beforeinstallprompt 捕获后才显形（Chromium）；已安装/装态恒隐 -->
+        <button class="menu-item menu-item-with-icon" id="menuInstallApp" type="button" role="menuitem" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#download"/></svg>
+        <span class="menu-item-label" data-i18n="menu.installApp">安装 WebPaint 到桌面</span>
+      </button>
         <button class="menu-item menu-item-with-icon" id="menuLongPressPick" type="button" role="menuitemcheckbox" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#eyedropper"/></svg>
         <span class="menu-item-label" data-i18n="menu.longPressPick">单指长按吸色</span>
         <span class="menu-item-state" data-state-for="longPressPick">关</span>

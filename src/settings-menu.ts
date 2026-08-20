@@ -18,6 +18,7 @@ import { positionPopup } from "./anchored-popup.ts";
 import { wireInlineSelect } from "./inline-select.ts";
 import { openInputSheet } from "./sheets.ts";
 import { reportError } from "./error-badge.ts";   // 全 app 唯一错误汇拢点（CLAUDE.md）
+import { initInstallCapture, bindInstallButton } from "./install-prompt.ts";
 import type { AppContext } from "./app-context.ts";
 
 // KEYBOARD_SHORTCUTS 元素（input.js 未类型化 → 描述渲染用到的字段）。
@@ -173,6 +174,11 @@ function _applyMenuTab() {
 
 export function initSettingsMenu(ctx: AppContext) {
   ({ state, board, setStatus, store, updateSaveStatus } = ctx);
+
+  // v0.9.26 PWA 安装入口（user 2026-08-20）：capture 要尽早挂（事件发在监听前就收不到了）；
+  //   设置页按钮在此绑，图库菜单那颗在 gallery-shell 绑（各自收各自的面板）。
+  initInstallCapture();
+  bindInstallButton(document.getElementById("menuInstallApp"), () => setMenuOpen(false));
 
   // v0.6C（user 拍板）：☰ 六 tab 分页（文件/画布/视图/设置/插件/dev）。停留页 RAM 记忆（session 内）。
   {
