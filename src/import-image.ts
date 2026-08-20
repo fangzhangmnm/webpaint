@@ -59,12 +59,14 @@ export function _openImagePicker() {
 
 // 「导入照片」语义：用照片新建一个 doc（doc 尺寸 = 照片尺寸，cap 8192），
 // 单层就是这张照片。和"导入图片 / .ora"（叠新图层到当前 doc）不同。
-export async function importImageAsNewDoc(file: File) {
+export async function importImageAsNewDoc(file: File, opts?: { nameOverride?: string }) {
   const bitmap = await decodeImageFile(file);
   const w = Math.min(8192, bitmap.width);
   const h = Math.min(8192, bitmap.height);
   const stem = file.name.replace(/\.[^.]+$/, "") || t("mi.defaultImportName");
-  const name = await uniqueNameFor(stem);
+  // nameOverride（图库孪生语义，v0.9.34）：调用方已定好带夹路径的目标裸名（如 "夹A/foo"）——
+  //   仍过 uniqueNameFor（归一化 + 撞名后缀双保险；孪生调用方已查过不存在，命中后缀 = 并发乌龙照样安全）。
+  const name = await uniqueNameFor(opts?.nameOverride ?? stem);
   // v0.6.46 字节管线：解码边界读出一次 → 面积平均缩小（缩小正解）/双三次放大。
   // v0.9.33：像素先算好、经 newDoc 的 layer0Pixels 走 wp2.load 正门（令牌+suspend，不入 undo）——
   //   旧 fillLayer0 回调在 load 后裸写 = C7 硬化后的违章（LayerTiles tokenless throw，云盘导入首暴）。

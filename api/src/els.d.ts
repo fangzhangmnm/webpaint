@@ -66,7 +66,6 @@ export declare const els: {
     addNew: HTMLElement;
     addImportPhoto: HTMLElement;
     addImportClipboard: HTMLElement;
-    addImportCloud: HTMLElement;
     cloudIconBtn: HTMLElement;
     cloudAccountPopup: HTMLElement;
     cloudAccountInfo: HTMLElement;

@@ -133,24 +133,7 @@ function itemToG(it: { path: string; syncState: string; lastModified?: number; s
 }
 // watchFolder（网盘模型）：订阅**当前文件夹** → 立即本地帧、云端到了同一 cb 再闪。app 只知「这一夹更新了」。
 //   替代全树列举（JRP 开夹慢的根因）；连接态 store 自持、无 ctx。folderNames = immediate 子夹名。（映射 store.Item → app GItem。）
-export function watchFolder(
-  folder: string,
-  cb: (snap: { path: string; items: ReturnType<typeof itemToG>[]; folderNames: string[] }) => void,
-): () => void {
-  const prefix = folder ? `${folder}/` : "";
-  return store.files.watchFolder(folder, (snap) => {
-    cb({
-      path: snap.path,
-      // 文件名**倒序**（localeCompare numeric）：新文档名 yyyymmdd-xxxx → 新日期在前，稳定（不随存盘时间跳）。
-      //   store 列举顺序不保证；排序是 app 展示策略（对齐 gallery-model.sliceFolder 的既定倒序），故在此 app 层做。
-      // 白名单：gallery 只见画作（isDocPath）；图片走 watchFolderImages（picker），杂物两边都不见。
-      items: snap.items.filter((it) => isDocPath(it.path)).map(itemToG).sort((a, b) => b.name.localeCompare(a.name, undefined, { numeric: true })),
-      folderNames: snap.folders.map((f) => f.slice(prefix.length)).filter(Boolean),   // 全路径 → immediate 段
-    });
-  });
-}
-
-// ---- 云盘图片列举（cloud-picker 数据面，spec 20260820 §3）。与 watchFolder 同一订阅面，反向 filter 只留图片。----
+// ---- 云盘图片条目（gallery 次级 tile + cloud-picker 共用形；spec 20260820 §2/§3，v0.9.34 图片进图库）----
 //   身份 = **全名 path**（含扩展名，直接就是 store.file 的 key——图片没有裸名/全名的 ora 代数）。
 export interface CloudImageItem {
   path: string;           // 全路径含扩展名（= store.file key / 缩略图缓存 key）
@@ -159,6 +142,39 @@ export interface CloudImageItem {
   lastModified?: number;  // 缩略图新鲜度 token 的原料（退 size）
   cached: boolean;        // 本地有副本（离线可用徽章）
 }
+const _toImageItems = (items: { path: string; syncState: string; lastModified?: number; size?: number }[]): CloudImageItem[] =>
+  items
+    .filter((it) => isImagePath(it.path))
+    .map((it) => ({
+      path: it.path,
+      name: imageBasename(it.path),
+      size: it.size,
+      lastModified: it.lastModified,
+      cached: isCached(it.syncState as never),
+    }))
+    // 素材收件箱语义：新的在前（lastModified 倒序，缺失退名字倒序）
+    .sort((a, b) => (b.lastModified ?? 0) - (a.lastModified ?? 0) || b.name.localeCompare(a.name, undefined, { numeric: true }));
+
+export function watchFolder(
+  folder: string,
+  cb: (snap: { path: string; items: ReturnType<typeof itemToG>[]; images: CloudImageItem[]; folderNames: string[] }) => void,
+): () => void {
+  const prefix = folder ? `${folder}/` : "";
+  return store.files.watchFolder(folder, (snap) => {
+    cb({
+      path: snap.path,
+      // 文件名**倒序**（localeCompare numeric）：新文档名 yyyymmdd-xxxx → 新日期在前，稳定（不随存盘时间跳）。
+      //   store 列举顺序不保证；排序是 app 展示策略（对齐 gallery-model.sliceFolder 的既定倒序），故在此 app 层做。
+      // 路由：画作（isDocPath）= 主 tile；图片 = 次级 tile（v0.9.34 拍板：可见+孪生语义，替代已删的＋菜单 picker 入口）；
+      //   其余杂物（.md 等）不进图库（诚实性余账见 ai-docs/20260820-gallery-hidden-files-honesty-handoff.md）。
+      items: snap.items.filter((it) => isDocPath(it.path)).map(itemToG).sort((a, b) => b.name.localeCompare(a.name, undefined, { numeric: true })),
+      images: _toImageItems(snap.items),
+      folderNames: snap.folders.map((f) => f.slice(prefix.length)).filter(Boolean),   // 全路径 → immediate 段
+    });
+  });
+}
+
+// cloud-picker 数据面（图层/参考窗入口仍用；与 watchFolder 同一订阅面，只留图片）。
 export function watchFolderImages(
   folder: string,
   cb: (snap: { path: string; images: CloudImageItem[]; folderNames: string[] }) => void,
@@ -167,17 +183,7 @@ export function watchFolderImages(
   return store.files.watchFolder(folder, (snap) => {
     cb({
       path: snap.path,
-      images: snap.items
-        .filter((it) => isImagePath(it.path))
-        .map((it) => ({
-          path: it.path,
-          name: imageBasename(it.path),
-          size: it.size,
-          lastModified: it.lastModified,
-          cached: isCached(it.syncState as never),
-        }))
-        // 素材收件箱语义：新的在前（lastModified 倒序，缺失退名字倒序）
-        .sort((a, b) => (b.lastModified ?? 0) - (a.lastModified ?? 0) || b.name.localeCompare(a.name, undefined, { numeric: true })),
+      images: _toImageItems(snap.items),
       folderNames: snap.folders.map((f) => f.slice(prefix.length)).filter(Boolean),
     });
   });

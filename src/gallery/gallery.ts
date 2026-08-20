@@ -24,9 +24,13 @@ import {
 } from "../../vendor/vue/vue.esm-browser.prod.js";
 import {
   store as _store,
-  watchFolder, listGalleryTrash,
+  watchFolder, listGalleryTrash, openCloudImage,
 } from "../app-store.ts";
+import type { CloudImageItem } from "../app-store.ts";
 import { getOrFetchCloudThumb, invalidateCachedThumb } from "./cloud-thumb-cache.ts";
+import { getOrFetchImageThumb } from "./image-thumbs.ts";
+import { imageThumbToken, imageTwinBareName, mimeForImageName } from "./cloud-image-model.ts";
+import { importImageAsNewDoc } from "../import-image.ts";
 import { createFrameGate } from "./frame-gate.ts";
 import { reportError } from "../error-badge.ts";
 // 加密（ADR-0012）：tile 锁样式 + 解锁浏览；transform/密码循环全在 store（flow.encrypt/decrypt +
@@ -58,6 +62,7 @@ const ICON = {
   ghost: iconHtml("cloud-unavailable"),
   pendingGone: iconHtml("cloud-pending"),
   lock: iconHtml("lock"),
+  image: iconHtml("image"),   // 图片次级 tile 角标（v0.9.34）
 };
 
 // 锁态 → 反应式镜像（ThumbCell 解锁后原地重试解密，不靠重建组件）
@@ -171,16 +176,55 @@ const ThumbCell = defineComponent({
   `,
 });
 
+// 图片文件的缩略图格子（v0.9.34）：与 ThumbCell 分开——图片没有 ora 的 zip-peek/加密路径，
+// 走 image-thumbs（整图下载自压 jpg + IDB 缓存，miss 才碰网；IObserver 进视口才拉）。
+const ImageThumbCell = defineComponent({
+  name: "ImageThumbCell",
+  props: {
+    path: { type: String, required: true },
+    token: { type: String, default: "" },
+    fallback: { type: String, default: "?" },
+    alt: { type: String, default: "" },
+  },
+  setup(props: { path: string; token: string; fallback: string; alt: string }) {
+    const url = ref<string | null>(null);
+    const root = ref<HTMLElement | null>(null);
+    let objUrl: string | null = null;
+    let obs: IntersectionObserver | null = null;
+    onMounted(() => {
+      obs = new IntersectionObserver((entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          obs?.disconnect(); obs = null;
+          getOrFetchImageThumb(props.path, props.token)
+            .then((blob: Blob) => {
+              if (objUrl) URL.revokeObjectURL(objUrl);
+              objUrl = URL.createObjectURL(blob); url.value = objUrl;
+            })
+            .catch((err: unknown) => reportError(new Error("[gallery] image thumb: " + String(err)), "log"));
+        }
+      }, { rootMargin: "600px 0px", threshold: 0.01 });
+      nextTick(() => { if (obs && root.value) obs.observe(root.value); });
+    });
+    onUnmounted(() => { obs?.disconnect(); if (objUrl) URL.revokeObjectURL(objUrl); });
+    return { url, root };
+  },
+  template: `
+    <img v-if="url" class="gallery-tile-thumb" :src="url" :alt="alt" loading="lazy" />
+    <div v-else class="gallery-tile-thumb placeholder" ref="root">{{ fallback }}</div>
+  `,
+});
+
 function makeGallery(host: GalleryHost) {
   return defineComponent({
     name: "Gallery",
-    components: { ThumbCell },
+    components: { ThumbCell, ImageThumbCell },
     setup() {
       const view = ref<"files" | "trash">("files");
       const folder = ref<string>(safeFolder());
       const loading = ref(false);
       // 当前文件夹的**单夹**快照（store.watchFolder 已切好片；不再客户端 sliceFolder 全表）。
-      const data = reactive<{ files: GItem[]; folderNames: string[] }>({ files: [], folderNames: [] });
+      const data = reactive<{ files: GItem[]; images: CloudImageItem[]; folderNames: string[] }>({ files: [], images: [], folderNames: [] });
       const trash = ref<TrashGItem[]>([]);
       const openMenu = ref<string | null>(null);   // 当前展开的 tile 菜单 key
 
@@ -199,6 +243,7 @@ function makeGallery(host: GalleryHost) {
         // 扣帧期间可能已换夹/换视图 → apply 时再挡一次（push 时挡过的是即时帧）
         if (view.value !== "files" || snap.path !== folder.value) return;
         data.files = snap.items as unknown as GItem[];
+        data.images = snap.images;
         data.folderNames = snap.folderNames;
         _framedFolder = snap.path;
         loading.value = false;
@@ -281,10 +326,15 @@ function makeGallery(host: GalleryHost) {
         t: tileFor(it, { signedIn: host.signedIn(), activeName: host.activeName(), encrypted: !!encByName[it.name] }),
       })));
       const trashTiles = computed(() => trash.value.map((it) => ({ item: it, t: trashTileFor(it) })));
+      // 图片次级 tile（v0.9.34 拍板：可见但视觉降级、排画作后；点击=孪生语义）。
+      const imageTiles = computed(() => data.images.map((im) => ({
+        raw: im, path: im.path, name: im.name, size: im.size || 0, time: im.lastModified || 0,
+        token: imageThumbToken(im),
+      })));
       const crumbs = computed(() => breadcrumb(folder.value));
       const isEmpty = computed(() => view.value === "trash"
         ? trashTiles.value.length === 0
-        : folderTiles.value.length === 0 && fileTiles.value.length === 0);
+        : folderTiles.value.length === 0 && fileTiles.value.length === 0 && imageTiles.value.length === 0);
       const emptyText = computed(() => view.value === "trash" ? t("gal.empty.trash")
         : folder.value ? t("gal.empty.folder", { f: folder.value }) : t("gal.empty.none"));
 
@@ -314,6 +364,36 @@ function makeGallery(host: GalleryHost) {
         await reload();
       }
       function enterFolder(path: string) { setFolder(path); }
+
+      // ---- 图片 tile（v0.9.34 拍板）----
+      // 孪生语义：点图片 = 开同夹同名 ora（画过就接着画）；没有 → 下载字节转生新 ora（名字钉死 = 孪生裸名，
+      //   uniqueNameFor 兜底并发撞名）。ora 改名后配对断、再点另开一个——拍板已知代价。
+      async function openImageTile(img: CloudImageItem) {
+        openMenu.value = null;
+        const twin = imageTwinBareName(folder.value, img.name);
+        const existing = data.files.find((it) => it.name === twin);
+        if (existing) { await session.open(existing); return; }
+        try {
+          const blob = await host.busy(t("cp.downloading", { name: img.name }), () => openCloudImage(img.path));
+          if (!blob) { host.status(t("cp.downloadFailed", { name: img.name }), true); return; }
+          await importImageAsNewDoc(new File([blob], img.name, { type: mimeForImageName(img.name) }), { nameOverride: twin });
+        } catch (e: unknown) { host.status(t("cp.importFailed", { err: String((e as { message?: unknown })?.message || e) }), true); }
+      }
+      // 图片删除：store.file(全 path).delete()（移 .trash 可恢复；DelResult 诚实读，同画作 del 的 v436 教训）。
+      async function deleteImage(img: CloudImageItem) {
+        openMenu.value = null;
+        if (!(await host.confirm(t("gal.dlg.delTitle", { name: img.name }), t("gal.del.imageDetail")))) return;
+        await host.busy(t("gal.busy.del", { name: img.name }), async () => {
+          try {
+            const del = await _store.file(img.path, { isZip: false, mode: "existing" }).delete();
+            if (del.status === "cancelled") { host.status(t("gal.st.delCancelled", { name: img.name })); return; }
+            host.status(del.status === "noop" ? t("gal.st.delNothing", { name: img.name })
+              : del.queuedCloudDelete === false ? t("gal.st.delLocalOnly", { name: img.name })
+              : t("gal.st.deleted", { name: img.name }), del.status === "noop" || del.queuedCloudDelete === false);
+          } catch (e: unknown) { host.status(t("gal.st.delFail", { e: String((e as { message?: unknown })?.message || e) }), true); }
+        });
+        await reload();
+      }
 
       async function rename(item: GItem) {
         openMenu.value = null;
@@ -575,13 +655,13 @@ function makeGallery(host: GalleryHost) {
         rename: t("gal.rename"), moveTo: t("gal.moveTo"), copy: t("gal.copy"), pullLocal: t("gal.pullLocal"),
         pushCloud: t("gal.pushCloud"), unloadLocal: t("gal.unloadLocal"), encrypt: t("menu.encrypt"), decrypt: t("menu.decrypt"),
         toTrash: t("gal.toTrash"), deleted: t("gal.deleted"), restore: t("gal.restore"), purge: t("gal.purge"),
-        reupload: t("gal.reupload"),
+        reupload: t("gal.reupload"), imageFile: t("gal.imageFile"),
       };
       return {
         view, folder, loading, openMenu, isEmpty, emptyText, L,
-        folderTiles, fileTiles, trashTiles, crumbs,
+        folderTiles, fileTiles, imageTiles, trashTiles, crumbs,
         badgeIcon, fmtMeta, ICON, toggleMenu, menuUp, invalidateEncrypted, setFolder, hydrateFolder, enterFolder,
-        openTile, rename, move, copy, push, reupload, unload, del, folderDelete, trashRestore, trashPurge, emptyTrash,
+        openTile, openImageTile, deleteImage, rename, move, copy, push, reupload, unload, del, folderDelete, trashRestore, trashPurge, emptyTrash,
         encryptItem, decryptItem, onUnlock, requestUnlock,
         reload, setView: (v: "files" | "trash") => { view.value = v; reload(); },
       };
@@ -643,6 +723,21 @@ function makeGallery(host: GalleryHost) {
                 <button v-if="row.item.local && row.t.encrypted" type="button" @click="decryptItem(row.item)"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#unlock"/></svg><span>{{ L.decrypt }}</span></button>
                 <button type="button" class="danger" @click="del(row.item)"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#trash-can"/></svg><span>{{ L.toTrash }}</span></button>
               </template>
+            </div>
+          </div>
+
+          <div v-for="im in imageTiles" :key="'I:'+im.path" class="gallery-tile image-file" @click="openImageTile(im.raw)">
+            <ImageThumbCell :path="im.path" :token="im.token" :fallback="im.name.slice(0,1) || '?'" :alt="im.name" />
+            <div class="gallery-tile-name-row">
+              <div class="gallery-tile-name" :title="im.path">{{ im.name }}</div>
+              <div class="gallery-tile-meta">
+                <span class="gallery-tile-state-icon" :title="L.imageFile" v-html="ICON.image"></span>
+                <span>{{ fmtMeta({ time: im.time, size: im.size }) }}</span>
+              </div>
+            </div>
+            <button type="button" class="gallery-tile-menu-btn" :aria-label="L.more" @click.stop="toggleMenu('I:'+im.path)"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#more"/></svg></button>
+            <div class="gallery-tile-menu-popup" :class="{ hidden: openMenu!=='I:'+im.path, up: menuUp }" @click.stop>
+              <button type="button" class="danger" @click="deleteImage(im.raw)"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#trash-can"/></svg><span>{{ L.toTrash }}</span></button>
             </div>
           </div>
         </template>

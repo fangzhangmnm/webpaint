@@ -37,11 +37,6 @@ declare function itemToG(it: {
     ghost: boolean;
     pendingGone: boolean;
 };
-export declare function watchFolder(folder: string, cb: (snap: {
-    path: string;
-    items: ReturnType<typeof itemToG>[];
-    folderNames: string[];
-}) => void): () => void;
 export interface CloudImageItem {
     path: string;
     name: string;
@@ -49,6 +44,12 @@ export interface CloudImageItem {
     lastModified?: number;
     cached: boolean;
 }
+export declare function watchFolder(folder: string, cb: (snap: {
+    path: string;
+    items: ReturnType<typeof itemToG>[];
+    images: CloudImageItem[];
+    folderNames: string[];
+}) => void): () => void;
 export declare function watchFolderImages(folder: string, cb: (snap: {
     path: string;
     images: CloudImageItem[];

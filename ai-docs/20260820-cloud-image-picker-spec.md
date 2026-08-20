@@ -16,12 +16,18 @@
   **别碰 `.trash/` `.backup/` `.webpaint/` 三个保留根**；建议文件名 descriptive（可带日期前缀）。
 - 前提钉死：ADR-0022 scope 永久 AppFolder → WebPaint 能读的图**只能**住 appfolder 内。
 
-## 2. 图库扩展名白名单（gallery 保持纯画作）
+## 2. 图库扩展名路由（v0.9.34 改版拍板，supersedes「图片不可见」）
 
-- 【拍板】图片在 gallery **不可见**，gallery 干净地只显示画作，不 distract。
-- 白名单 = `.ora` + `.zip`（加密容器 X.ora.zip）。**其余一切**（png/jpg/claude.md/未知）不进
-  gallery 列表。过滤落 **app 层** `app-store.ts` 的 watchFolder 适配（库零内容格式知识纪律不动；
-  库侧既有 dot 项过滤 `is-hidden.ts` 照旧）。
+- 【拍板 2026-08-20 二轮】**图片进图库当「次级 tile」**：视觉降级（半透明+image 角标+contain 缩略图）、
+  排在画作 tile 之后；点击 = **孪生语义**——同夹同名 `<stem>.ora` 已存在就直接打开它，不存在才下载
+  转生新 ora（名字钉死 = 孪生裸名）。心智模型：「点图片就是在这张图上画；画过了就接着画」。
+  已知代价（拍板接受）：ora 改名后配对断，再点另开一个。
+- 随之【拍板】**图库＋菜单「从云盘新建」入口删除**（图库本身就是浏览器，第二个 picker 门多余）；
+  图层＋号/参考窗的 picker 入口照旧。
+- 白名单其余不变：`.md`/未知杂物仍不显示（诚实性余账见
+  `20260820-gallery-hidden-files-honesty-handoff.md`——图片可见后该 handoff 的「图片半边」已消）。
+- 图片 tile 的 ⋯ 菜单：v1 只有「移到回收站」（store delete，可恢复）。
+- 首轮「图片在 gallery 不可见」拍板（本节旧文）被本轮 user 明确翻案，不算 re-litigate。
 - 只是展示过滤不是门禁：文件夹级操作（图库删夹/改名）仍作用于整夹含隐藏文件（store 语义，
   删除=移 .trash 可恢复）。已知边缘，接受。
 

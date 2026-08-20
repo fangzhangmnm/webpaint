@@ -2,6 +2,8 @@ export declare const isDocPath: (p: string) => boolean;
 export declare const isImagePath: (p: string) => boolean;
 /** path → basename（picker 显示名；File 包装名 =「有名保名」命名规范的上游）。 */
 export declare const imageBasename: (p: string) => string;
+/** 孪生裸名（v0.9.34 拍板：图库点图片 = 开同夹同名 ora，没有才新建）：foo.png @ 夹A → "夹A/foo"。 */
+export declare const imageTwinBareName: (folder: string, basename: string) => string;
 /** File 包装的 MIME（decodeImageFile 实际按字节嗅探，给对只是礼貌）。 */
 export declare function mimeForImageName(name: string): string;
 /** 缩略图新鲜度 token（cloud-thumb-cache 同款语义：lastModified 优先，退 size）。变 = 重拉覆盖同 key。 */

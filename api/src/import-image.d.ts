@@ -1,6 +1,8 @@
 import type { AppContext } from "./app-context.ts";
 export declare function _openImagePicker(): void;
-export declare function importImageAsNewDoc(file: File): Promise<void>;
+export declare function importImageAsNewDoc(file: File, opts?: {
+    nameOverride?: string;
+}): Promise<void>;
 export declare function importImageAsLayer(file: File, opts?: {
     center?: {
         x: number;

@@ -11,6 +11,12 @@ export const isImagePath = (p: string): boolean => IMAGE_EXT_RE.test(p);
 /** path → basename（picker 显示名；File 包装名 =「有名保名」命名规范的上游）。 */
 export const imageBasename = (p: string): string => p.slice(p.lastIndexOf("/") + 1);
 
+/** 孪生裸名（v0.9.34 拍板：图库点图片 = 开同夹同名 ora，没有才新建）：foo.png @ 夹A → "夹A/foo"。 */
+export const imageTwinBareName = (folder: string, basename: string): string => {
+  const stem = basename.replace(/\.[^.]+$/, "") || basename;
+  return folder ? `${folder}/${stem}` : stem;
+};
+
 /** File 包装的 MIME（decodeImageFile 实际按字节嗅探，给对只是礼貌）。 */
 export function mimeForImageName(name: string): string {
   const m = /\.([a-z0-9]+)$/i.exec(name)?.[1]?.toLowerCase();

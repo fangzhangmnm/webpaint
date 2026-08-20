@@ -2586,11 +2586,17 @@ export declare const S: {
         readonly ja: "クリップボードから新規";
         readonly tok: "sitelen sin tan poki kipisi";
     };
-    readonly "gal.menu.newFromCloud": {
-        readonly zh: "从云盘新建…";
-        readonly en: "New from cloud…";
-        readonly ja: "クラウドから新規…";
-        readonly tok: "sitelen sin tan poki sewi…";
+    readonly "gal.imageFile": {
+        readonly zh: "图片";
+        readonly en: "Image";
+        readonly ja: "画像";
+        readonly tok: "sitelen";
+    };
+    readonly "gal.del.imageDetail": {
+        readonly zh: "移到回收站（可恢复）。这是图片素材，不是画作。";
+        readonly en: "Move to trash (recoverable). This is an image file, not an artwork.";
+        readonly ja: "ゴミ箱へ移動（復元可）。これは画像ファイルで、作品ではありません。";
+        readonly tok: "ni li tawa poki jaki (ken kama sin). ni li sitelen lipu taso.";
     };
     readonly "gal.menu.newFolder": {
         readonly zh: "新建文件夹…";

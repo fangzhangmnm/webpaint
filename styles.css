@@ -2290,6 +2290,15 @@ body[data-mode="gallery"] .board { display: none !important; }
 .gallery-tile.folder .gallery-tile-name {
   font-weight: 500;
 }
+/* 图片文件次级 tile（v0.9.34 拍板：可见但视觉降级，与画作一眼可分；点击=孪生开画） */
+.gallery-tile.image-file { opacity: 0.72; }
+.gallery-tile.image-file:hover { opacity: 1; }
+.gallery-tile.image-file .gallery-tile-thumb {
+  /* 素材图整图看全（contain）；画作 thumb 维持既有裁切规则不动 */
+  object-fit: contain;
+  background: color-mix(in srgb, var(--ink, #e8eaed) 4%, var(--bg));
+}
+.gallery-tile.image-file .gallery-tile-name { font-weight: 400; color: var(--ink-soft, #9aa0a6); }
 /* 回收站 bar：trash 视图独立 header，含返回 + 标题 + 清空按钮 */
 .gallery-trash-bar {
   display: flex; align-items: center;

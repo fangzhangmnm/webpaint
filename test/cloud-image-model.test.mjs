@@ -4,7 +4,7 @@
 import { describe, it, assert, eq } from "./runner.mjs";
 import {
   isDocPath, isImagePath, imageBasename, mimeForImageName,
-  imageThumbToken, thumbTargetSize, flattenOntoWhite, nextFreeExportName,
+  imageThumbToken, thumbTargetSize, flattenOntoWhite, nextFreeExportName, imageTwinBareName,
 } from "../src/gallery/cloud-image-model.ts";
 import { encodeJpegFromBytes } from "../src/backend/jpeg-codec.ts";
 
@@ -49,6 +49,15 @@ describe("cloud-image · 缩略图 token/尺寸（错了会缓存不失效或糊
     eq(JSON.stringify(thumbTargetSize(512, 1024, 128)), JSON.stringify({ w: 64, h: 128 }));
     eq(JSON.stringify(thumbTargetSize(100, 50, 128)), JSON.stringify({ w: 100, h: 50 }), "小图不放大");
     eq(JSON.stringify(thumbTargetSize(10000, 1, 128)), JSON.stringify({ w: 128, h: 1 }), "极端条状不塌成 0");
+  });
+});
+
+describe("cloud-image · 孪生裸名（v0.9.34 图库点图片=开同名 ora）", () => {
+  it("夹前缀 + 去扩展名", () => {
+    eq(imageTwinBareName("素材/mock", "ui-a.png"), "素材/mock/ui-a");
+    eq(imageTwinBareName("", "foo.jpeg"), "foo");
+    eq(imageTwinBareName("A", "多点.名.webp"), "A/多点.名", "只去最后一个扩展名");
+    eq(imageTwinBareName("A", "无扩展名"), "A/无扩展名", "无扩展名整名当 stem");
   });
 });
 

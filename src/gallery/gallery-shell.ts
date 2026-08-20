@@ -30,7 +30,6 @@ import { lang, setLang, LANGS, langDisplayName } from "../i18n/index.ts";
 import { openInputSheet, openConfirmSheet } from "../sheets.ts";
 import { pathJoin } from "./gallery-path.ts";
 import { setAddImportAsNewDoc, importImageAsNewDoc } from "../import-image.ts";
-import { pickCloudImage } from "../cloud-picker-host.ts";
 import { isUnlocked, lock, setPassword, promptPassword } from "../crypto-state.ts";
 import { hasVerifier, checkVerifier, clearVerifier } from "../password-verifier.ts";
 import { t } from "../i18n/index.ts";
@@ -321,18 +320,8 @@ export function initGalleryShell(ctx: AppContext) {
     }
   });
 
-  // 从云盘新建（spec 20260820 §4）：picker 选图 → 新画打底（与「从图片新建」同语义，来源换云盘）。
-  els.addImportCloud.addEventListener("click", async () => {
-    els.galleryAddPopup.classList.add("hidden");
-    try {
-      const file = await pickCloudImage();
-      if (!file) return;
-      await importImageAsNewDoc(file);
-      setGalleryOpen(false);
-    } catch (e) {
-      reportError(new Error(t("cp.importFailed", { err: errMsg(e) })), "warning");
-    }
-  });
+  // （「从云盘新建」＋菜单入口已删 v0.9.34：图片直接显示在图库当次级 tile、点击=孪生语义
+  //   （gallery.ts openImageTile），不再需要第二个 picker 门。图层/参考窗入口的 picker 照旧。）
 
   // 新建作品 sheet 接线
   // #21 终版（v0.5.10）：唯一的尺寸下拉框（v217 的 chips 按钮组已删）
