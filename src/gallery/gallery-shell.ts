@@ -207,7 +207,8 @@ export function initGalleryShell(ctx: AppContext) {
     const hidden = els.galleryAddPopup.classList.contains("hidden");
     els.cloudAccountPopup.classList.add("hidden");
     els.galleryAddPopup.classList.toggle("hidden", !hidden);
-    if (hidden) anchorPopupToBtn(els.galleryAddPopup, els.galleryAddBtn);
+    // v0.9.25：编辑器「新建…」入口复用本 popup 时会藏起「新建文件夹」（图库视图操作）——图库侧打开时恢复
+    if (hidden) { els.addNewFolder.hidden = false; anchorPopupToBtn(els.galleryAddPopup, els.galleryAddBtn); }
     els.galleryAddBtn.setAttribute("aria-expanded", hidden ? "true" : "false");
   });
   // 云 icon popup

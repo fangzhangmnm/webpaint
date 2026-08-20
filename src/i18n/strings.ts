@@ -29,6 +29,7 @@ export const S = {
   "nav.gallery":    { zh: "图库",              en: "Gallery",         ja: "ギャラリー", tok: "tomo sitelen" },
   // v0.6.14 workbench ☰ 文件页首项专用（user：「图库」两字看不出会关闭当前画；「退出」又太怪 → 回到图库）
   "menu.backToGallery": { zh: "回到图库",      en: "Back to gallery", ja: "ギャラリーに戻る", tok: "o tawa tomo sitelen" },
+  "menu.newArtwork":    { zh: "新建…",         en: "New…",            ja: "新規…",         tok: "sitelen sin…" },
   "menu.openLocalFile": { zh: "打开本地文件…", en: "Open local file…", ja: "ローカルファイルを開く…", tok: "o open e lipu lon ilo ni…" },
   "nav.trash":      { zh: "回收站",            en: "Trash",           ja: "ゴミ箱", tok: "poki jaki" },
   "save.tip":       { zh: "保存 / 上传",       en: "Save / Upload",   ja: "保存 / アップロード", tok: "awen / pana tawa poki sewi" },
