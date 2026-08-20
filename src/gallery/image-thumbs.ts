@@ -24,16 +24,20 @@ interface CachedImageThumb { token: string; blob: Blob; at: number; }
 // 纯数学（token/目标尺寸/白底平铺）在 cloud-image-model.ts（node 可测）；此处只管 IO 编排。
 export { imageThumbToken } from "./cloud-image-model.ts";
 
-// 缩略图专用解码（v0.9.31，QA ⑤）：createImageBitmap 的 resize 选项让浏览器在**解码期**降采样，
-//   JS 侧峰值从 全图 W*H*4（8k 图 ≈256MB，iPad 可崩 tab）降到 ~128*长宽比 量级。
+// 缩略图专用解码（v0.9.31，QA ⑤；v0.9.32 加文件大小门）：createImageBitmap 的 resize 选项让浏览器
+//   在**解码期**降采样，JS 侧峰值从 全图 W*H*4（8k 图 ≈256MB，iPad 可崩 tab）降到 ~128*长宽比 量级。
 //   只给 resizeWidth 时按比例缩（规范行为）；竖图宽 128 后长边仍 >128，交给下游 resampleBytes 收口。
-//   老浏览器不认 options / 解码失败 → 退全尺寸 decodeImageFile（行为同 v0.9.29，只是没了省内存优化）。
+//   ⚠ resize 解码对 <128px 小图是**放大**（违背「缩略图绝不放大」不变量，小图标会糊）——而内存优化
+//   只对大文件才有意义 → 只在 blob 超过阈值时启用（128px 级图片文件不可能超 256KB；小文件全尺寸
+//   解码本来就不费内存）。老浏览器不认 options / 解码失败 → 退全尺寸 decodeImageFile。
+const RESIZE_DECODE_MIN_BYTES = 256 * 1024;
 async function _decodeForThumb(blob: Blob): Promise<DecodedImage> {
-  try {
-    return await createImageBitmap(blob, { resizeWidth: IMAGE_THUMB_MAX, resizeQuality: "high" });
-  } catch {
-    return decodeImageFile(blob);
+  if (blob.size >= RESIZE_DECODE_MIN_BYTES) {
+    try {
+      return await createImageBitmap(blob, { resizeWidth: IMAGE_THUMB_MAX, resizeQuality: "high" });
+    } catch { /* 退全尺寸 */ }
   }
+  return decodeImageFile(blob);
 }
 
 /** 整份图片字节 → 缩略图 jpeg Blob（纯派生，不碰缓存；picker 之外想复用也从这走）。 */

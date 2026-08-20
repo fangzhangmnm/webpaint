@@ -35,21 +35,35 @@ function _openRaw(version?: number): Promise<IDBDatabase> {
       if (db.objectStoreNames.contains(STORE_SESSIONS)) db.deleteObjectStore(STORE_SESSIONS);
       // 更旧的 ai-docs/layers stores 不主动删（如果存在），让 DevTools 翻历史；新代码不读不写它们。
     };
+    // 升级被别的连接挡住（旧 bundle 的 tab 不听 versionchange、永不让路）→ 响亮 reject，
+    //   别静默 pending 到天荒地老（长跑纪律：挂死→响亮红）。缩略图/revert 各自 catch，开画不受影响。
+    req.onblocked = () => reject(new Error("IndexedDB upgrade blocked by another WebPaint tab (old bundle holding the DB) — close other WebPaint tabs"));
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
 }
 
-function openDB(): Promise<IDBDatabase> {
-  if (_dbPromise) return _dbPromise;
-  _dbPromise = (async () => {
-    let db = await _openRaw();                                    // 无版本号：现有库什么版本都打得开
-    if (REQUIRED_STORES.every((s) => db.objectStoreNames.contains(s))) return db;
-    const next = db.version + 1;                                  // 缺 store（新装/新增 store 的版本）→ 最小步升级补建
+async function _openAdaptive(): Promise<IDBDatabase> {
+  let db = await _openRaw();                                    // 无版本号：现有库什么版本都打得开
+  if (!REQUIRED_STORES.every((s) => db.objectStoreNames.contains(s))) {
+    const next = db.version + 1;                                // 缺 store（新装/新增 store 的版本）→ 最小步升级补建
     db.close();
     db = await _openRaw(next);
-    return db;
-  })();
+  }
+  // 别的 tab 要升级时主动让路（旧代码不让路是 onblocked 挂死的根源，新代码别再当拦路者）；
+  //   让路后清缓存，下次调用按新版本重开。
+  db.onversionchange = () => { db.close(); if (_dbPromise) _dbPromise = null; };
+  return db;
+}
+
+function openDB(): Promise<IDBDatabase> {
+  if (_dbPromise) return _dbPromise;
+  // 失败（VersionError 并发竞升 / blocked 瞬态）重试一次；仍失败则**不缓存 rejected promise**——
+  //   否则一次瞬时失败会让本 session 的缩略图/revert 永久死透，连恢复机会都没有。
+  _dbPromise = _openAdaptive().catch(async (e1) => {
+    try { return await _openAdaptive(); }
+    catch { _dbPromise = null; throw e1; }
+  });
   return _dbPromise;
 }
 
