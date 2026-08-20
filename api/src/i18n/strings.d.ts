@@ -4470,6 +4470,24 @@ export declare const S: {
         readonly ja: "暗号化作品は平文をクラウドへ出力しません——「ファイル」でダウンロードしてください";
         readonly tok: "sitelen len li pana ala e open tawa poki sewi. o kepeken nasin lipu.";
     };
+    readonly "tm.exportingCloud": {
+        readonly zh: "正在导出到云盘…";
+        readonly en: "Exporting to cloud…";
+        readonly ja: "クラウドへエクスポート中…";
+        readonly tok: "mi pana tawa poki sewi…";
+    };
+    readonly "tm.exportCloudUnavailable": {
+        readonly zh: "云盘不可用（store 缺席模式）——请用「文件」下载";
+        readonly en: "Cloud unavailable (store-absent mode) — use \"File\" download instead";
+        readonly ja: "クラウドは利用できません（store 不在モード）——「ファイル」でダウンロードしてください";
+        readonly tok: "poki sewi li ken ala. o kepeken nasin lipu.";
+    };
+    readonly "tm.exportLocalDocNoCloud": {
+        readonly zh: "本地文件模式没有云端身份，不导出到云盘——请用「文件」下载";
+        readonly en: "Local-file mode has no cloud identity; won't export to cloud — use \"File\" download instead";
+        readonly ja: "ローカルファイルモードにはクラウド ID がないため、クラウドへ出力しません——「ファイル」でダウンロードしてください";
+        readonly tok: "lipu ni li lon ilo taso. ona li ken ala tawa poki sewi. o kepeken nasin lipu.";
+    };
     readonly "tm.configSource": {
         readonly zh: "来源";
         readonly en: "Source";

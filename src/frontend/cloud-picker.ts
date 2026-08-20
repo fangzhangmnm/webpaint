@@ -26,7 +26,9 @@ const TEMPLATE = `<style>
   position: fixed; inset: 0;
   display: flex; align-items: center; justify-content: center;
   background: rgba(0, 0, 0, 0.45);
-  z-index: var(--z-window, 100);
+  /* modal band：必须压过图库全屏 overlay(--z-overlay)——图库＋菜单是三入口之一（QA ①，v0.9.31）；
+     busy(--z-busy) 仍在其上，下载中的防误点遮罩不受影响 */
+  z-index: var(--z-modal, 500);
   -webkit-tap-highlight-color: transparent;
   font-size: 13px;
 }

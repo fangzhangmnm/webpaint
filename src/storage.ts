@@ -11,32 +11,45 @@
 import type { CheckpointRecord } from "./checkpoint-policy.ts";
 
 const DB_NAME = "webpaint";
-// v4（2026-07-18）：① 建 checkpoints ② 删 sessions（详见 git 史；别加回）。
-// v5（2026-08-20，cloud-image-picker spec §6，user 批准的派生缓存）：建 image-thumbs。
-const DB_VERSION = 5;
-const STORE_SESSIONS = "sessions";        // 仅 v4 upgrade 里用来 deleteObjectStore，别再读写
+// 版本史：v4（2026-07-18）建 checkpoints + 删 sessions；v5（2026-08-20，cloud-image-picker spec §6）建 image-thumbs。
+// ⚠ v0.9.31（QA ②）起**不再硬编码 DB 版本**：prod（/）和 dev（/dev/）同源共享这个库，
+//   硬编码版本 = dev 升库后旧渠道 open(旧版本号) 直接 VersionError，缩略图/revert 整库打不开。
+//   自适应打开：先无版本号 open（任何现有版本都成功）→ 缺 store 才 close 并按 当前版本+1 升级补建。
+//   本文件从此对版本号不敏感；旧渠道仍硬编码的历史版本追不回来（那是旧 bundle 的代码），
+//   但从本版起两渠道再也不会互相打断。
+const STORE_SESSIONS = "sessions";        // 仅 upgrade 里用来 deleteObjectStore，别再读写
 const STORE_THUMBS = "gallery-thumbs";    // 图库缩略图缓存专用 store，key = store 文件身份 X.ora（cloud-thumb-cache.ts）
 const STORE_IMAGE_THUMBS = "image-thumbs"; // 云盘图片缩略图缓存，key = 全名 path 含扩展名（gallery/image-thumbs.ts）
 const STORE_CHECKPOINTS = "checkpoints";  // revert 快照，key = checkpointKey(fullName, slot)
+const REQUIRED_STORES = [STORE_THUMBS, STORE_IMAGE_THUMBS, STORE_CHECKPOINTS];
 
 let _dbPromise: Promise<IDBDatabase> | null = null;
 
-function openDB(): Promise<IDBDatabase> {
-  if (_dbPromise) return _dbPromise;
-  _dbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
+function _openRaw(version?: number): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = version == null ? indexedDB.open(DB_NAME) : indexedDB.open(DB_NAME, version);
     req.onupgradeneeded = (ev) => {
       const db = (ev.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains(STORE_THUMBS)) db.createObjectStore(STORE_THUMBS);
-      if (!db.objectStoreNames.contains(STORE_IMAGE_THUMBS)) db.createObjectStore(STORE_IMAGE_THUMBS);
-      if (!db.objectStoreNames.contains(STORE_CHECKPOINTS)) db.createObjectStore(STORE_CHECKPOINTS);
-      // v4：sessions 整个删掉（恒空的死 store；见下方说明）。deleteObjectStore 只能在 upgrade 事务里调。
+      for (const s of REQUIRED_STORES) if (!db.objectStoreNames.contains(s)) db.createObjectStore(s);
+      // sessions 死 store（v415 断供）：撞见就删。deleteObjectStore 只能在 upgrade 事务里调。
       if (db.objectStoreNames.contains(STORE_SESSIONS)) db.deleteObjectStore(STORE_SESSIONS);
       // 更旧的 ai-docs/layers stores 不主动删（如果存在），让 DevTools 翻历史；新代码不读不写它们。
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
+}
+
+function openDB(): Promise<IDBDatabase> {
+  if (_dbPromise) return _dbPromise;
+  _dbPromise = (async () => {
+    let db = await _openRaw();                                    // 无版本号：现有库什么版本都打得开
+    if (REQUIRED_STORES.every((s) => db.objectStoreNames.contains(s))) return db;
+    const next = db.version + 1;                                  // 缺 store（新装/新增 store 的版本）→ 最小步升级补建
+    db.close();
+    db = await _openRaw(next);
+    return db;
+  })();
   return _dbPromise;
 }
 

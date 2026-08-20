@@ -21,8 +21,9 @@ import { triggerDownload, shareOrDownloadBlob, copyImageToClipboard, readImageFr
 import { importImageAsLayer } from "./import-image.ts";
 import { desk } from "./workbench-state.ts";
 import { reportError } from "./error-badge.ts";
-import { store } from "./app-store.ts";
+import { store, storeAbsent } from "./app-store.ts";
 import { nextFreeExportName } from "./gallery/cloud-image-model.ts";
+import { withBusy } from "./fullscreen-busy.ts";
 
 import type { AppContext } from "./app-context.ts";
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
@@ -52,13 +53,31 @@ function _selCropRect(): { x: number; y: number; w: number; h: number } | null {
 // v0.5.20：导出图片/导出项目合并为一个「导出」入口——format=ora/psd 即项目语义（所有图层·文件）。
 function _isProjectFormat(fmt: string): boolean { return (getExporter(fmt)?.kind ?? "image") === "project"; }
 
-// v0.9.30 导出到云盘（spec 20260820 补章，user 拍板：image+psd 开放 / 落画所在夹+时间戳）：
-//   第四个 target sink——落点 = 画所在夹（session.name 自带夹前缀），名 = <画名>-<stamp>.<ext>，
+// 导出文件名的基名（v0.9.31，QA ③）：无地本地文件模式 session.name 恒 null（双墙设计），
+//   用打开的本地文件 stem；否则用 store 裸名（自带夹前缀）。所有导出 sink 共用。
+function _exportBaseName(): string {
+  const lf = session.localFile;
+  if (lf) return lf.name.replace(/\.[^.]+$/, "") || "export";
+  return session.name ?? "export";   // name=null ∧ 非无地 不该发生；防御兜底别让文件名变 "null"
+}
+
+// 云盘去向的前置闸（v0.9.31，QA ③④）：返回拒绝文案或 null=放行。encode 之前调，别白编码。
+//   - store 缺席（?nostore）：null-store 的 save 什么都不落，放行会让 toast 撒谎（QA ④）。
+//   - 无地本地文件：无地=零 store 身份（spec 20260819 §7），cloud 导出会建 store 条目，软拒。
+//   - 加密作品：加密模型承诺明文字节不落云端（v0.9.30 起）。
+function _cloudSinkBlocked(): string | null {
+  if (storeAbsent) return t("tm.exportCloudUnavailable");
+  if (session.localFile) return t("tm.exportLocalDocNoCloud");
+  if (session.enc.encrypted) return t("tm.exportEncryptedNoCloud");
+  return null;
+}
+
+// v0.9.30 导出到云盘（spec 20260820 §7.5，user 拍板：image+psd 开放 / 落画所在夹+时间戳）：
+//   第四个 target sink——落点 = 画所在夹（基名自带夹前缀），名 = <画名>-<stamp>.<ext>，
 //   撞名自动后缀（mode:"new" 首存护栏仍兜底）。save 默认 best-effort push：
 //   toast 按 pushed 事实说话（在线=已上云 / 离线=已存本地待补推），不谎报。
-//   ⚠ 加密作品软拒（调用方拦）：加密模型的承诺=明文字节不落云端，明文导出请走文件下载。
 async function _exportBlobToCloud(blob: Blob, ext: string): Promise<void> {
-  const name = await nextFreeExportName(`${session.name}-${stampNow()}`, ext, (n) => store.files.nameOccupied(n).then(Boolean));
+  const name = await nextFreeExportName(`${_exportBaseName()}-${stampNow()}`, ext, (n) => store.files.nameOccupied(n).then(Boolean));
   const r = await store.file(name, { isZip: false, mode: "new" }).save(blob);
   setStatus(r.pushed ? t("tm.exportedCloud", { name }) : t("tm.exportedCloudLocal", { name }), true);
 }
@@ -123,22 +142,25 @@ export function initExportImportMenu(ctx: AppContext) {
         if (session.enc.encrypted && exp.id === "ora") {
           const cipher = await session.readEncryptedBytes();   // 内部先 saveNow（否则导的是上次保存的旧内容）
           if (!cipher) { setStatus(t("tm.exportNoCipher"), true); return; }
-          triggerDownload(cipher, `${session.name}.ora.zip`);
+          triggerDownload(cipher, `${_exportBaseName()}.ora.zip`);
           setStatus(t("tm.dotExtDownloaded", { ext: "ora.zip" }));
           return;
         }
-        // v0.9.30：psd + 云盘去向（ora 锁 file 不进这里；加密件软拒——明文不落云端）。
+        // v0.9.30：psd + 云盘去向（ora 锁 file 不进这里；缺席/无地/加密 前置闸软拒，v0.9.31）。
         if (c.target === "cloud" && exp.id === "psd") {
-          if (session.enc.encrypted) { setStatus(t("tm.exportEncryptedNoCloud"), true); return; }
-          if (exp.busyHint) setStatus(exp.busyHint, true);
-          const blob = await exp.encode(doc);
-          await _exportBlobToCloud(blob, exp.ext);
+          const blocked = _cloudSinkBlocked();
+          if (blocked) { setStatus(blocked, true); return; }
+          // busy 遮罩（QA ⑥）：psd 编码 + 上传都可能秒级，给防误点 + 可见进行时
+          await withBusy(t("tm.exportingCloud"), async () => {
+            const blob = await exp.encode(doc);
+            await _exportBlobToCloud(blob, exp.ext);
+          });
           return;
         }
         // 加密 + .psd：格式不支持加密 → 出明文（user 已 consent：「导出 psd/png 就当 consent 了」）。
         if (exp.busyHint) setStatus(exp.busyHint, true);
         const blob = await exp.encode(doc);
-        triggerDownload(blob, `${session.name}.${exp.ext}`);
+        triggerDownload(blob, `${_exportBaseName()}.${exp.ext}`);
         setStatus(t("tm.dotExtDownloaded", { ext: exp.ext }));
       } catch (e) { setStatus(t("tm.exportFailed", { err: String(errMsg(e)) })); }
       return;
@@ -166,18 +188,20 @@ export function initExportImportMenu(ctx: AppContext) {
           setStatus(t("tm.popupBlockedInlinePrint"));
         }
       } else if (c.target === "cloud") {
-        // v0.9.30 导出到云盘（加密件软拒——明文不落云端；导出配置 defringe/底色/选区裁剪全生效）
-        if (session.enc.encrypted) { setStatus(t("tm.exportEncryptedNoCloud"), true); return; }
+        // v0.9.30 导出到云盘（缺席/无地/加密 前置闸软拒 v0.9.31；导出配置 defringe/底色/选区裁剪全生效）
+        const blocked = _cloudSinkBlocked();
+        if (blocked) { setStatus(blocked, true); return; }
         const exp = getExporter(c.format) || getExporter("png");
-        if (exp.busyHint) setStatus(exp.busyHint, true);
-        const blob = await exp.encode(doc, { scope: c.scope, cropRect, defringe: desk.export.defringe, bg: desk.export.bg });
-        await _exportBlobToCloud(blob, exp.ext);
+        await withBusy(t("tm.exportingCloud"), async () => {
+          const blob = await exp.encode(doc, { scope: c.scope, cropRect, defringe: desk.export.defringe, bg: desk.export.bg });
+          await _exportBlobToCloud(blob, exp.ext);
+        });
       } else {
         // 文件/分享——以及 #23：iOS/iPad 上「打印」也走这里（分享面板自带打印；PWA 里 window.open 打印脆弱）
         const exp = getExporter(c.target === "print" ? (c.format === "jpg" ? "jpg" : "png") : c.format) || getExporter("png");
         if (exp.busyHint) setStatus(exp.busyHint, true);
         const blob = await exp.encode(doc, { scope: c.scope, cropRect, defringe: desk.export.defringe, bg: desk.export.bg });
-        const r = await shareOrDownloadBlob(blob, `${session.name}-${stampNow()}.${exp.ext}`, exp.mime);
+        const r = await shareOrDownloadBlob(blob, `${_exportBaseName()}-${stampNow()}.${exp.ext}`, exp.mime);
         setStatus(r.method === "share" ? t("tm.sharePanelOpened") : r.method === "cancel" ? t("tm.shareCancelled") : t("tm.extDownloadedUpper", { ext: exp.ext.toUpperCase() }));
       }
     } catch (e) { reportError(new Error(t("tm.exportFailed", { err: String(errMsg(e)) })), "warning"); }   // #34：剪贴板/分享权限被拒也走 banner，不再静默状态栏
@@ -217,7 +241,8 @@ export function initExportImportMenu(ctx: AppContext) {
       (tgtSel.querySelector('option[value="print"]') as HTMLOptionElement).disabled = proj;
       clipEl.disabled = proj || !doc.selection;
       desk.export.format = fmtSel.value;
-      desk.export.target = tgtSel.value;
+      // QA ⑥：ora 锁死去向时不把锁定值写回 desk——切回 png/jpg/psd 后用户的 cloud 偏好还在
+      if (!tgtSel.disabled) desk.export.target = tgtSel.value;
       desk.export.layerMode = scopeSel.value;
       if (!clipEl.disabled) desk.export.clipSelection = clipEl.checked;
       // v0.9.14 导出底色：preset radio 直落；自定义走 hex/色名/色温 parse，非法=保留现值（半输入永不生效）。

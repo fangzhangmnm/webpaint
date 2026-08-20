@@ -8,6 +8,7 @@
 // 图片本就明文（加密容器不是图片扩展名，进不了这条管线），jpeg 落 IDB 无明文红线问题。
 
 import { decodeImageFile, imageSourceToBytes } from "../shell/image-io.ts";
+import type { DecodedImage } from "../shell/image-io.ts";
 import { resampleBytes } from "../backend/algorithms/resample-bytes.ts";
 import { encodeJpegFromBytes } from "../backend/jpeg-codec.ts";
 import { getImageThumb, setImageThumb, clearImageThumbs } from "../storage.ts";
@@ -23,9 +24,21 @@ interface CachedImageThumb { token: string; blob: Blob; at: number; }
 // 纯数学（token/目标尺寸/白底平铺）在 cloud-image-model.ts（node 可测）；此处只管 IO 编排。
 export { imageThumbToken } from "./cloud-image-model.ts";
 
+// 缩略图专用解码（v0.9.31，QA ⑤）：createImageBitmap 的 resize 选项让浏览器在**解码期**降采样，
+//   JS 侧峰值从 全图 W*H*4（8k 图 ≈256MB，iPad 可崩 tab）降到 ~128*长宽比 量级。
+//   只给 resizeWidth 时按比例缩（规范行为）；竖图宽 128 后长边仍 >128，交给下游 resampleBytes 收口。
+//   老浏览器不认 options / 解码失败 → 退全尺寸 decodeImageFile（行为同 v0.9.29，只是没了省内存优化）。
+async function _decodeForThumb(blob: Blob): Promise<DecodedImage> {
+  try {
+    return await createImageBitmap(blob, { resizeWidth: IMAGE_THUMB_MAX, resizeQuality: "high" });
+  } catch {
+    return decodeImageFile(blob);
+  }
+}
+
 /** 整份图片字节 → 缩略图 jpeg Blob（纯派生，不碰缓存；picker 之外想复用也从这走）。 */
 export async function makeImageThumb(fileBlob: Blob): Promise<Blob> {
-  const bitmap = await decodeImageFile(fileBlob);
+  const bitmap = await _decodeForThumb(fileBlob);
   const px = imageSourceToBytes(bitmap);
   (bitmap as ImageBitmap).close?.();
   const { w, h } = thumbTargetSize(px.w, px.h, IMAGE_THUMB_MAX);
