@@ -1,5 +1,7 @@
 # WeebPaint 改名 handoff（宣发 sprint 内执行）
 
+> **战报 2026-08-20 深夜：主体执行完毕。** v0.10.0 全量改名（含内部 key）已推 dev；.ora=新写旧读双认+`weebpaint:format=1` schema 戳（双读回归测试在 test/ora-rename-dualread.test.mjs）；prod 快照 v0.9.35 先行；文件夹/家族引用/OneDrive `.webpaint→.weebpaint` 均完成。**§1 的公私仓预案被推翻**（2026-08-20 深夜 grill）：走**公开工坊道**——现仓 rename `weebpaint` 保真史公开+毕业分拣（全绿零手术），并升级 custom domain **weebpaint.com** 正宫（cert/双通道/301 全绿，Azure 现役 `18c496a6` 已补新 URI，真机开通）。终态见家族 CLAUDE.md「家/出货模型」2026-08-20 修订节 + memory `project_webpaint_rename`。余量=微画未 pin、icon/README 内容轮、0.10 推 prod（user 一起验）。
+
 > as-of v0.9.29 / 2026-08-20 晚
 > 读者 = 执行改名的 agent（不预设读过本轮聊天）。协调 agent 只跟进度，执行归你。
 > 出处纪律：标【原话】= user 2026-08-20 本轮聊天逐字/近逐字；其余为 AI 整理、user 过目。
