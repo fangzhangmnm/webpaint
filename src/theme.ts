@@ -31,7 +31,11 @@ function readCssColor(name: string) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 function applyThemeColorsToBoard() {
-  board.setThemeColors({ voidColor: readCssColor("--void") });
+  board.setThemeColors({
+    voidColor: readCssColor("--void"),
+    voidDotColor: readCssColor("--void-dot"),     // 透明显示模式：点网格色
+    docFrameColor: readCssColor("--doc-frame"),   // 透明显示模式：doc 细框（白@日/黑@夜）
+  });
 }
 
 // 只贴 DOM/board/label（**不写盘**）——boot 贴 / 对账热重贴 复用（换主题=换 CSS，无 reboot）。

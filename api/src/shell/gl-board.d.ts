@@ -54,5 +54,9 @@ export declare class GLBoard {
         dstX: number;
         dstY: number;
     } | null;
-    render(doc: GLDoc, affine6: number[], canvasW: number, canvasH: number, scale: number, voidColor: string, docBg: string | null, floats?: FloatInput[], stampOverlay?: OverlayInput | null, liveSyncLeaf?: DocLeaf | null, surrogate?: SurrogateInput | null): void;
+    render(doc: GLDoc, affine6: number[], canvasW: number, canvasH: number, scale: number, voidColor: string, docBg: string | null, floats?: FloatInput[], stampOverlay?: OverlayInput | null, liveSyncLeaf?: DocLeaf | null, surrogate?: SurrogateInput | null, gridBg?: {
+        dotColor: string;
+        stepPx: number;
+        radiusPx: number;
+    } | null): void;
 }

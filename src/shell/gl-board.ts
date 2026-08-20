@@ -11,7 +11,7 @@ import { RasterService } from "../backend/gl/raster-service.ts";
 import type { FloatInput, OverlayInput, SurrogateInput } from "../backend/gl/gl-room.ts";
 import type { LayerPixels } from "../backend/tiles/tile-layer.ts";
 import type { DocNode, DocLeaf } from "../backend/gl/gl-doc-bridge.ts";
-import type { Background } from "../backend/gl/gl-compositor.ts";
+import type { Background, ScreenGridBg } from "../backend/gl/gl-compositor.ts";
 
 export interface GLDoc { layers: DocNode[]; width: number; height: number; }
 // board live-sync 接缝用的叶类型别名（结构上 = DocLeaf，board 传活动 Layer 进来）。
@@ -91,14 +91,18 @@ export class GLBoard {
 
   // 渲染一帧。affine6 = board _applyDocTransform 的 device-px 6 参；canvasW/H = device px。
   // liveSyncLeaf 只取 id（标 updated，像素变更由 contentVersion 快路径自己发现）。
-  render(doc: GLDoc, affine6: number[], canvasW: number, canvasH: number, scale: number, voidColor: string, docBg: string | null, floats: FloatInput[] = [], stampOverlay: OverlayInput | null = null, liveSyncLeaf: DocLeaf | null = null, surrogate: SurrogateInput | null = null): void {
+  // gridBg 非空 = 透明显示模式（docBg 应为 null）：present 时整屏「主题底(voidColor)+点网格」，doc 真透明叠上。
+  render(doc: GLDoc, affine6: number[], canvasW: number, canvasH: number, scale: number, voidColor: string, docBg: string | null, floats: FloatInput[] = [], stampOverlay: OverlayInput | null = null, liveSyncLeaf: DocLeaf | null = null, surrogate: SurrogateInput | null = null, gridBg: { dotColor: string; stepPx: number; radiusPx: number } | null = null): void {
     if (this._glctx.isLost) return;
     const bg: Background | undefined = docBg === "checker" ? "checker"
       : docBg ? [...hexToRgb(docBg), 1] as [number, number, number, number] : undefined;
+    const screenGrid: ScreenGridBg | null = gridBg
+      ? { bg: hexToRgb(voidColor), dot: hexToRgb(gridBg.dotColor), stepPx: gridBg.stepPx, radiusPx: gridBg.radiusPx }
+      : null;
     this._tree.renderFrame(
       doc.layers, doc.width, doc.height, bg,
       affine6, canvasW, canvasH, scale, hexToRgb(voidColor),
-      floats, stampOverlay, surrogate, liveSyncLeaf ? liveSyncLeaf.id : null,
+      floats, stampOverlay, surrogate, liveSyncLeaf ? liveSyncLeaf.id : null, screenGrid,
     );
   }
 }

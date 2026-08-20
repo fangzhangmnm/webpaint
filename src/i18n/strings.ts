@@ -41,7 +41,7 @@ export const S = {
   "account.add.aria":{ zh: "账号 / 新增",      en: "Account / Add",   ja: "アカウント / 追加", tok: "nimi sina / sin" },
 
   // ── ⋯ 设置菜单 ────────────────────────────────────────────────
-  "menu.checkerboard":     { zh: "透明背景显示棋盘", en: "Checkerboard for transparency", ja: "透明部分に市松模様", tok: "leko pi kule kon" }, 
+  "menu.checkerboard":     { zh: "显示透明背景", en: "Show transparency", ja: "透明部分を表示", tok: "lukin e kule kon" },
   "menu.longPressPick":    { zh: "单指长按吸色", en: "Long-press to pick color", ja: "長押しでスポイト", tok: "luka awen li kama e kule" }, 
   "menu.singleFingerDraw": { zh: "单指绘画",   en: "One-finger drawing", ja: "一本指で描画", tok: "luka wan li sitelen" }, 
   "menu.pixelGrid":        { zh: "像素栅格（放大时）", en: "Pixel grid (when zoomed)", ja: "ピクセルグリッド（拡大時）", tok: "kulupu leko lili (lon lukin suli)" }, 
@@ -147,7 +147,7 @@ export const S = {
 
   // ── 状态行（本切片只接静态默认值 + 设置菜单反馈；setStatus 大面留后续切片）──
   "status.ready":         { zh: "就绪",        en: "Ready",           ja: "準備完了", tok: "pona" },
-  "status.checkerboard":  { zh: "透明棋盘 · {s}", en: "Checkerboard · {s}", ja: "市松模様 · {s}", tok: "leko pi kule kon · {s}" },
+  "status.checkerboard":  { zh: "透明背景 · {s}", en: "Transparency · {s}", ja: "透明表示 · {s}", tok: "lukin kule kon · {s}" },
   "status.longPressPick": { zh: "长按吸色 · {s}", en: "Long-press pick · {s}", ja: "長押しスポイト · {s}", tok: "luka awen li kama e kule · {s}" },
   "status.singleFingerDraw":{ zh: "单指绘画 · {s}", en: "One-finger draw · {s}", ja: "一本指描画 · {s}", tok: "luka wan li sitelen · {s}" },
   "status.pixelGrid":     { zh: "像素栅格 · {s}", en: "Pixel grid · {s}", ja: "ピクセルグリッド · {s}", tok: "kulupu leko lili · {s}" },

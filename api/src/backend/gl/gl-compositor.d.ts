@@ -31,6 +31,12 @@ export interface Acc {
     read: PooledFBO;
     write: PooledFBO;
 }
+export interface ScreenGridBg {
+    bg: [number, number, number];
+    dot: [number, number, number];
+    stepPx: number;
+    radiusPx: number;
+}
 export declare class GLCompositor {
     private _glctx;
     private _prec;
@@ -49,7 +55,8 @@ export declare class GLCompositor {
     pass(arena: Gl2TileArena, srcKind: SourceKind, srcIndex: IndexTexture | null, groupTex: Gl2TexSource | null, mode: BlendMode, opacity: number, clipIndex: IndexTexture | null, acc: Acc, docW: number, docH: number, overlay?: OverlayDesc | null, clipTex?: Gl2TexSource | null): void;
     floatPass(f: FloatDesc, acc: Acc, docW: number, docH: number, clipBase?: FloatDesc | null): void;
     presentTo(srcTex: Gl2TexSource, target: PooledFBO, w: number, h: number, unpremult?: boolean): void;
-    presentToScreenAffine(srcTex: Gl2TexSource, docW: number, docH: number, affine: number[], canvasW: number, canvasH: number, smooth?: boolean, clearColor?: [number, number, number, number] | null): void;
+    presentToScreenAffine(srcTex: Gl2TexSource, docW: number, docH: number, affine: number[], canvasW: number, canvasH: number, smooth?: boolean, clearColor?: [number, number, number, number] | null, over?: boolean): void;
+    drawScreenBg(grid: ScreenGridBg, canvasW: number, canvasH: number): void;
     warpToBytes(srcCanvas: {
         data: Float32Array;
         w: number;

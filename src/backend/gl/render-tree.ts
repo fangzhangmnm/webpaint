@@ -16,7 +16,7 @@
 
 import { IndexTexture } from "./gpu-tile-pool.ts";
 import { TILE_SIZE, tilesAcross, tilesDown, tileCoord } from "../../common/tile-geometry.ts";
-import type { Background } from "./gl-compositor.ts";
+import type { Background, ScreenGridBg } from "./gl-compositor.ts";
 import type { DocNode, DocLeaf } from "./gl-doc-bridge.ts";
 import { buildPlan } from "./render-plan.ts";
 import type { Plan, PlanStep, SegBuild, BgKind } from "./render-plan.ts";
@@ -74,7 +74,7 @@ export class RenderTree {
     nodes: DocNode[], docW: number, docH: number, bg: Background | undefined,
     affine6: number[], canvasW: number, canvasH: number, scale: number, voidRgb: [number, number, number],
     floats: FloatInput[], stampOverlay: OverlayInput | null, surrogate: SurrogateInput | null,
-    liveSyncLeafId: number | null,
+    liveSyncLeafId: number | null, screenGrid: ScreenGridBg | null = null,
   ): void {
     const room = this._room;
     this.frameStats.segBuilds = 0; this.frameStats.segHits = 0; this.frameStats.cachingDegraded = false;
@@ -110,7 +110,7 @@ export class RenderTree {
 
     // 快路径：无 dirty 无动态、display 有效且签名没变 → 只 present（pan/zoom 帧）。
     if (!this._dirty && updated.size === 0 && this._display && this._displaySig === sig) {
-      this._present(docW, docH, affine6, canvasW, canvasH, scale, voidRgb);
+      this._present(docW, docH, affine6, canvasW, canvasH, scale, voidRgb, screenGrid);
       return;
     }
 
@@ -171,7 +171,7 @@ export class RenderTree {
     if (this._display) room.glctx.returnFBO(this._display);
     this._display = fresh;
     this._displaySig = sig;
-    this._present(docW, docH, affine6, canvasW, canvasH, scale, voidRgb);
+    this._present(docW, docH, affine6, canvasW, canvasH, scale, voidRgb, screenGrid);
   }
 
   // ---- 内部：签名 / 段有效性 ----
@@ -230,7 +230,13 @@ export class RenderTree {
     }
   }
 
-  private _present(docW: number, docH: number, affine6: number[], canvasW: number, canvasH: number, scale: number, voidRgb: [number, number, number]): void {
+  private _present(docW: number, docH: number, affine6: number[], canvasW: number, canvasH: number, scale: number, voidRgb: [number, number, number], screenGrid: ScreenGridBg | null): void {
+    if (screenGrid) {
+      // 透明显示模式：整屏「主题底 + 屏幕空间点网格」代替 void clear，doc 以真透明（premult-over）叠上。
+      this._room.comp.drawScreenBg(screenGrid, canvasW, canvasH);
+      this._room.comp.presentToScreenAffine(this._display!, docW, docH, affine6, canvasW, canvasH, scale < 1, null, true);
+      return;
+    }
     // void 底色 clear 并入 present draw（draw spec 的 clear = 全画布，doc 外区域即 void 色）。
     this._room.comp.presentToScreenAffine(this._display!, docW, docH, affine6, canvasW, canvasH, scale < 1,
       [voidRgb[0], voidRgb[1], voidRgb[2], 1]);

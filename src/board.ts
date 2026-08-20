@@ -128,6 +128,8 @@ export class Board {
   _cursor: Cursor | null;
   _showCursor: boolean;
   _voidColor: string;
+  _voidDotColor: string;    // 透明显示模式的点网格色（CSS --void-dot，微不可见的低对比）
+  _docFrameColor: string;   // 透明显示模式的 doc 细框色（CSS --doc-frame，白@日/黑@夜）
   _showCheckerboard: boolean;
   _pixelGridEnabled: boolean;
   _docGridOn: boolean;      // #10 主栅格（per-doc，desk.grid）
@@ -175,6 +177,8 @@ export class Board {
 
     // 主题色：从 CSS 变量取
     this._voidColor = "#e6e2d6";
+    this._voidDotColor = "#d6d1c2";
+    this._docFrameColor = "#ffffff";
     // 棋盘背景：开后底层用半透明灰白格替代白纸显示常量。
     // 适合做透明素材 / 看图层 alpha 通道。
     this._showCheckerboard = false;
@@ -277,8 +281,10 @@ export class Board {
     this._gridSig = "";
     this.requestRender();
   }
-  setThemeColors({ voidColor }: { voidColor?: string }) {
+  setThemeColors({ voidColor, voidDotColor, docFrameColor }: { voidColor?: string; voidDotColor?: string; docFrameColor?: string }) {
     if (voidColor) this._voidColor = voidColor;
+    if (voidDotColor) this._voidDotColor = voidDotColor;
+    if (docFrameColor) this._docFrameColor = docFrameColor;
     this.requestRender();
   }
 
@@ -623,7 +629,10 @@ export class Board {
   // GL 渲染路径：GL canvas 渲 doc（void 底 + doc 背景 + 图层 + live overlay，视口仿射）；
   //   本 2D canvas 清透明、只画 lasso overlay + doc 边框（GL 透出 doc）。
   _renderFullGL(ctx: Ctx2D, W: number, H: number) {
-    const docBg = this._showCheckerboard ? "checker" : "#ffffff";   // 白纸=显示常量（doc 无纸色）；棋盘背景接缝（GL 合成器 doc 空间棋盘）
+    // 白纸=显示常量（doc 无纸色）。透明显示（v0.10.5，Procreate 式）：不再画棋盘——doc 真透明
+    //   （bg=null），present 叠在「主题底(void)+屏幕空间点网格」上，拖动时内容滑过静止的点。
+    const transparentBg = this._showCheckerboard;
+    const docBg = transparentBg ? null : "#ffffff";
     // live-sync：原地改真层的笔（draw/erase pixelMode）描边中把活动叶标 updated
     //   （执行器 contentVersion 快路径每帧只重传变更 tile）。液化/filterBrush/形状笔 pixelMode
     //   改走 _glSurrogate 的影子变体（C6 stroke 替身叶，同一条增量 sync 路）。
@@ -636,15 +645,16 @@ export class Board {
       W, H, this.viewport.scale, this._voidColor, docBg,
       this._glFloatInputs(), stampOverlay,
       liveSync as unknown as GLLeaf | null, this._glSurrogate(),
+      transparentBg ? { dotColor: this._voidDotColor, stepPx: 24 * this.dpr, radiusPx: 1.25 * this.dpr } : null,
     );
-    // 2D 叠层（透明底）：lasso 蚂蚁线/handles + doc 边框
+    // 2D 叠层（透明底）：lasso 蚂蚁线/handles + doc 边框（透明显示=主题细框 白@日/黑@夜；白纸=淡黑）
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, W, H);
     this._applyDocTransform(ctx);
     const { scale } = this.viewport;
     this._drawLassoOverlay(ctx, scale);
     this._drawPerspGizmo(ctx, scale);
-    ctx.strokeStyle = "rgba(0,0,0,0.18)";
+    ctx.strokeStyle = transparentBg ? this._docFrameColor : "rgba(0,0,0,0.18)";
     ctx.lineWidth = 1 / scale;
     ctx.strokeRect(0, 0, this.doc.width, this.doc.height);
   }
@@ -877,7 +887,7 @@ export class Board {
   //   GL 失败态返 null（v351 起无 WebGL2 = 无画布）。底与显示同源（棋盘/背景色）。
   pickCompositeColor(ix: number, iy: number): [number, number, number, number] | null {
     if (!this._glBoard) return null;
-    const docBg = this._showCheckerboard ? "checker" : "#ffffff";   // 白纸=显示常量（doc 无纸色）
+    const docBg = this._showCheckerboard ? this._voidColor : "#ffffff";   // 白纸=显示常量；透明显示=主题底色（吸到的≈眼睛看到的，点网格忽略）
     // v0.4.11（拍板#8）：调整预览开着时取替身（WYSIWYG——吸到的=眼睛看到的）。
     // v0.5.11（user 拍板）：fill 预览挂着时同款待遇——吸到的=预览色，不是底下真实像素。
     return this._glBoard.pickColor(this.doc as unknown as GLDoc, docBg, ix, iy, this._glSurrogate(), this._glFillOverlay());

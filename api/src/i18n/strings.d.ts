@@ -157,10 +157,10 @@ export declare const S: {
         readonly tok: "nimi sina / sin";
     };
     readonly "menu.checkerboard": {
-        readonly zh: "透明背景显示棋盘";
-        readonly en: "Checkerboard for transparency";
-        readonly ja: "透明部分に市松模様";
-        readonly tok: "leko pi kule kon";
+        readonly zh: "显示透明背景";
+        readonly en: "Show transparency";
+        readonly ja: "透明部分を表示";
+        readonly tok: "lukin e kule kon";
     };
     readonly "menu.longPressPick": {
         readonly zh: "单指长按吸色";
@@ -643,10 +643,10 @@ export declare const S: {
         readonly tok: "pona";
     };
     readonly "status.checkerboard": {
-        readonly zh: "透明棋盘 · {s}";
-        readonly en: "Checkerboard · {s}";
-        readonly ja: "市松模様 · {s}";
-        readonly tok: "leko pi kule kon · {s}";
+        readonly zh: "透明背景 · {s}";
+        readonly en: "Transparency · {s}";
+        readonly ja: "透明表示 · {s}";
+        readonly tok: "lukin kule kon · {s}";
     };
     readonly "status.longPressPick": {
         readonly zh: "长按吸色 · {s}";

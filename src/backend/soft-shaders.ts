@@ -420,7 +420,7 @@ const warpbake: CpuDraw = (c) => {
 
 // ---- 注册表 ----
 // GPU-only 显式登记（屏显专属，headless 不需要；SoftGl2Port draw 到这些名字响亮 throw）。
-const GPU_ONLY = new Set<string>(["present-affine"]);
+const GPU_ONLY = new Set<string>(["present-affine", "present-affine-over", "screen-bg"]);
 
 // 按名解析：命中 CPU 实现 → 返回；GPU-only → "gpu-only"；两边都没有 → null（program() 响亮拒）。
 export function resolveCpuProgram(name: string): CpuDraw | "gpu-only" | null {

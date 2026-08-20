@@ -35,6 +35,9 @@
   --danger: #c0392b;
   /* 画布外的"空地" — 比 bg 暗一档，给画布边缘视觉边界 */
   --void: #e6e2d6;
+  /* 透明显示模式（v0.10.5）：点网格色（比 void 暗一丝，微不可见）+ doc 细框色（白@日/黑@夜） */
+  --void-dot: #d6d1c2;
+  --doc-frame: #ffffff;
   --shadow: 0 6px 24px rgba(0, 0, 0, 0.08);
   --radius: 12px;
 }
@@ -49,6 +52,8 @@
   --accent: #d8b48a;
   --danger: #e57369;
   --void: #0a0a09;
+  --void-dot: #1c1c1a;
+  --doc-frame: #000000;
   --shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
 }
 
@@ -63,6 +68,8 @@
     --accent: #d8b48a;
     --danger: #e57369;
     --void: #0a0a09;
+    --void-dot: #1c1c1a;
+    --doc-frame: #000000;
     --shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
   }
 }

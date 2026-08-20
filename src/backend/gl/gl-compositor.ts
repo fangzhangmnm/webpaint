@@ -220,6 +220,42 @@ void main(){
   o = warpSample(u_src, u_srcSize, u_Hinv, u_mode, u_bakeOrigin + v_uv * u_bakeSize);   // 直值（不预乘、不合成）
 }`;
 
+// 透明显示模式（v0.10.5，Procreate 式）：透明不画棋盘，present 时 doc 以真透明叠在
+//   「主题底色 + 屏幕空间点网格」上（点网格钉在屏幕坐标 → 拖动画布时内容滑过静止的点，
+//   透明区一眼可辨）。参数由 board 从 CSS 主题变量（--void / --void-dot）+ dpr 算好递入。
+export interface ScreenGridBg {
+  bg: [number, number, number];    // 底色（= 主题 void 色，doc 内外无缝）
+  dot: [number, number, number];   // 点色（微不可见的低对比）
+  stepPx: number;                  // 点距（device px）
+  radiusPx: number;                // 点半径（device px）
+}
+
+// 整屏底 pass：主题底色 + 点网格（gl_FragCoord = device px → 屏幕空间，pan/zoom 不动）。
+const SCREEN_BG_FRAG = `#version 300 es
+precision highp float;
+uniform vec3 u_bgColor;
+uniform vec3 u_dotColor;
+uniform float u_dotStep;      // device px
+uniform float u_dotRadius;    // device px
+out vec4 o;
+void main(){
+  vec2 p = mod(gl_FragCoord.xy, u_dotStep) - 0.5 * u_dotStep;
+  float m = 1.0 - smoothstep(u_dotRadius - 0.75, u_dotRadius + 0.75, length(p));
+  o = vec4(mix(u_bgColor, u_dotColor, m), 1.0);
+}`;
+
+// present 的叠加变体：源（直值累积器）预乘输出，配 premult-over blend 叠到已画好的屏幕底上
+//   （透明显示模式的 doc 四边形；朝向由 PRESENT_AFFINE_VERT 顶点处理，无 flip/unpremult 参数）。
+const PRESENT_OVER_FRAG = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_src;
+out vec4 o;
+void main(){
+  vec4 p = texture(u_src, v_uv);
+  o = vec4(p.rgb * p.a, p.a);
+}`;
+
 const PRESENT_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
@@ -387,23 +423,39 @@ export class GLCompositor {
   // affine = [a,b,c,d,e,f]（board _applyDocTransform 的 setTransform 参数）；canvasW/H = device px。
   // smooth = 缩小(scale<1)用 LINEAR 抗锯齿；放大(scale>1)用 NEAREST 看像素（对齐 2D board imageSmoothing 策略）。
   // clearColor 非空 = 先清整画布（render-tree 的 void 底色）；doc 之外的画布区不被本 draw 覆盖。
-  presentToScreenAffine(srcTex: Gl2TexSource, docW: number, docH: number, affine: number[], canvasW: number, canvasH: number, smooth = true, clearColor: [number, number, number, number] | null = null): void {
-    this._glctx.program("present-affine", PRESENT_AFFINE_VERT, PRESENT_FRAG);
+  // over = 透明显示模式：doc 预乘输出 + premult-over blend 叠到已画好的屏幕底（drawScreenBg）上，不 clear。
+  //   ⚠已知小账：累积器是直值存储，scale<1 的 LINEAR 采样在描边边缘会向透明 texel 的 rgb=0 略偏
+  //   （缩小视图下极淡的暗边；不透明底模式无此项）。真机验收盯一眼，重了再上预乘中间面。
+  presentToScreenAffine(srcTex: Gl2TexSource, docW: number, docH: number, affine: number[], canvasW: number, canvasH: number, smooth = true, clearColor: [number, number, number, number] | null = null, over = false): void {
+    const prog = over ? "present-affine-over" : "present-affine";
+    this._glctx.program(prog, PRESENT_AFFINE_VERT, over ? PRESENT_OVER_FRAG : PRESENT_FRAG);
     const [a, b, c, d, e, f] = affine;
+    const uniforms: NonNullable<Parameters<Gl2Port["draw"]>[0]["uniforms"]> = {
+      u_docSize: [docW, docH],
+      u_canvas: [canvasW, canvasH],
+      // setTransform 6 参 [[a,c,e],[b,d,f],[0,0,1]] 的 row-major 排布（契约：mat3 一律 row-major）。
+      u_affine: [a, c, e, b, d, f, 0, 0, 1],
+    };
+    if (!over) { uniforms.u_flipY = 0; uniforms.u_unpremult = 0; }   // 朝向由顶点 clip-y 处理
     this._glctx.draw({
-      program: "present-affine",
+      program: prog,
       target: "screen",
       viewport: [0, 0, canvasW, canvasH],
-      clear: clearColor ?? undefined,
-      uniforms: {
-        u_flipY: 0,   // 朝向由顶点 clip-y 处理
-        u_unpremult: 0,
-        u_docSize: [docW, docH],
-        u_canvas: [canvasW, canvasH],
-        // setTransform 6 参 [[a,c,e],[b,d,f],[0,0,1]] 的 row-major 排布（契约：mat3 一律 row-major）。
-        u_affine: [a, c, e, b, d, f, 0, 0, 1],
-      },
+      clear: over ? undefined : (clearColor ?? undefined),
+      blend: over ? "premult-over" : undefined,
+      uniforms,
       textures: { u_src: { src: srcTex, filter: smooth ? "linear" : "nearest" } },
+    });
+  }
+
+  // 透明显示模式的整屏底：主题底色 + 屏幕空间点网格（present doc 之前画，代替 void clear）。
+  drawScreenBg(grid: ScreenGridBg, canvasW: number, canvasH: number): void {
+    this._glctx.program("screen-bg", COMPOSITE_VERT, SCREEN_BG_FRAG);
+    this._glctx.draw({
+      program: "screen-bg",
+      target: "screen",
+      viewport: [0, 0, canvasW, canvasH],
+      uniforms: { u_bgColor: grid.bg, u_dotColor: grid.dot, u_dotStep: grid.stepPx, u_dotRadius: grid.radiusPx },
     });
   }
 
