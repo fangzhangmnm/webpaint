@@ -23,6 +23,9 @@ export interface EditorAdapter {
   // 当前内容 → { bytes, peek }。peek = **content-blind 的不透明 sidecar 字节**（app 域自己决定语义，
   //   如画作缩略图/文本摘要；editor-session 不看、只把它作 store.save 的 hint 透传）。无则 peek 省略。
   encode(): Promise<{ bytes: Blob; peek?: Blob | null }>;
+  // 可选：某身份的字节**成功落盘**后 fire（本地写成即算；push 与否不影响）。app 域用来作废派生缓存
+  //   （如画作缩略图）。本模块仍 content-blind——只报「name 的字节变了」，不知道变了什么。
+  onSaved?(name: string): void;
 }
 
 /** editor-session 消费的 store 最小面（结构类型；真 sync-store 天然满足，测试可 mock）。 */
@@ -139,6 +142,9 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
       //   保住 push-pending 下次重试。宁可多推一次，也不要静默清干净（优先级②）。
       if (tryPush) _pushPending = res?.pushed !== true;
       if (_createFor === _name) _createFor = null;   // 首存成功 → 这个身份已建，后续都是编辑
+      // 落盘成功 → 通知 app 域字节变了（缩略图等派生缓存作废）。save() 能 resolve = 本地已写成
+      //   （push 失败被 store 内部 catch 成 banner，不影响「字节已变」这个事实）。
+      if (_name != null) editor.onSaved?.(_name);
     } catch (e) {
       // 还原**入场时的真实状态**（不是无脑置脏）：本来脏就继续脏（工作没丢、重试武装着）；
       //   本来干净（force save 一个未改动的 doc）就保持干净，别造一个假的脏 badge。

@@ -27,7 +27,7 @@ import {
   watchFolder, listGalleryTrash, openCloudImage,
 } from "../app-store.ts";
 import type { CloudImageItem } from "../app-store.ts";
-import { getOrFetchCloudThumb, invalidateCachedThumb } from "./cloud-thumb-cache.ts";
+import { getOrFetchCloudThumb, invalidateCachedThumb, onThumbInvalidated } from "./cloud-thumb-cache.ts";
 import { getOrFetchImageThumb } from "./image-thumbs.ts";
 import { imageThumbToken, imageTwinBareName, mimeForImageName } from "./cloud-image-model.ts";
 import { importImageAsNewDoc } from "../import-image.ts";
@@ -91,6 +91,13 @@ export interface GalleryHost {
 // 云端拉回密文 peek（store.encryption.isEncryptedPeekBlob 判）→ file.decryptPeek。锁定 → 锁 icon
 // （点它 emit('unlock', name) → 图库走交互解锁）；解锁 → watch 锁态原地重试。
 // 解出的 PNG 只进 objectURL，永不写 IDB。
+// per-key 缩略图失效 rev（v0.10.2 缩略图冻结根修的 gallery 半边）：保存/加解密 invalidate 时 bump，
+//   ThumbCell watch 它原地重取。为什么不能只靠 thumbToken：①tile 被 keyed v-for 复用，onMounted
+//   一辈子一次（v0.9.15 防误触改动后同夹刷新不再清栅格重建，靠销毁重建刷图的隐式路径已断）；
+//   ②token 的 lastModified 云端优先（store listing seam），本机保存后推送未落地期间 token 不变。
+const _thumbRev = reactive(new Map<string, number>());   // key = 全名 X.ora（与 cache key 逐字一致）
+onThumbInvalidated((key: string) => { _thumbRev.set(key, (_thumbRev.get(key) ?? 0) + 1); });
+
 const ThumbCell = defineComponent({
   name: "ThumbCell",
   props: {
@@ -133,6 +140,20 @@ const ThumbCell = defineComponent({
       if (png) { locked.value = false; setBlob(png); }
       else locked.value = true;
     };
+    let fetchSeq = 0;   // 只认最新一次取图（token 变化连发时过期结果丢弃，防旧图后到反盖新图）
+    const fetchThumb = () => {
+      const seq = ++fetchSeq;
+      // 库无 itemId/downloadUrl（内容盲）：按**裸 name**（props.alt = item.name）走 store.getPeek，
+      //   新鲜度戳 = 云 lastModified / 本地 updatedAt / size（token 变 = 重拉）。
+      getOrFetchCloudThumb(props.alt, props.thumbToken)
+        .then(({ blob }: { blob: Blob }) => {
+          if (seq !== fetchSeq) return;
+          showCloud.value = false;
+          if (_store.encryption.isEncryptedPeekBlob(blob)) { cloudEncBlob = blob; return tryDecrypt(); }
+          setBlob(blob);
+        })
+        .catch((err: unknown) => reportError(new Error("[gallery] thumb: " + String(err)), "log"));
+    };
 
     onMounted(() => {
       if (props.localThumb) { setBlob(props.localThumb); return; }
@@ -145,21 +166,20 @@ const ThumbCell = defineComponent({
           for (const e of entries) {
             if (!e.isIntersecting) continue;
             obs?.disconnect(); obs = null;
-            // 库无 itemId/downloadUrl（内容盲）：按**裸 name**（props.alt = item.name）走 store.getPeek，
-            //   新鲜度戳 = 云 lastModified / 本地 updatedAt / size（token 变 = 重拉）。
-            getOrFetchCloudThumb(props.alt, props.thumbToken)
-              .then(({ blob }: { blob: Blob }) => {
-                showCloud.value = false;
-                if (_store.encryption.isEncryptedPeekBlob(blob)) { cloudEncBlob = blob; return tryDecrypt(); }
-                setBlob(blob);
-              })
-              .catch((err: unknown) => reportError(new Error("[gallery] thumb: " + String(err)), "log"));
+            fetchThumb();
           }
         }, { rootMargin: "600px 0px", threshold: 0.01 });
         nextTick(() => { if (obs && root.value) obs.observe(root.value); });
       }
     });
     watch(() => _lockState.unlocked, () => { if (locked.value || props.encName) tryDecrypt(); });
+    // 失效 rev / token 变 → **原地重取**：复用的 tile 没有第二次 onMounted（见 _thumbRev 注）。
+    watch(() => [props.thumbToken, _thumbRev.get(sessionFileName(props.alt)) ?? 0], () => {
+      if (props.localThumb) return;                      // 静态 blob 分支不走缓存
+      if (props.encName) { void tryDecrypt(); return; }  // 本地加密件：readPeek 直读 store（无缓存层），重解即最新
+      if (!props.fetchable || obs) return;               // 还没进过视口 → observer 触发时自会用当时的新 token
+      fetchThumb();
+    });
     onUnmounted(() => { obs?.disconnect(); if (objUrl) URL.revokeObjectURL(objUrl); });
     return { url, showCloud, locked, root, ICON, lockedTitle: t("gal.lockedThumb") };
   },
@@ -191,21 +211,29 @@ const ImageThumbCell = defineComponent({
     const root = ref<HTMLElement | null>(null);
     let objUrl: string | null = null;
     let obs: IntersectionObserver | null = null;
+    let fetchSeq = 0;
+    const fetchThumb = () => {
+      const seq = ++fetchSeq;
+      getOrFetchImageThumb(props.path, props.token)
+        .then((blob: Blob) => {
+          if (seq !== fetchSeq) return;
+          if (objUrl) URL.revokeObjectURL(objUrl);
+          objUrl = URL.createObjectURL(blob); url.value = objUrl;
+        })
+        .catch((err: unknown) => reportError(new Error("[gallery] image thumb: " + String(err)), "log"));
+    };
     onMounted(() => {
       obs = new IntersectionObserver((entries) => {
         for (const e of entries) {
           if (!e.isIntersecting) continue;
           obs?.disconnect(); obs = null;
-          getOrFetchImageThumb(props.path, props.token)
-            .then((blob: Blob) => {
-              if (objUrl) URL.revokeObjectURL(objUrl);
-              objUrl = URL.createObjectURL(blob); url.value = objUrl;
-            })
-            .catch((err: unknown) => reportError(new Error("[gallery] image thumb: " + String(err)), "log"));
+          fetchThumb();
         }
       }, { rootMargin: "600px 0px", threshold: 0.01 });
       nextTick(() => { if (obs && root.value) obs.observe(root.value); });
     });
+    // token 变（云端图片被外部改写）→ 原地重取；tile 复用同 ThumbCell（keyed v-for，无第二次 onMounted）。
+    watch(() => props.token, () => { if (!obs) fetchThumb(); });
     onUnmounted(() => { obs?.disconnect(); if (objUrl) URL.revokeObjectURL(objUrl); });
     return { url, root };
   },

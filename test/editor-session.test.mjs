@@ -245,3 +245,41 @@ describe("editor-session › push-pending（autosave 后退出仍推）", () => 
     await es.flushLocal(); eq(store.saves[0].name, "new.ora"); eq(store.saves[0].tryPush, false);
   });
 });
+
+// v0.10.2：onSaved（保存成功回调）——app 域用它作废缩略图等派生缓存（缩略图冻结根修的 es 半边）。
+describe("editor-session › onSaved 保存成功回调", () => {
+  it("落盘成功 → onSaved(name) fire（flushLocal / flushAndPush 都算）", async () => {
+    const store = mockStore(), editor = mockEditor();
+    const savedNames = [];
+    editor.onSaved = (name) => savedNames.push(name);
+    const es = createEditorSession({ store, editor });
+    await es.open("a.ora"); editor.fireChange();
+    await es.flushLocal();
+    eq(savedNames.length, 1); eq(savedNames[0], "a.ora");
+    editor.fireChange();
+    await es.flushAndPush();
+    eq(savedNames.length, 2);
+  });
+  it("不脏 no-op → 不 fire；save 抛异常 → 不 fire（字节没变就别作废缓存）", async () => {
+    const store = mockStore(), editor = mockEditor();
+    const savedNames = [];
+    editor.onSaved = (name) => savedNames.push(name);
+    const es = createEditorSession({ store, editor });
+    await es.open("a.ora");
+    await es.flushLocal();                    // 不脏 no-op
+    eq(savedNames.length, 0, "没保存就不 fire");
+    editor.fireChange();
+    store.file = () => ({ save: async () => { throw new Error("disk full"); } });
+    let threw = false;
+    try { await es.flushLocal(); } catch (_) { threw = true; }
+    eq(threw, true, "save 失败要抛（前置条件）");
+    eq(savedNames.length, 0, "保存失败不 fire（本地一个字节都没写成）");
+  });
+  it("未注册 onSaved（可选接口）→ 保存照常不炸", async () => {
+    const store = mockStore(), editor = mockEditor();
+    const es = createEditorSession({ store, editor });
+    await es.open("a"); editor.fireChange();
+    await es.flushLocal();
+    eq(store.saves.length, 1);
+  });
+});

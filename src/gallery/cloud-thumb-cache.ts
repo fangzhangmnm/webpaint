@@ -58,9 +58,18 @@ export async function writeCachedThumb(name: string, token: string, blob: Blob):
   }
 }
 
-/** 让一件作品的缩略图缓存立即作废（bytes 变了：加密/解密/revert 后）。删同 key，下次 miss 重拉。 */
+// 失效广播（v0.10.2）：删条目只解决「下次 miss」，救不了**在世的 tile**——gallery 的 ThumbCell 被
+//   keyed v-for 复用、onMounted 一辈子只跑一次；且 token 的 lastModified 云端优先（listing seam），
+//   本机保存后推送未落地期间 token 纹丝不动 → 单靠 token 比对听不到本地保存。所以 invalidate 同时
+//   通知订阅者（gallery 用它 bump per-key rev → tile 原地重取；getPeek 本地优先=刚写的字节）。
+type ThumbInvalidatedListener = (key: string) => void;   // key = _key(name) = 全名 X.ora
+const _invalidated = new Set<ThumbInvalidatedListener>();
+export function onThumbInvalidated(fn: ThumbInvalidatedListener): void { _invalidated.add(fn); }
+
+/** 让一件作品的缩略图缓存立即作废（bytes 变了：保存/加密/解密/revert 后）。删同 key + 广播，在世 tile 重取。 */
 export async function invalidateCachedThumb(name: string): Promise<void> {
   try { await deleteThumb(_key(name)); } catch (_) { /* best-effort */ }
+  for (const fn of _invalidated) { try { fn(_key(name)); } catch (_) { /* listener 自理 */ } }
 }
 
 /**

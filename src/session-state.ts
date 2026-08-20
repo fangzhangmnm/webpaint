@@ -25,7 +25,8 @@ import type { EncryptedBlob } from "./app-store.ts";   // 密文 at-rest 字节�
 import { openInputSheet, openConfirmSheet, openChoiceSheet, lockSyncGate } from "./sheets.ts";
 import { readHandleFile, writeHandleBlob, handleMtime, hasWeebPaintTraces, type LocalFileHandle } from "./local-file-session.ts";
 import { pathFolder } from "./gallery/gallery-path.ts";
-import { sessionFileName, sessionBareName } from "./config.ts";
+import { invalidateCachedThumb } from "./gallery/cloud-thumb-cache.ts";
+import { sessionFileName, sessionBareName, stripSessionExt } from "./config.ts";
 import { serializedToolStatePatch, desk } from "./workbench-state.ts";
 import { getBlenderSyncState, applyBlenderSyncState } from "./blender-sync.ts";
 import { ensureNewPassword, ensureUnlocked } from "./enc-thumbs.ts";
@@ -759,6 +760,9 @@ export function initSession(ctx: AppContext) {
     editor: {
       adopt: async (bytes: Blob) => { const loaded = await decodeOraToPainting(bytes) as LoadedDoc; adoptModel(loaded); },
       encode: async () => await _encodeCurrentOraWithPeek(),
+      // 字节落盘成功 → 作废该画的缩略图缓存 + 广播（gallery 在世 tile 原地重取，getPeek 本地优先
+      //   = 刚写的字节）。覆盖显式保存/autosave/退出 flush 全路径（v0.10.2 缩略图冻结根修）。
+      onSaved: (fullName: string) => { void invalidateCachedThumb(stripSessionExt(fullName)); },
       // v0.8.5（S5）：sidecar 变更（参考图等「跟 ora 走 ∧ 不进 undo」态）与内容变更走同一内容脏门
       //   ——都要落盘/推云；差别只在不进 undo 栈（wp:sidecarchange 不碰 undo 按钮态）。
       // ⚠ wp:histchange 在 **window** 上 dispatch（history.ts）——绑 document 收不到 → 打开的文档编辑永不标脏、

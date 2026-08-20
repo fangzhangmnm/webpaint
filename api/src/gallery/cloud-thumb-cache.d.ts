@@ -16,7 +16,9 @@ export declare const config: {
 export declare function readCachedThumb(name: string): Promise<CachedThumb | null>;
 /** 写 cache（fire-and-forget；失败不影响主流程） */
 export declare function writeCachedThumb(name: string, token: string, blob: Blob): Promise<void>;
-/** 让一件作品的缩略图缓存立即作废（bytes 变了：加密/解密/revert 后）。删同 key，下次 miss 重拉。 */
+type ThumbInvalidatedListener = (key: string) => void;
+export declare function onThumbInvalidated(fn: ThumbInvalidatedListener): void;
+/** 让一件作品的缩略图缓存立即作废（bytes 变了：保存/加密/解密/revert 后）。删同 key + 广播，在世 tile 重取。 */
 export declare function invalidateCachedThumb(name: string): Promise<void>;
 /**
  * 拿 thumbnail。优先 cache（token 匹配）；miss 走网络（peekTail）+ 回写 cache。
