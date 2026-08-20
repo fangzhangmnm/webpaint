@@ -284,7 +284,8 @@ export class FloatingTransform {
           [{ x: gx0, y: gy1 }, { x: gx1, y: gy1 }],
         ],
         meshN: 2,
-        mode: "free",
+        mode: "uniform",   // v0.10.1 (user：「等比最高频，特别是导入图片」)：默认等比；uniform=similarity 是最低类，仍可升 free/distort
+
         uniformAspect: gw / Math.max(1, gh),
         usedClass: "similarity",
       },

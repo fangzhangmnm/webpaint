@@ -75,7 +75,7 @@ describe("S6 · lift（整点：清选区 + float tiles + 挖洞）", () => {
     eq(fs.floats[0].pixels.docW, 16, "float 网格 = rect 尺寸，不是 doc 尺寸");
     // gizmo = float rect（v0.6.21 frame 化：origin/ux 轴对齐）
     eq(fs.transform.gizmoFrame.origin.x, 30); eq(fs.transform.gizmoFrame.ux.x, 16);
-    eq(fs.transform.mode, "free");
+    eq(fs.transform.mode, "uniform");   // v0.10.1 默认等比（user：等比最高频）
 
     h.undo();
     eq(float.view(), null, "undo：浮层消失");
@@ -185,7 +185,7 @@ describe("S6 · 变换 metadata 微整点（FloatLayerComponent.setTransform）"
     eq(h.depth, d0 + 1, "切模式 = metadata 整点");
     eq(float.view().transform.mode, "distort");
     h.undo();
-    eq(float.view().transform.mode, "free", "undo 回 free");
+    eq(float.view().transform.mode, "uniform", "undo 回默认 uniform");
   });
 });
 

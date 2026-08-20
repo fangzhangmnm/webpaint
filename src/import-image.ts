@@ -213,7 +213,6 @@ export async function importImageAsLayer(file: File, opts: { center?: { x: numbe
       const ok = direct || input.lasso.liftSelectionForTransform(layer, { fallbackFullLayer: true, ignoreSelection: true });
       if (ok) {
         (editMode.enterTransient as (n: string, o?: TransientOpts) => void)("transform", { apply: _commitTransform, abort: _cancelTransform });
-        input.lasso.setMode("free");
         updateLassoToolbar();
         _suppressTransientPanels("transform");
         board.invalidateAll();
