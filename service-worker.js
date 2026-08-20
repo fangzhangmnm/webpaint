@@ -3,7 +3,7 @@
 //
 // 设计：
 //   - install：fetch index.html → 抠出当前 bundle 文件名 → precache 入口 + bundle + statics
-//   - cache name = "webpaint-<bundleHash>"。新 bundle = 新 cache name；activate 时清老的。
+//   - cache name = "weebpaint-<bundleHash>"。新 bundle = 新 cache name；activate 时清老的。
 //   - fetch：cache-first + 后台 revalidate；ETag 变了通知 page。
 //
 // 跟 sibling family 抄：基本可以 1:1 拷，改 STATIC_PRECACHE 列表就行。
@@ -26,7 +26,7 @@ const STATIC_PRECACHE = [
   // msal / 其它惰性加载的库 SW 不预缓存。用到才下，那时候 fetch 会自动 cache。
 ];
 
-let CACHE_NAME = "webpaint-boot";   // install 时会被替换为 webpaint-<bundleHash>
+let CACHE_NAME = "weebpaint-boot";   // install 时会被替换为 weebpaint-<bundleHash>
 
 // 同一个 SW 文件部署到 /(prod) 和 /dev/ 两处；按**自己的作用域**选策略（owner: docs + src/pwa-shell.ts）：
 //   - prod(scope=/)      → cache-first：秒开 + 离线稳，更新靠 asset-updated toast。
@@ -38,22 +38,22 @@ async function getCurrentBundleUrl() {
   const res = await fetch("./index.html", { cache: "no-store" });
   if (!res.ok) throw new Error("install: index.html fetch failed " + res.status);
   const html = await res.text();
-  // <script type="module" src="./dist/webpaint-<hash>.mjs"></script>
+  // <script type="module" src="./dist/weebpaint-<hash>.mjs"></script>
   // v124 起 bundle 名从 main- 改成 webpaint-；SW 这条 regex 当时漏改 → install 抛错 →
   // 新 SW 永远装不上，老 SW 继续 cache-first 服旧 bundle/默认笔架 → 提交了也「没同步」。
-  // 兼容 main-（旧）+ webpaint-（现）两种名，避免再被改名咬到。
-  const m = html.match(/src="(\.\/dist\/(?:main|webpaint)-[a-z0-9-]+\.mjs)"/i);
-  if (!m) throw new Error("install: entry ./dist/(main|webpaint)-*.mjs not found in index.html");
+  // 0.10.0 改名 webpaint-→weebpaint-。兼容 main-/webpaint-（旧）+ weebpaint-（现）三种名，避免再被改名咬到。
+  const m = html.match(/src="(\.\/dist\/(?:main|webpaint|weebpaint)-[a-z0-9-]+\.mjs)"/i);
+  if (!m) throw new Error("install: entry ./dist/(main|webpaint|weebpaint)-*.mjs not found in index.html");
   return { html, bundleUrl: m[1] };
 }
 
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
     const { bundleUrl } = await getCurrentBundleUrl();
-    // 必须跟 line 36 入口 regex 同步认 main-（旧）+ webpaint-（现）两种名 —— 否则抽不出 hash
-    // → fallback "boot" → CACHE_NAME 恒为 webpaint-boot → cache 永不随 build 失效（离线/更新坏）
-    const bundleHash = bundleUrl.match(/(?:main|webpaint)-([a-z0-9-]+)\.mjs/i)?.[1] || "boot";
-    CACHE_NAME = `webpaint-${bundleHash}`;
+    // 必须跟 line 36 入口 regex 同步认 main-/webpaint-（旧）+ weebpaint-（现）三种名 —— 否则抽不出 hash
+    // → fallback "boot" → CACHE_NAME 恒为 weebpaint-boot → cache 永不随 build 失效（离线/更新坏）
+    const bundleHash = bundleUrl.match(/(?:main|webpaint|weebpaint)-([a-z0-9-]+)\.mjs/i)?.[1] || "boot";
+    CACHE_NAME = `weebpaint-${bundleHash}`;
     const cache = await caches.open(CACHE_NAME);
     const urls = [...STATIC_PRECACHE, bundleUrl, bundleUrl + ".map"];
     await Promise.all(urls.map((u) =>
@@ -69,7 +69,8 @@ self.addEventListener("activate", (event) => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
     await Promise.all(
-      keys.filter((k) => k.startsWith("webpaint-") && k !== CACHE_NAME)
+      // 改名（0.10.0 webpaint-→weebpaint-）：旧前缀 cache 一并清，免得永久占存储。
+      keys.filter((k) => (k.startsWith("weebpaint-") || k.startsWith("webpaint-")) && k !== CACHE_NAME)
           .map((k) => caches.delete(k))
     );
     await self.clients.claim();

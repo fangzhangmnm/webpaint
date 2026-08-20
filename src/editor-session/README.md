@@ -1,6 +1,6 @@
 # editor-session —— 编辑器 doc 生命周期编排（家族共享深模块）
 
-> 与 sync-store 平级的共享库，各编辑器 app 间**互拷代码**（WebPaint / WebXiaoHeiWu / …）。本 README 随模块一起拷，是权威。
+> 与 sync-store 平级的共享库，各编辑器 app 间**互拷代码**（WeebPaint / WebXiaoHeiWu / …）。本 README 随模块一起拷，是权威。
 
 一个 doc「从打开到关闭、保持同步」的编排者。**app-agnostic**：不懂 paint/ora/canvas，只跟不透明字节 + 注入的适配器打交道。
 

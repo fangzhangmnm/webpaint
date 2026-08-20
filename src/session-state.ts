@@ -11,18 +11,19 @@
 //   （dirty 分层：内存脏=es.isDirty，sync 脏=listAllItems）、_store.busy/edits/session/autosave/flow.*/adoptBase/seal。
 
 import { reactive } from "../vendor/vue/vue.esm-browser.prod.js";
-import { WEBPAINT_VERSION } from "./version.ts";
+import { WEEBPAINT_VERSION } from "./version.ts";
 import { reportError } from "./error-badge.ts";
 import { setBrushColor } from "./color-panel.ts";
 import { thumbBlobFromBytes, setCurrentSessionName } from "./session.ts";
 import { renderNodesToBytes } from "./backend/doc-render.ts";
 import { encodeDocToOra, decodeOraToPainting, paintingDataToEncodeDoc, parseAppVersion, type DecodedPainting } from "./backend/ora.ts";
+import { ORA_FORMAT_VERSION } from "./backend/ora-stack-xml.ts";
 import { flattenViewLeaves } from "./backend/workpiece/painting-view.ts";
 import { tLatin } from "./i18n/index.ts";
 import { isSignedIn, store as _store } from "./app-store.ts";
 import type { EncryptedBlob } from "./app-store.ts";   // 密文 at-rest 字节（branded）；B2：类型经接缝转口
 import { openInputSheet, openConfirmSheet, openChoiceSheet, lockSyncGate } from "./sheets.ts";
-import { readHandleFile, writeHandleBlob, handleMtime, hasWebPaintTraces, type LocalFileHandle } from "./local-file-session.ts";
+import { readHandleFile, writeHandleBlob, handleMtime, hasWeebPaintTraces, type LocalFileHandle } from "./local-file-session.ts";
 import { pathFolder } from "./gallery/gallery-path.ts";
 import { sessionFileName, sessionBareName } from "./config.ts";
 import { serializedToolStatePatch, desk } from "./workbench-state.ts";
@@ -40,7 +41,7 @@ import { timelapseDetach, timelapseAdopt, timelapseForSave } from "./timelapse-s
 
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
 
-interface OraWebpaintState {
+interface OraWeebpaintState {
   reference?: unknown; color?: string; toolStates?: Record<string, unknown>;
   palette?: unknown; checkerboard?: boolean; activeId?: number; activeLayerIndex?: number;
   viewport?: { scale?: number } & Record<string, unknown>;
@@ -88,7 +89,7 @@ function _setActive(name: string | null): void {
   _activeSessionName = name == null ? null : sessionBareName(name);
   setCurrentSessionName(_activeSessionName ?? "");
 }
-const _file = (name: string) => _store.file(toFull(name), { isZip: true, mode: "existing" });   // WebPaint work-file = ora-zip 容器（有 peek）
+const _file = (name: string) => _store.file(toFull(name), { isZip: true, mode: "existing" });   // WeebPaint work-file = ora-zip 容器（有 peek）
 async function _refreshEncrypted() {
   try { _enc.encrypted = _activeSessionName ? await _file(_activeSessionName).isEncrypted() : false; }
   catch { _enc.encrypted = false; }
@@ -115,14 +116,14 @@ function _markLocalDirty() {
 /** es 重新绑定 store 身份（open/adopt/新建/另存成功）→ 解除残影墙。 */
 function _esRebound() { _esMuted = false; }
 
-/** 打开本地 .ora：明文 + 有 WebPaint 痕迹 → 原位打开（返回 null）；
+/** 打开本地 .ora：明文 + 有 WeebPaint 痕迹 → 原位打开（返回 null）；
  *  加密容器 / 外来 ora → 不原位，把 File 还给调用方走导入路径（返回 File）。 */
 async function openLocalFile(handle: LocalFileHandle): Promise<File | null> {
   const file = await readHandleFile(handle);
   // 加密容器：原位模式 v1 不吃密文（解锁/记忆密码/落库语义全在导入路径）→ 交还导入。
   if (await _store.encryption.isEncryptedBlob(file)) return file;
   const loaded = await decodeOraToPainting(file) as LoadedDoc;
-  if (!hasWebPaintTraces(loaded)) return file;   // 外来 ora（Krita 等）→ 导入为新 doc，绝不原位覆写别人的文件
+  if (!hasWeebPaintTraces(loaded)) return file;   // 外来 ora（Krita 等）→ 导入为新 doc，绝不原位覆写别人的文件
   if (!(await leaveLocalFile())) return null;    // 已在无地且脏 → 先问（保存/丢弃/取消）
   if (es.isDirty()) await saveNow();             // 旧 store doc 先落盘（openItem 同款；无地时已被上一行清场）
   _esMuted = true;   // 墙②先立再换内容：adoptModel 之后 canvas 就不再是 es._name 的像素了
@@ -141,7 +142,7 @@ async function saveLocalFileNow(): Promise<boolean> {
   if (!_localFile) return false;
   if (editMode.hasPendingTransient()) editMode.applyPendingTransient();
   if (_loadedDocIsNewer && !_loadedDocNewerConfirmed) {
-    const ok = await openConfirmSheet(t("ss.overwriteNewerTitle"), t("ss.overwriteNewerMsg", { writer: String(_loadedDocWriterVer), version: WEBPAINT_VERSION }));
+    const ok = await openConfirmSheet(t("ss.overwriteNewerTitle"), t("ss.overwriteNewerMsg", { writer: String(_loadedDocWriterVer), version: WEEBPAINT_VERSION }));
     if (!ok) { setStatus(t("ss.saveCancelled")); return false; }
     _loadedDocNewerConfirmed = true; updateNewerBanner();
   }
@@ -185,8 +186,8 @@ async function leaveLocalFile(): Promise<boolean> {
 
 // ============ 编辑器状态 I/O（v267b；T5/v0.8.21 拆双轨：旧轨 webpaint/state.json **停写**）============
 // 旧轨独有的三样（eraser/filterBrush/selPen dial、palette、blender）已迁 desk（toolDials/palette/blender
-// 三组，存时 syncRuntimeForSave 捞进）；activeId 在 stack.xml webpaint:active 原生携带。
-// 读兼容：restoreEditorStateFromOra 仍吃存量 .ora 的 _webpaintState（desk 后手赢），拔除另议。
+// 三组，存时 syncRuntimeForSave 捞进）；activeId 在 stack.xml weebpaint:active 原生携带。
+// 读兼容：restoreEditorStateFromOra 仍吃存量 .ora 的 _weebpaintState（desk 后手赢），拔除另议。
 function resetEditorState() {
   referenceWindow.clearBitmap?.(); referenceWindow.close?.();   // ?.=元素可能未升级（无 CE 环境），见 ReferenceWindowHandle 注
   paletteWindow.clear?.(); paletteWindow.close?.();
@@ -199,7 +200,7 @@ function resetEditorState() {
 //   开/关/定位自己（**只读 desk + 裸 DOM 操作，不回写 desk**）。
 function applyEditorStateToUI(): void { window.dispatchEvent(new CustomEvent("wp:applyEditorState")); }
 function restoreEditorStateFromOra(loaded: LoadedDoc) {
-  const ws = loaded?._webpaintState as OraWebpaintState | undefined;
+  const ws = loaded?._weebpaintState as OraWeebpaintState | undefined;
   if (loaded?._referenceBlob) {
     // skipFit：ref 面板 open/位置/vp 由 desk.refPanel 经 wp:applyEditorState 恢复；bitmap 异步载入不覆盖已载入 vp。
     createImageBitmap(loaded._referenceBlob).then((bitmap: ImageBitmap) => {
@@ -222,7 +223,7 @@ function restoreEditorStateFromOra(loaded: LoadedDoc) {
     const leaf = flattenViewLeaves(doc.layers)[ws.activeLayerIndex!];
     if (leaf && wp2.layerTree!.setActive(leaf.id)) renderLayersPanel();
   }
-  // 新轨（desk per-doc）：载入 .webpaint/editor-state.json（缺失=老画作 → resetEditorState 已回默认）。
+  // 新轨（desk per-doc）：载入 .weebpaint/editor-state.json（缺失=老画作 → resetEditorState 已回默认）。
   //   **后手赢**：它会用 brushTool 覆盖 toolStates.brush + color。
   if (loaded._editorState != null) desk.Unserialize(loaded._editorState);
   // T5（v0.8.21）：旧轨停写后三样的新家（desk 后手赢——覆盖上面旧轨灌的值；存量老 .ora 无这三组 = null 跳过）。
@@ -268,7 +269,7 @@ async function _encodeCurrentOraWithPeek(): Promise<{ bytes: Blob; peek: Blob | 
   // timelapse：drain 运动帧 + 用**同一份 merged** 现编尾帧（与 mergedimage 同刻同源；merged=null → 冻结 passthrough）。
   //   在 frozen 之后 await——层快照已同步冻结，录像编码的 await 间隙不撕存档。自愈在内，绝不 throw。
   const timelapse = await timelapseForSave(merged);
-  const bytes = await encodeDocToOra(frozen, { ...meta, mergedBytes: merged, wroteWith: WEBPAINT_VERSION, timelapse }) as Blob;
+  const bytes = await encodeDocToOra(frozen, { ...meta, mergedBytes: merged, wroteWith: WEEBPAINT_VERSION, timelapse }) as Blob;
   const peek = merged ? await thumbBlobFromBytes(merged, 256) : null;
   return { bytes, peek };
 }
@@ -299,16 +300,17 @@ function adoptModel(loaded: LoadedDoc) {
     resetEditorState();
     els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
     board.invalidateAll(); board.requestRender(); renderLayersPanel();
-    // 版本降级检测：写这画的 WebPaint 版本 > 当前 → 警告（守卫 saveNow/saveAndPush 覆盖）。
+    // 版本降级检测：写这画的 WeebPaint 版本 > 当前，或 .ora 私有扩展 schema（weebpaint:format）
+    // 比本版认识的新 → 警告（守卫 saveNow/saveAndPush 覆盖）。
     _loadedDocIsNewer = false; _loadedDocNewerConfirmed = false;
-    const writerN = parseAppVersion(loaded._wroteWith), selfN = parseAppVersion(WEBPAINT_VERSION);
-    if (writerN !== null && selfN !== null && writerN > selfN) {
+    const writerN = parseAppVersion(loaded._wroteWith), selfN = parseAppVersion(WEEBPAINT_VERSION);
+    if ((writerN !== null && selfN !== null && writerN > selfN) || (loaded._formatVersion ?? 0) > ORA_FORMAT_VERSION) {
       _loadedDocIsNewer = true; _loadedDocWriterVer = loaded._wroteWith ?? null;
-      setStatus(t("ss.docNewerWarning", { writer: String(loaded._wroteWith), version: WEBPAINT_VERSION }), true);
+      setStatus(t("ss.docNewerWarning", { writer: String(loaded._wroteWith), version: WEEBPAINT_VERSION }), true);
     } else { _loadedDocWriterVer = null; }
     updateNewerBanner();
     restoreEditorStateFromOra(loaded);
-    const vp = desk.viewport;   // 视口从 desk（.webpaint/editor-state.json）回灌 board
+    const vp = desk.viewport;   // 视口从 desk（.weebpaint/editor-state.json）回灌 board
     // #27：必须经 setViewport（scale 夹取 + _clampPan），不许 Object.assign 裸灌——大屏存的
     // viewport 换小屏/旋转后画布整体落屏外，且交互 pan 夹取之外没有任何路径能把它拉回。
     if (vp && typeof vp.scale === "number") {
@@ -356,7 +358,7 @@ function _adoptCommon(loaded: LoadedDoc, name: string, opts: { create?: boolean 
 }
 
 // ---- checkpoint / revert（v415 重接；prod 有、dev 在 store cutover 删 _store.seal 后成了 stub）----
-// 落盘 = app 自己的 webpaint 库的 checkpoints store；策略（key/何时封/加密怎么办）在纯模块 checkpoint-policy.ts。
+// 落盘 = app 自己的 weebpaint 库的 checkpoints store；策略（key/何时封/加密怎么办）在纯模块 checkpoint-policy.ts。
 /** 封存「本次打开这幅画」的快照。fire-and-forget：**绝不阻塞开画**，失败只 log。
  *  加密作品存**密文容器**字节（getEncryptedBlob）——绝不退化成 encodeDocToOra 的明文（红线）。 */
 async function _captureCheckpoint(name: string, trigger: CheckpointTrigger) {
@@ -397,7 +399,7 @@ async function saveNow(opts: { implicit?: boolean } = {}) {
   if (editMode.hasPendingTransient()) { if (opts.implicit) return; editMode.applyPendingTransient(); }
   if (_loadedDocIsNewer && !_loadedDocNewerConfirmed) {
     if (opts.implicit) return;
-    const ok = await openConfirmSheet(t("ss.overwriteNewerTitle"), t("ss.overwriteNewerMsg", { writer: String(_loadedDocWriterVer), version: WEBPAINT_VERSION }));
+    const ok = await openConfirmSheet(t("ss.overwriteNewerTitle"), t("ss.overwriteNewerMsg", { writer: String(_loadedDocWriterVer), version: WEEBPAINT_VERSION }));
     if (!ok) { setStatus(t("ss.saveCancelled")); return; }
     _loadedDocNewerConfirmed = true; updateNewerBanner();
   }

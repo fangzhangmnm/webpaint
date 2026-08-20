@@ -30,7 +30,7 @@ export function useDials(): { state: EditorRuntimeState; dialReactive: DialReact
   // reactive：dial 是反应式 SSoT。先建 toolStates → 让 state 字面量一次成形、整体类型化（序列化走 JSON.stringify 无碍）。
   const toolStates: Record<string, ToolDial> = reactive({
     // brush dial 默认（size/opacity/activeBrushId 归 desk.brushTool SSoT，boot 后 bindEditorReactive 灌入、doc 载入覆盖；
-    //   不再从 LS 种子——desk per-doc，删了 webpaint.size/opacity 设备记忆）。
+    //   不再从 LS 种子——desk per-doc，删了 weebpaint.size/opacity 设备记忆）。
     //   v415 删了 flow：四处钉死 1.0、无滑块、无 preset 来源——压感对流量的影响走 per-preset 的 flowCoeff。
     brush:    { size: 12, opacity: 1.0, activeBrushId: null },
     eraser:   { size: 32, opacity: 0.6, activeBrushId: null },
@@ -45,8 +45,8 @@ export function useDials(): { state: EditorRuntimeState; dialReactive: DialReact
     // tool（当前工具）的 SSoT 在 editMode（editMode.current()）。见 edit-mode.js / CONTEXT.md。
     // v132 filter brush 激活时 = { Filter, params, variantLabel }；空闲 = null
     filterBrush: null,
-    color: "#1b1b1b",   // 归 desk.brushTool.color SSoT（boot bind 灌入 / doc 载入覆盖）；删 webpaint.color LS 种子
-    // （全局压感开关 pressureToSize/Opacity 已 deprecate 2026-07-14 → 每笔自带，见 resolved-brush；删 webpaint.pToSize/pToOpacity LS）
+    color: "#1b1b1b",   // 归 desk.brushTool.color SSoT（boot bind 灌入 / doc 载入覆盖）；删 weebpaint.color LS 种子
+    // （全局压感开关 pressureToSize/Opacity 已 deprecate 2026-07-14 → 每笔自带，见 resolved-brush；删 weebpaint.pToSize/pToOpacity LS）
     // 手势开关 = 跨设备偏好（synced-user-preference collection）。
     // ⚠v409 起 useDials 在 collection hydrate **之前**跑（TLA 门已拆）→ 这里只能拿到 DEFAULTS。
     //   真值由 app.ts 的 fixup 相（await prefsReady）经 settings-menu 的 renderSettingsFromPrefs() 灌入。
@@ -87,7 +87,7 @@ export function useDials(): { state: EditorRuntimeState; dialReactive: DialReact
   return { state, dialReactive };
 }
 
-// 把存档的 per-tool dial（ORA _webpaintState.toolStates[tool]）按 v98 兼容映射成 patch 对象，
+// 把存档的 per-tool dial（ORA _weebpaintState.toolStates[tool]）按 v98 兼容映射成 patch 对象，
 // caller Object.assign 到 reactive toolStates[tool]（保留反应式）。saved 无效 → null（不动）。
 // 反序列化细节下沉到 editor-state（toolState 形状的所有者；survey rec #5 part b）：
 //   老 doc 兼容（**保留**）：只有 .intensity 当 opacity；只有 flow 没 opacity 时 flow 也当 opacity。
@@ -117,7 +117,7 @@ export function serializedToolStatePatch(current: ToolDial, saved: unknown): Par
 //   用法像 struct：`desk.colorPanel.position = {left,top}`（代码热路径）。
 //   **永远 Hot、不自动推**；除各字段外只有 Serialize() / Unserialize() / reset() / syncRuntimeForSave()。
 //   开新文件必 reset()（钉在 session-state 的 adoptModel + newDoc，结构性无法绕过）。
-//   序列化进 ora 的 `.webpaint/editor-state.json`；**存盘时被顺手捞走**（_buildOraMeta），不自己驱动落盘。
+//   序列化进 ora 的 `.weebpaint/editor-state.json`；**存盘时被顺手捞走**（_buildOraMeta），不自己驱动落盘。
 //
 // ⚠**desk 没有 dirty 标记**（v409 决策，撤销 v407 的 workspaceDirty 设计）：
 //   desk 改动**不标脏、不触发保存、不触发退出推云**。只有内容脏（history 的 wp:histchange）或用户显式按
@@ -133,7 +133,7 @@ export function serializedToolStatePatch(current: ToolDial, saved: unknown): Par
 export interface PanelPos { left: number; top: number; width?: number; height?: number }
 export interface EditorViewport { tx: number; ty: number; scale: number; rot: number }
 
-// 序列化形状 = `.webpaint/editor-state.json` 的内容（freshGroups() 即 defaults SSoT）。
+// 序列化形状 = `.weebpaint/editor-state.json` 的内容（freshGroups() 即 defaults SSoT）。
 function freshGroups() {
   return {
     export:        { format: "png" as string, target: "file" as string, layerMode: "merged" as string, clipSelection: false, defringe: false, bg: "transparent" as string },   // layerMode=scope "merged"|"active"；clipSelection=#16 仅导出选区范围；defringe=v0.9.13 贴图防黑边（PNG）；bg=v0.9.14 导出底色（"transparent"|"#rrggbb"，PNG 透明/JPG 白）
@@ -356,7 +356,7 @@ export const desk = {
   set pressureDisabled(v: boolean) { if (_bind) _bind.setPressureOff(v); else S.g.pressureDisabled = v; },
 
   // ── 除各字段外仅此四法 ──
-  // 深拷贝：与 live 解耦；即 .webpaint/editor-state.json 内容。绑定字段（brushTool/pickMode）从引擎 live 取。
+  // 深拷贝：与 live 解耦；即 .weebpaint/editor-state.json 内容。绑定字段（brushTool/pickMode）从引擎 live 取。
   Serialize(): EditorGroups {
     const out = JSON.parse(JSON.stringify(S.g)) as EditorGroups;
     if (_bind) {

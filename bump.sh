@@ -4,6 +4,6 @@
 set -e
 NEW="${1:?usage: ./bump.sh vM.m.p-YYYY-MM-DD}"
 cd "$(dirname "$0")"
-sed -i "s/WEBPAINT_VERSION = \"[^\"]*\"/WEBPAINT_VERSION = \"$NEW\"/" src/version.ts
+sed -i "s/WEEBPAINT_VERSION = \"[^\"]*\"/WEEBPAINT_VERSION = \"$NEW\"/" src/version.ts
 echo "bumped to $NEW:"
-grep -H "WEBPAINT_VERSION" src/version.ts
+grep -H "WEEBPAINT_VERSION" src/version.ts

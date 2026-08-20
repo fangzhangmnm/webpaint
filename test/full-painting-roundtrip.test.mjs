@@ -4,7 +4,7 @@
 // 且两代 backend 的 exportImage 合成逐字节相同（SoftGl2 软合成域）。
 import { describe, it, assert, eq } from "./runner.mjs";
 
-const { WebPaintBackend } = await import("../src/backend/webpaint-backend.ts");
+const { WeebPaintBackend } = await import("../src/backend/weebpaint-backend.ts");
 const { SoftGl2Port } = await import("../src/backend/soft-gl2-port.ts");
 const { GlRoom, poolCapacityForBudget } = await import("../src/backend/gl/gl-room.ts");
 const { RasterService } = await import("../src/backend/gl/raster-service.ts");
@@ -31,7 +31,7 @@ function stroke(be, leafId, brush, points) {
 
 // 结构丰富的确定性画作：4 叶 + 1 组（2 叶入组）+ 属性全谱 + 6 笔 + erase + 2 filter + 负向扩张 crop
 function buildRichPainting() {
-  const be = WebPaintBackend.blank({ width: 640, height: 480 }, mkInject());
+  const be = WeebPaintBackend.blank({ width: 640, height: 480 }, mkInject());
   const L2 = be.layerAdd("线稿").id, L3 = be.layerAdd("上色").id, L4 = be.layerAdd("特效").id;
   // 属性全谱（mode/opacity/clippingMask/lockAlpha/visible/name——stack.xml 全字段过一遍）
   be.layerSetProp(L2, "opacity", 0.85);
@@ -72,7 +72,7 @@ describe("full · 全量画作 round-trip（决定论 encode）", () => {
     const be1 = buildRichPainting();
     const ora1 = await be1.encodeOra();
     assert(ora1.length > 10000, `全量画作有分量（${ora1.length} 字节）`);
-    const { backend: be2, sidecar } = await WebPaintBackend.open(ora1, mkInject());
+    const { backend: be2, sidecar } = await WeebPaintBackend.open(ora1, mkInject());
     eq(sidecar.wroteWith, "v0.0.0-full", "wrote-with 戳 round-trip");
     const ora2 = await be2.encodeOra();
     assert(bytesEq(ora1, ora2), "encodeOra 两代逐字节相同（1980 epoch zip + 决定论全链）");

@@ -7,13 +7,13 @@
     <meta name="theme-color" content="#121110" media="(prefers-color-scheme: dark)" />
     <script>
       // Theme guard：在样式表生效前把 [data-theme] 落上去，避免 FOUC。
-      // 键 = webpaint.boot.theme（src/boot-snapshot.ts 的快照；SSoT 是 IDB collection，但 IDB 异步、
+      // 键 = weebpaint.boot.theme（src/boot-snapshot.ts 的快照；SSoT 是 IDB collection，但 IDB 异步、
       //   pre-paint 读不到 → 必须有这份同步镜像。写入方 = theme.ts 的 applyTheme/对账）。
       //   ⚠ v406-v408 这里读的是 `webpaint.theme`，而那个键在迁 collection 时没了写入方 →
       //     guard 静默失效、夜间冷启动闪白。改键名时**务必**同步改 theme.ts，否则又是同样的哑巴回归。
       (function () {
         try {
-          var saved = localStorage.getItem("webpaint.boot.theme");
+          var saved = localStorage.getItem("weebpaint.boot.theme");
           if (saved === "day" || saved === "night" || saved === "auto") {
             document.documentElement.setAttribute("data-theme", saved);
           }
@@ -48,8 +48,8 @@
     <meta name="color-scheme" content="light dark" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="WebPaint" />
-    <title>WebPaint</title>
+    <meta name="apple-mobile-web-app-title" content="WeebPaint" />
+    <title>WeebPaint</title>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
     <link rel="icon" href="./icon-192.png" type="image/png" sizes="192x192" />
@@ -63,7 +63,7 @@
     <script defer src="./vendor/zip-js/zip-full.min.js"></script>
   </head>
   <body>
-    <!-- 图标 sprite：共享库子集 + WebPaint 本地补丁，静态内联（1×1 + opacity:0 藏起来）。
+    <!-- 图标 sprite：共享库子集 + WeebPaint 本地补丁，静态内联（1×1 + opacity:0 藏起来）。
          ⚠ sprite 根别改成 display:none —— 不渲染的子树里 <mask>/<clipPath> 静默失效，
          18 个靠遮罩留白的图标会全糊成一坨且不报错（v428 前就是这样）。理由详见
          20260708 SVG Icons/extract-icons.py 的 SPRITE_ROOT_STYLE 注释。
@@ -518,7 +518,7 @@
       <!-- v0.6.14：gen-AI 开关撤出图库菜单（user：它不影响图库，不该出现在这）；开关只在主菜单设置页 -->
       <!-- v0.9.26 PWA 安装入口（user 2026-08-20）：与主菜单设置页那颗同源（install-prompt.ts 管显隐） -->
       <button class="menu-item menu-item-with-icon" id="galleryMenuInstallApp" type="button" role="menuitem" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#download"/></svg>
-        <span class="menu-item-label" data-i18n="menu.installApp">安装 WebPaint 到桌面</span>
+        <span class="menu-item-label" data-i18n="menu.installApp">安装 WeebPaint 到桌面</span>
       </button>
       <button class="menu-item menu-item-with-icon" id="galleryMenuLock" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#unlock"/></svg>
         <span class="menu-item-label" data-i18n="gal.menu.unlock">解锁加密作品…</span>
@@ -899,7 +899,7 @@
     <!-- v120 删除：shapes tool 撤了。以后 shapes 改成 brush preset 的 toggle，在画架里挑。 -->
 
     <!-- Palette 调色板小窗（v87）：256×256 内嵌混色画布 + 笔/涂/吸
-         浮动可拖；canvas 内容跟 doc 走（webpaint/state.json 持久化） -->
+         浮动可拖；canvas 内容跟 doc 走（weebpaint/state.json 持久化） -->
     <div class="palette-window hidden" id="paletteWindow">
       <div class="palette-head">
         <span class="palette-title" data-i18n="palette.title">调色板</span>
@@ -1267,7 +1267,7 @@
         <span class="menu-item-label" data-i18n="menu.newArtwork">新建…</span>
       </button>
         <!-- v0.9.24 无地本地文件（spec 20260819 §7）：FS Access 在场才由 topbar-menu 取消 hidden。
-             明文+有 WebPaint 痕迹的 .ora = 原位编辑（不入库不上传）；加密/外来 ora 自动转导入 -->
+             明文+有 WeebPaint 痕迹的 .ora = 原位编辑（不入库不上传）；加密/外来 ora 自动转导入 -->
         <button class="menu-item menu-item-with-icon" id="menuOpenLocalFile" type="button" role="menuitem" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#folder-open"/></svg>
         <span class="menu-item-label" data-i18n="menu.openLocalFile">打开本地文件…</span>
       </button>
@@ -1345,7 +1345,7 @@
       <div class="menu-page hidden" data-menu-page="settings">
         <!-- v0.9.26 PWA 安装入口（user 2026-08-20）：beforeinstallprompt 捕获后才显形（Chromium）；已安装/装态恒隐 -->
         <button class="menu-item menu-item-with-icon" id="menuInstallApp" type="button" role="menuitem" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#download"/></svg>
-        <span class="menu-item-label" data-i18n="menu.installApp">安装 WebPaint 到桌面</span>
+        <span class="menu-item-label" data-i18n="menu.installApp">安装 WeebPaint 到桌面</span>
       </button>
         <button class="menu-item menu-item-with-icon" id="menuLongPressPick" type="button" role="menuitemcheckbox" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#eyedropper"/></svg>
         <span class="menu-item-label" data-i18n="menu.longPressPick">单指长按吸色</span>
@@ -1474,6 +1474,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-583b6ea7450c.mjs"></script>
+    <script type="module" src="./dist/weebpaint-583b6ea7450c.mjs"></script>
   </body>
 </html>

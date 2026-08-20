@@ -27,7 +27,7 @@
 //     Selection.materializeMaskRegion 窄读口产物），mask[i] < 128 时该像素 passthrough。
 //
 // ============= 插件加载（future）=============
-// window.WebPaint.registerFilter(MyFilterClass) — 暴露在 app.js 末尾
+// window.WeebPaint.registerFilter(MyFilterClass) — 暴露在 app.js 末尾
 // onFilterRegistered(fn) — 监听新 filter，菜单自动加入口
 // 下载插件接口：[ai-docs/20260528-backlog.md] AI 远程 / 本地 WASM 段落
 

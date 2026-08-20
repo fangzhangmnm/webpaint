@@ -1,13 +1,13 @@
-// WebPaintBackend —— backend 装配根（C7；契约 = ./webpaint-backend-interface.ts，提案 §3）。
+// WeebPaintBackend —— backend 装配根（C7；契约 = ./weebpaint-backend-interface.ts，提案 §3）。
 // 与 app.ts 组合根的关系：app.ts 目前仍自装配同一套件（history+wp2+view+layers）跑浏览器壳；
 // 本类是 headless/MCP/embedding 面的**第二个组合根**（装配的是同一批组件，非复刻逻辑）。
-// 壳迁移到「app.ts 消费 WebPaintBackend」= C7 后棒（app-context 39 键瘦版的落点）。
+// 壳迁移到「app.ts 消费 WeebPaintBackend」= C7 后棒（app-context 39 键瘦版的落点）。
 //
 // born-loaded：工厂返回时 doc 已在（blank 脚手架或 open 解码灌入）；无空态、无 load 方法。
 // 换画 = 弃旧建新（dispose 旧 + 工厂新）。
 //
 // 注入清单（node 拿不到的才注入；node 里近乎无参）：
-//   appVersion   —— .ora wrote-with 戳（壳传 WEBPAINT_VERSION；缺省 ""）
+//   appVersion   —— .ora wrote-with 戳（壳传 WEEBPAINT_VERSION；缺省 ""）
 //   jpgEncoder   —— exportImage("jpg") 的编码器（壳 = canvas toBlob 域；headless 缺席响亮失败）
 //   imageDecoder —— open() png 之外的位图解码（jpg/webp…；headless 缺席响亮失败）
 // 合成面（mergedimage/exportImage/mergeDown）走 doc-render 全局接缝（setDocCompositorBytes）——
@@ -35,9 +35,9 @@ import { encodeDocToOra, decodeOraToPainting, paintingDataToEncodeDoc, type Deco
 import { encodePngFromBytes, decodePngToBytes, type RgbaPlane } from "./png-codec.ts";
 import { isGroupNode, type TreeNode } from "./workpiece/layer-tree.ts";
 import type {
-  WebPaintBackendInterface, BackendLayerNode, BackendDocInfo, BackendChangeEvent,
+  WeebPaintBackendInterface, BackendLayerNode, BackendDocInfo, BackendChangeEvent,
   BackendOpResult, BackendAddResult, ResolvedBrushSnapshot, StrokeId, FilterSessionId,
-} from "./webpaint-backend-interface.ts";
+} from "./weebpaint-backend-interface.ts";
 
 const UNDO_QUOTA_BYTES = 128 * 1024 * 1024;   // app.ts 同款配额
 
@@ -70,7 +70,7 @@ export interface BackendInject {
 }
 
 export interface BackendOpenResult {
-  backend: WebPaintBackend;
+  backend: WeebPaintBackend;
   /** open 解出的壳 sidecar（backend 不解释，原样交壳）。 */
   sidecar: { editorState?: unknown; legacyState?: unknown; referencePng?: Uint8Array; wroteWith: string | null };
 }
@@ -102,7 +102,7 @@ function singleImageData(plane: RgbaPlane): PaintingData {
   };
 }
 
-export class WebPaintBackend implements WebPaintBackendInterface {
+export class WeebPaintBackend implements WeebPaintBackendInterface {
   private _history: History;
   private _wp2: PaintingWorkpiece;
   private _view: PaintingView;
@@ -166,8 +166,8 @@ export class WebPaintBackend implements WebPaintBackendInterface {
 
   // ── 静态工厂（路由归 backend）──
 
-  static blank(meta: { width: number; height: number }, inject: BackendInject = {}): WebPaintBackend {
-    return new WebPaintBackend(blankData(meta), inject);
+  static blank(meta: { width: number; height: number }, inject: BackendInject = {}): WeebPaintBackend {
+    return new WeebPaintBackend(blankData(meta), inject);
   }
 
   /** 魔数嗅探：zip→ora、8BPS→psd（后棒）、png→UPNG 单图成层、其余→注入解码器单图成层。 */
@@ -175,11 +175,11 @@ export class WebPaintBackend implements WebPaintBackendInterface {
     const fmt = sniffFormat(bytes);
     if (fmt === "ora-zip") {
       const dec: DecodedPainting = await decodeOraToPainting(new Blob([bytes as unknown as BlobPart]));
-      const backend = new WebPaintBackend(dec.data, inject);
+      const backend = new WeebPaintBackend(dec.data, inject);
       return {
         backend,
         sidecar: {
-          editorState: dec._editorState, legacyState: dec._webpaintState,
+          editorState: dec._editorState, legacyState: dec._weebpaintState,
           referencePng: dec._referenceBlob ? new Uint8Array(await dec._referenceBlob.arrayBuffer()) : undefined,
           wroteWith: dec._wroteWith,
         },
@@ -188,12 +188,12 @@ export class WebPaintBackend implements WebPaintBackendInterface {
     if (fmt === "psd") {
       // C7 后棒实勘：全仓不存在 psd 解码器——psd 是**只写格式**（导出 = backend/psd.ts encodeDocToPsd，
       // exporters 懒加载）。open 对 8BPS 响亮失败是终态，不是待接的路由（要导入 psd = 新功能，另立项）。
-      throw new Error("WebPaintBackend.open: no psd decoder (psd is write-only) — re-save as .ora/.png and import that");
+      throw new Error("WeebPaintBackend.open: no psd decoder (psd is write-only) — re-save as .ora/.png and import that");
     }
     const plane = fmt === "png"
       ? await decodePngToBytes(bytes)
-      : await (inject.imageDecoder ?? (() => { throw new Error("WebPaintBackend.open: non-png bitmaps need an injected imageDecoder"); }))(bytes);
-    const backend = new WebPaintBackend(singleImageData(plane), inject);
+      : await (inject.imageDecoder ?? (() => { throw new Error("WeebPaintBackend.open: non-png bitmaps need an injected imageDecoder"); }))(bytes);
+    const backend = new WeebPaintBackend(singleImageData(plane), inject);
     return { backend, sidecar: { wroteWith: null } };
   }
 
@@ -218,7 +218,7 @@ export class WebPaintBackend implements WebPaintBackendInterface {
   }
 
   private _guard(): void {
-    if (this._disposed) throw new Error("WebPaintBackend: disposed (switching artwork = discard and rebuild)");
+    if (this._disposed) throw new Error("WeebPaintBackend: disposed (switching artwork = discard and rebuild)");
   }
 
   // ── 字节面 ──

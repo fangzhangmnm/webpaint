@@ -1,4 +1,4 @@
-// WebPaint 全量层测试入口（C8 ⑤ 测试分级）——`npm run test:full` = 快层(run.mjs) + 本层 + GL smoke。
+// WeebPaint 全量层测试入口（C8 ⑤ 测试分级）——`npm run test:full` = 快层(run.mjs) + 本层 + GL smoke。
 // 本层住「贵但值」的锚：全量画作 round-trip、mock multiplayer 双 backend。
 // 三方 golden ±ε（真 GPU vs SwiftShader vs SoftGl2，gl-smoke harness 注入 SoftGl2 比较器）排后棒。
 // 快层开发期快捷：TEST_FILTER=<子串> npm test 只跑匹配条目（runner.mjs run() 的过滤器）。
@@ -12,5 +12,5 @@ installDomParserShim();          // open 路径 parseStackXml 用（node 无 DOM
 import "./full-painting-roundtrip.test.mjs";   // 全量画作 encodeOra↔open 逐字节 + 构建决定论
 import "./full-mock-multiplayer.test.mjs";     // 共享 SoftGl2Port 双租户：隔离对拍/令牌墙 per-backend/退租
 
-console.log("\n  WebPaint —— 全量层（test:full；快层锚在 run.mjs）\n");
+console.log("\n  WeebPaint —— 全量层（test:full；快层锚在 run.mjs）\n");
 await run();

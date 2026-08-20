@@ -73,11 +73,11 @@ describe("store-absent · null-store 消费面点名", () => {
 });
 
 describe("store-absent · 整段 boot smoke（子进程）", () => {
-  it("WEBPAINT_NOSTORE=1 下 app.ts 整段 boot 不炸", async () => {
+  it("WEEBPAINT_NOSTORE=1 下 app.ts 整段 boot 不炸", async () => {
     const child = fileURLToPath(new URL("./nostore-boot-child.mjs", import.meta.url));
     const r = await new Promise((resolve) => {
       const p = spawn(process.execPath, [child], {
-        env: { ...process.env, WEBPAINT_NOSTORE: "1" },
+        env: { ...process.env, WEEBPAINT_NOSTORE: "1" },
         stdio: ["ignore", "ignore", "pipe"],
       });
       let err = "";

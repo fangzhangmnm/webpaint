@@ -6,7 +6,7 @@ import { LayersFace } from "./layers-face.ts";
 import type { Gl2Port } from "../common/gl2-port.ts";
 import { type DocCompositorBytesFn } from "./doc-render.ts";
 import { type RgbaPlane } from "./png-codec.ts";
-import type { WebPaintBackendInterface, BackendLayerNode, BackendDocInfo, BackendChangeEvent, BackendOpResult, BackendAddResult, ResolvedBrushSnapshot, StrokeId, FilterSessionId } from "./webpaint-backend-interface.ts";
+import type { WeebPaintBackendInterface, BackendLayerNode, BackendDocInfo, BackendChangeEvent, BackendOpResult, BackendAddResult, ResolvedBrushSnapshot, StrokeId, FilterSessionId } from "./weebpaint-backend-interface.ts";
 /** 壳侧编排钩子（进程内壳专用；headless 缺省 no-op。MCP/embedding 面走 onChange 事件——
  *  序列化墙那侧不存在这组细粒度钩子，它们是浏览器壳「同步刷新面板/画面」的过渡协作面）。 */
 export interface BackendShellHooks {
@@ -37,7 +37,7 @@ export interface BackendInject {
     hooks?: BackendShellHooks;
 }
 export interface BackendOpenResult {
-    backend: WebPaintBackend;
+    backend: WeebPaintBackend;
     /** open 解出的壳 sidecar（backend 不解释，原样交壳）。 */
     sidecar: {
         editorState?: unknown;
@@ -46,7 +46,7 @@ export interface BackendOpenResult {
         wroteWith: string | null;
     };
 }
-export declare class WebPaintBackend implements WebPaintBackendInterface {
+export declare class WeebPaintBackend implements WeebPaintBackendInterface {
     private _history;
     private _wp2;
     private _view;
@@ -71,7 +71,7 @@ export declare class WebPaintBackend implements WebPaintBackendInterface {
     static blank(meta: {
         width: number;
         height: number;
-    }, inject?: BackendInject): WebPaintBackend;
+    }, inject?: BackendInject): WeebPaintBackend;
     /** 魔数嗅探：zip→ora、8BPS→psd（后棒）、png→UPNG 单图成层、其余→注入解码器单图成层。 */
     static open(bytes: Uint8Array, inject?: BackendInject): Promise<BackendOpenResult>;
     get disposed(): boolean;

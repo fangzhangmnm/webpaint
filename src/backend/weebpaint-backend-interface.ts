@@ -1,5 +1,5 @@
-// webpaint-backend-interface —— 纯接口文件（类 .h）：契约与实现分离（提案 §3，pin 住；
-// 形状变了要回写 20260808-c-headless-proposal.md）。实现体 = ./webpaint-backend.ts。
+// weebpaint-backend-interface —— 纯接口文件（类 .h）：契约与实现分离（提案 §3，pin 住；
+// 形状变了要回写 20260808-c-headless-proposal.md）。实现体 = ./weebpaint-backend.ts。
 //
 // 【硬纪律】本文件全部方法只收/吐 标量 | JSON-able 对象 | TypedArray/bytes——它同时是
 // 进程内 api、postMessage 协议、MCP tool schema、multiplayer 序列化面（同一把刀）。
@@ -48,7 +48,7 @@ export type FilterSessionId = number;
  *  deadzone 单位 doc px）——同一快照+同一 (x,y,p,t) 序列 → 同一输出（ADR-0009 决定论）。 */
 export type ResolvedBrushSnapshot = Record<string, unknown>;
 
-export interface WebPaintBackendInterface {
+export interface WeebPaintBackendInterface {
   // ── 生命周期：born-loaded，无空态无 load 方法（liminal space 结构性不存在）——
   //    换画 = 弃旧建新；load/new 的舒服语义住壳层 tab 管理器。
   dispose(): void;                        // 显式释放（undo 栈/tileset/观察者退租；幂等）
@@ -56,9 +56,9 @@ export interface WebPaintBackendInterface {
 
   // ── 字节面：吐包好的 binary（加密等外包装壳再开一次包）──
   encodeOra(opts?: {
-    /** 壳 sidecar（不透明携带，backend 不解释）：desk struct → .webpaint/editor-state.json。 */
+    /** 壳 sidecar（不透明携带，backend 不解释）：desk struct → .weebpaint/editor-state.json。 */
     editorSidecar?: object;
-    /** 参考窗图 bytes → webpaint/reference.png。 */
+    /** 参考窗图 bytes → weebpaint/reference.png。 */
     referencePng?: Uint8Array;
   }): Promise<Uint8Array>;
   exportImage(fmt: "png" | "jpg"): Promise<Uint8Array>;   // 合成→字节；jpg 经注入编码器；GL 缺席响亮失败

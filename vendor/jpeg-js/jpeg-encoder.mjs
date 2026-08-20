@@ -1,5 +1,5 @@
 // vendored from npm jpeg-js@0.4.4 lib/encoder.js (encoder half only; BSD-3 Adobe, see LICENSE)
-// WebPaint modifications (2026-08-20, cloud-image-picker spec):
+// WeebPaint modifications (2026-08-20, cloud-image-picker spec):
 //   - CJS/window glue -> ESM `export { encode }`
 //   - dropped btoa/Buffer shim + node Buffer return branch (always returns Uint8Array)
 //   - dropped unreachable dataUri tail + getImageDataFromImage (canvas helper; family rule: bytes never via canvas)

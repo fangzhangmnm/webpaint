@@ -16,7 +16,7 @@ export function setDocCompositor(fn: DocCompositorFn): void { _fn = fn; }
 export function setDocCompositorBytes(fn: DocCompositorBytesFn | null): void { _bytesFn = fn; }
 /** 现值读口（测试 save/restore 全局接缝用）。 */
 export function getDocCompositorBytes(): DocCompositorBytesFn | null { return _bytesFn; }
-// per-tenant 已落（C7 后棒）：WebPaintBackend/LayersFace 各持 inject.compositorBytes（缺省回落本全局面）。
+// per-tenant 已落（C7 后棒）：WeebPaintBackend/LayersFace 各持 inject.compositorBytes（缺省回落本全局面）。
 // 本全局接缝保留给**壳单租户消费者**（psd mergedimage / session 导出 / 参考窗镜像）——多 backend 并存时
 // 它们只服务主 tab 的 board；embedding/MCP 面的合成恒走各自 backend 的注入面，不经这里。
 

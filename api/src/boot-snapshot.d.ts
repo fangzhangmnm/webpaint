@@ -1,6 +1,6 @@
 declare const KEYS: {
-    readonly theme: "webpaint.boot.theme";
-    readonly lang: "webpaint.boot.lang";
+    readonly theme: "weebpaint.boot.theme";
+    readonly lang: "weebpaint.boot.lang";
 };
 export type BootSnapshotKey = keyof typeof KEYS;
 export declare function readBootSnapshot(k: BootSnapshotKey): string | null;

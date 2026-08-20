@@ -1,11 +1,11 @@
-// WebPaint 专属测试入口（store/cloud-sync/provider 契约在 lib 的 test/，这里只留 WebPaint vendored adapter）。
+// WeebPaint 专属测试入口（store/cloud-sync/provider 契约在 lib 的 test/，这里只留 WeebPaint vendored adapter）。
 import "./dom-shim-first.mjs";   // **必须第一**：在任何 import-Vue 之前装 DOM shim（见该文件头注释）。
 import { run } from "./runner.mjs";
 import "./editor-session.test.mjs";   // 家族共享模块 editor-session 生命周期编排（mock store+editor）
 import "./checkpoint-policy.test.mjs";
 import "./clipboard-policy.test.mjs";     // v0.9.22 剪贴板正宫化：双击 Ctrl+C 判窗 + 大图护栏阈值（spec 20260819）
 import "./edit-mode-transient.test.mjs";  // v0.9.22 连贴收口=commit 钉子（applyPendingTransient 语义）
-import "./local-file-session.test.mjs";   // v0.9.24 无地本地文件：WebPaint 痕迹检测（原位 vs 导入 分流）
+import "./local-file-session.test.mjs";   // v0.9.24 无地本地文件：WeebPaint 痕迹检测（原位 vs 导入 分流）
 import "./cloud-image-model.test.mjs";    // v0.9.29 云盘图片 picker：扩展名路由/thumb token/白底平铺/jpeg 编码接缝（spec 20260820）
 import "./brush-rack-migrate.test.mjs";
 import "./engine-registry.test.mjs";
@@ -101,7 +101,7 @@ import "./blend-glsl.test.mjs";             // WebGL2+tiling Stage 2：12 blend 
 import "./gl-compose-plan.test.mjs";        // WebGL2+tiling Stage 2：clip 基底解析 + 组隔离判定（与 layer-composite 对齐）
 import "./gl-doc-bridge.test.mjs";       // WebGL2+tiling 接 board：doc 树→CompNode 翻译 + safeMode
 import "./ora-tree.test.mjs";               // batch 2 step3：ORA 嵌套组序列化（buildStackXml↔parseStackXml + id + active 往返）
-import "./webpaint-backend.test.mjs";       // C7：WebPaintBackend 装配（born-loaded 工厂/逐字节 round-trip/多 backend 并发/dispose/onChange）
+import "./weebpaint-backend.test.mjs";       // C7：WeebPaintBackend 装配（born-loaded 工厂/逐字节 round-trip/多 backend 并发/dispose/onChange）
 import "./backend-stroke.test.mjs";         // C8：stroke 档口（一笔一步/no-op/cancel 无痕/单令牌墙/决定论/pixelMode/erase——SoftGl2Port 全链）
 import "./filter-gate.test.mjs";            // C8：filter 档口（kernel 清单/参数重算一步落层/重算不累积/identity 不占步/cancel 无痕/单令牌墙/选区 mask）
 import "./mcp-redteam.test.mjs";            // C8：MCP server 红队（spawn 真子进程走 stdio JSON-RPC——握手/全动词流程/决定论穿墙/敌意输入不死）
@@ -126,5 +126,5 @@ import "./editor-state-restore.test.mjs";   // adoptLoadedDoc 的 toolStates 反
 import "./color-cluster.test.ts";    // v0.7.9 按颜色拆分：确定性 k-means + 硬分配（分片互斥 ∪=原字节）。
 import "./color-name.test.ts";       // v0.7.10 颜色命名：xkcd top-120 表完整性/四语互异 + OKLab nearest + 四语 parse。
 
-console.log("\n  WebPaint —— vendored OneDriveProvider 适配验收（lib 契约在 sync-store/test/）\n");
+console.log("\n  WeebPaint —— vendored OneDriveProvider 适配验收（lib 契约在 sync-store/test/）\n");
 await run();

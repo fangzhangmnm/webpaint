@@ -58,7 +58,7 @@ const ICON = {
   folder: iconHtml("folder"),
   cloudBig: iconHtml("cloud"),
   // ghost：云端已确认消失（划叉）。pendingGone：云端消失但还在防抖 grace 内、尚未判定（云+时钟）。
-  // 两者必须视觉可分——别合并。pendingGone 共享库还没有，暂用 assets/webpaint_legacy.svg 的本地图形。
+  // 两者必须视觉可分——别合并。pendingGone 共享库还没有，暂用 assets/weebpaint_legacy.svg 的本地图形。
   ghost: iconHtml("cloud-unavailable"),
   pendingGone: iconHtml("cloud-pending"),
   lock: iconHtml("lock"),

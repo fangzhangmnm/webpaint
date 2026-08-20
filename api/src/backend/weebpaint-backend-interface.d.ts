@@ -41,13 +41,13 @@ export type FilterSessionId = number;
  *  完整可画的笔）。平滑推导在 backend 内（streamline/stabilization × SMOOTH_DEFAULTS 常数，
  *  deadzone 单位 doc px）——同一快照+同一 (x,y,p,t) 序列 → 同一输出（ADR-0009 决定论）。 */
 export type ResolvedBrushSnapshot = Record<string, unknown>;
-export interface WebPaintBackendInterface {
+export interface WeebPaintBackendInterface {
     dispose(): void;
     readonly disposed: boolean;
     encodeOra(opts?: {
-        /** 壳 sidecar（不透明携带，backend 不解释）：desk struct → .webpaint/editor-state.json。 */
+        /** 壳 sidecar（不透明携带，backend 不解释）：desk struct → .weebpaint/editor-state.json。 */
         editorSidecar?: object;
-        /** 参考窗图 bytes → webpaint/reference.png。 */
+        /** 参考窗图 bytes → weebpaint/reference.png。 */
         referencePng?: Uint8Array;
     }): Promise<Uint8Array>;
     exportImage(fmt: "png" | "jpg"): Promise<Uint8Array>;

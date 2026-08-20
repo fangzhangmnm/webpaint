@@ -1,6 +1,6 @@
 // blend-modes —— 图层混合模式契约（W3C Compositing and Blending L1 §10.1；C8 抽入 common）。
 //
-// 这 12 个 = WebPaint UI 实际可选的全部（layers-panel.ts LAYER_MODE_LABEL）；非可分离的
+// 这 12 个 = WeebPaint UI 实际可选的全部（layers-panel.ts LAYER_MODE_LABEL）；非可分离的
 //   hue/sat/color/luminosity UI 选不到（只在 PSD 互转），故不实现。
 // 双实现对表：GLSL 版在 src/gl/blend-glsl.ts（BLEND_BODY，逐模式字符串）、CPU 版在本文件
 //   （blendChannel，SoftGl2Port 与任何字节域合成共用）。**改公式两边必须同步**——

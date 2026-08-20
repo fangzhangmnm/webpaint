@@ -2,7 +2,7 @@
 //
 // 把「能导出成什么格式」从 app.js 的硬 switch 收成注册表插件——和 filters.js 同一道接缝
 // （共享 registry.js）。加一个格式 = registerExporter(...) 一处，导出菜单 data-driven 自动出现。
-// 下载插件（future）：window.WebPaint.registerExporter(spec)，同 registerFilter。
+// 下载插件（future）：window.WeebPaint.registerExporter(spec)，同 registerFilter。
 //
 // ============= Exporter 契约 =============
 // 一个 Exporter = 一个普通对象：
@@ -21,7 +21,7 @@
 import { t } from "./i18n/index.ts";
 import { makeRegistry } from "./registry.ts";
 import { encodeDocToOra } from "./backend/ora.ts";
-import { WEBPAINT_VERSION } from "./version.ts";
+import { WEEBPAINT_VERSION } from "./version.ts";
 import { renderDocToImageBlob } from "./session.ts";
 import type { PaintingView } from "./backend/workpiece/painting-view.ts";
 
@@ -66,7 +66,7 @@ registerExporter({
   //   （store 的 ZipFile.getEncryptedBlob）原样导出 at-rest 密文容器，落地名 <名>.ora.zip。
   //   所以这条路径只会被明文作品走到。
   encode: async (doc) => {
-    return await encodeDocToOra(doc, { wroteWith: WEBPAINT_VERSION });
+    return await encodeDocToOra(doc, { wroteWith: WEEBPAINT_VERSION });
   },
 });
 registerExporter({

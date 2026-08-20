@@ -1,4 +1,4 @@
-// WebPaintBackend 装配锚（C7；提案 §5 C7 行验收）：node 无 GL——
+// WeebPaintBackend 装配锚（C7；提案 §5 C7 行验收）：node 无 GL——
 //   ① born-loaded 工厂（blank / open 魔数路由 / png 单图成层）
 //   ② open → 指令 → undo → encode **逐字节** round-trip（决定论 encode：zip 时间戳钉死）
 //   ③ 多 backend 并发（观察者多播 + 所有权戳：记账互不串）
@@ -12,7 +12,7 @@ import { installDomParserShim } from "./xml-shim.mjs";
 ensureZipLoaded();
 installDomParserShim();
 
-const { WebPaintBackend } = await import("../src/backend/webpaint-backend.ts");
+const { WeebPaintBackend } = await import("../src/backend/weebpaint-backend.ts");
 const { encodePngFromBytes } = await import("../src/backend/png-codec.ts");
 const { getDocCompositorBytes, setDocCompositorBytes } = await import("../src/backend/doc-render.ts");
 
@@ -27,9 +27,9 @@ const withNoGL = async (fn) => {
 const bytesEq = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
 const INJ = { appVersion: "v0.0.0-test" };
 
-describe("webpaint-backend · born-loaded 工厂", () => {
+describe("weebpaint-backend · born-loaded 工厂", () => {
   it("blank：出生即 doc 在（无空态），干净不脏、栈空", () => {
-    const be = WebPaintBackend.blank({ width: 128, height: 96 }, INJ);
+    const be = WeebPaintBackend.blank({ width: 128, height: 96 }, INJ);
     const info = be.docInfo();
     eq(info.width, 128); eq(info.height, 96);
     eq(info.layerCount, 1); eq(info.activeId, 1);
@@ -43,7 +43,7 @@ describe("webpaint-backend · born-loaded 工厂", () => {
     const px = new Uint8ClampedArray(w * h * 4);
     for (let i = 0; i < w * h; i++) { px[i * 4] = 200; px[i * 4 + 3] = 255; }   // 不透明红
     const png = await encodePngFromBytes(px, w, h);
-    const { backend: be, sidecar } = await WebPaintBackend.open(png, INJ);
+    const { backend: be, sidecar } = await WeebPaintBackend.open(png, INJ);
     const info = be.docInfo();
     eq(info.width, w); eq(info.height, h); eq(info.layerCount, 1);
     eq(sidecar.wroteWith, null);
@@ -54,15 +54,15 @@ describe("webpaint-backend · born-loaded 工厂", () => {
 
   it("open：垃圾字节（非 png/zip/psd）无解码注入 → 响亮 throw", async () => {
     let threw = false;
-    try { await WebPaintBackend.open(new Uint8Array([1, 2, 3, 4]), INJ); }
+    try { await WeebPaintBackend.open(new Uint8Array([1, 2, 3, 4]), INJ); }
     catch (e) { threw = true; assert(String(e.message).includes("imageDecoder"), e.message); }
     assert(threw, "必须响亮失败");
   });
 });
 
-describe("webpaint-backend · encode↔open 逐字节 round-trip（无 GL）", () => {
+describe("weebpaint-backend · encode↔open 逐字节 round-trip（无 GL）", () => {
   it("blank → verbs → encodeOra → open → encodeOra：字节相同", async () => await withNoGL(async () => {
-    const b1 = WebPaintBackend.blank({ width: 64, height: 48 }, INJ);
+    const b1 = WeebPaintBackend.blank({ width: 64, height: 48 }, INJ);
     const add = b1.layerAdd("上层");
     assert(add.ok, "layerAdd");
     eq(b1.layerSetProp(add.id, "opacity", 0.5).ok, true);
@@ -72,7 +72,7 @@ describe("webpaint-backend · encode↔open 逐字节 round-trip（无 GL）", (
     b1.wp2.layerTiles.putRegion(add.id, 3, 4, 2, 2, new Uint8ClampedArray([9, 8, 7, 255, 1, 2, 3, 255, 4, 5, 6, 255, 250, 250, 250, 128]));
     t.commit();
     const bytes1 = await b1.encodeOra();
-    const { backend: b2, sidecar } = await WebPaintBackend.open(bytes1, INJ);
+    const { backend: b2, sidecar } = await WeebPaintBackend.open(bytes1, INJ);
     eq(sidecar.wroteWith, "v0.0.0-test", "wrote-with 戳注入生效");
     const bytes2 = await b2.encodeOra();
     assert(bytesEq(bytes1, bytes2), `round-trip 字节漂移（${bytes1.length} vs ${bytes2.length}）`);
@@ -82,10 +82,10 @@ describe("webpaint-backend · encode↔open 逐字节 round-trip（无 GL）", (
   }));
 
   it("open → 指令 → undo → encodeOra == 原字节（C7 验收判据）", async () => await withNoGL(async () => {
-    const b1 = WebPaintBackend.blank({ width: 32, height: 32 }, INJ);
+    const b1 = WeebPaintBackend.blank({ width: 32, height: 32 }, INJ);
     b1.layerAdd("A");
     const bytes1 = await b1.encodeOra();
-    const { backend: b2 } = await WebPaintBackend.open(bytes1, INJ);
+    const { backend: b2 } = await WeebPaintBackend.open(bytes1, INJ);
     // 指令批：结构 + 属性 + 像素令牌写
     const r = b2.layerAdd("扰动层"); assert(r.ok);
     b2.layerSetProp(r.id, "opacity", 0.25);
@@ -100,16 +100,16 @@ describe("webpaint-backend · encode↔open 逐字节 round-trip（无 GL）", (
     b1.dispose(); b2.dispose();
   }));
 
-  it("encodeOra sidecar 透传：editorSidecar → .webpaint/editor-state.json → open 解回", async () => {
-    const b1 = WebPaintBackend.blank({ width: 16, height: 16 }, INJ);
+  it("encodeOra sidecar 透传：editorSidecar → .weebpaint/editor-state.json → open 解回", async () => {
+    const b1 = WeebPaintBackend.blank({ width: 16, height: 16 }, INJ);
     const bytes = await b1.encodeOra({ editorSidecar: { toolDials: { brush: 42 }, shellVer: "t1" } });
-    const { backend: b2, sidecar } = await WebPaintBackend.open(bytes, INJ);
+    const { backend: b2, sidecar } = await WeebPaintBackend.open(bytes, INJ);
     eq(JSON.stringify(sidecar.editorState), JSON.stringify({ toolDials: { brush: 42 }, shellVer: "t1" }), "sidecar 原样往返（backend 不解释）");
     b1.dispose(); b2.dispose();
   });
 
   it("exportImage：无 GL/合成注入 → 响亮失败（不出占位图）", async () => await withNoGL(async () => {
-    const be = WebPaintBackend.blank({ width: 8, height: 8 }, INJ);
+    const be = WeebPaintBackend.blank({ width: 8, height: 8 }, INJ);
     let threw = false;
     try { await be.exportImage("png"); } catch (e) { threw = true; assert(String(e.message).includes("no compositor available"), e.message); }
     assert(threw);
@@ -117,7 +117,7 @@ describe("webpaint-backend · encode↔open 逐字节 round-trip（无 GL）", (
   }));
 
   it("exportImage：jpg 无编码器注入 → 响亮失败", async () => {
-    const be = WebPaintBackend.blank({ width: 8, height: 8 }, INJ);
+    const be = WeebPaintBackend.blank({ width: 8, height: 8 }, INJ);
     let threw = false;
     try { await be.exportImage("jpg"); } catch { threw = true; }
     assert(threw, "jpgEncoder 缺席必须 throw");
@@ -125,10 +125,10 @@ describe("webpaint-backend · encode↔open 逐字节 round-trip（无 GL）", (
   });
 });
 
-describe("webpaint-backend · 多 backend 并发（观察者多播 + 所有权戳）", () => {
+describe("weebpaint-backend · 多 backend 并发（观察者多播 + 所有权戳）", () => {
   it("双 backend 交错令牌写：记账互不串、undo 各回各家", () => {
-    const A = WebPaintBackend.blank({ width: 16, height: 16 }, INJ);
-    const B = WebPaintBackend.blank({ width: 16, height: 16 }, INJ);
+    const A = WeebPaintBackend.blank({ width: 16, height: 16 }, INJ);
+    const B = WeebPaintBackend.blank({ width: 16, height: 16 }, INJ);
     const red = new Uint8ClampedArray([255, 0, 0, 255]);
     const blu = new Uint8ClampedArray([0, 0, 255, 255]);
     // 交错开令牌（A 开着时写 B——旧单槽观察者下这必坏账）
@@ -150,8 +150,8 @@ describe("webpaint-backend · 多 backend 并发（观察者多播 + 所有权�
   });
 
   it("A 令牌开着时 B 的换手不进 A 的包（undo 包按 backend 隔离）", () => {
-    const A = WebPaintBackend.blank({ width: 16, height: 16 }, INJ);
-    const B = WebPaintBackend.blank({ width: 16, height: 16 }, INJ);
+    const A = WeebPaintBackend.blank({ width: 16, height: 16 }, INJ);
+    const B = WeebPaintBackend.blank({ width: 16, height: 16 }, INJ);
     const px = new Uint8ClampedArray([7, 7, 7, 255]);
     const ta = A.wp2.begin("a-open");
     // B 无令牌直写会 throw？不——B 的观察者 gate 是 tokenOpen；这里给 B 也开令牌，写完各自 commit。
@@ -176,8 +176,8 @@ describe("webpaint-backend · 多 backend 并发（观察者多播 + 所有权�
       return { fn, calls };
     };
     const ca = mkComp(11), cb = mkComp(22);
-    const A = WebPaintBackend.blank({ width: 8, height: 8 }, { compositorBytes: ca.fn });
-    const B = WebPaintBackend.blank({ width: 8, height: 8 }, { compositorBytes: cb.fn });
+    const A = WeebPaintBackend.blank({ width: 8, height: 8 }, { compositorBytes: ca.fn });
+    const B = WeebPaintBackend.blank({ width: 8, height: 8 }, { compositorBytes: cb.fn });
     const pa = await A.exportImage("png");
     const pb = await B.exportImage("png");
     assert(pa.length > 0 && pb.length > 0, "两家都出字节");
@@ -187,10 +187,10 @@ describe("webpaint-backend · 多 backend 并发（观察者多播 + 所有权�
   });
 });
 
-describe("webpaint-backend · dispose / onChange", () => {
+describe("weebpaint-backend · dispose / onChange", () => {
   it("dispose：幂等；死后 verbs 响亮 throw；邻居照常活", () => {
-    const A = WebPaintBackend.blank({ width: 8, height: 8 }, INJ);
-    const B = WebPaintBackend.blank({ width: 8, height: 8 }, INJ);
+    const A = WeebPaintBackend.blank({ width: 8, height: 8 }, INJ);
+    const B = WeebPaintBackend.blank({ width: 8, height: 8 }, INJ);
     A.dispose();
     A.dispose();   // 幂等
     eq(A.disposed, true);
@@ -202,7 +202,7 @@ describe("webpaint-backend · dispose / onChange", () => {
   });
 
   it("onChange：verb 一步 / undo 各响一次；disposer 拆掉后安静", () => {
-    const be = WebPaintBackend.blank({ width: 8, height: 8 }, INJ);
+    const be = WeebPaintBackend.blank({ width: 8, height: 8 }, INJ);
     const evs = [];
     const off = be.onChange((ev) => evs.push(ev));
     const r = be.layerAdd("L");

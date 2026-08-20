@@ -38,7 +38,7 @@ export declare function readImageFromClipboard(): Promise<Blob | null>;
 export declare function triggerDownload(blob: Blob, filename: string): void;
 /**
  * 首选打印路径：把图开在**独立新标签页**里、从那儿打印（v375，用户实测选定）。
- * 为什么不在本页打：WebPaint 屏上是 2D canvas，但底下有 WebGL 合成器；iOS 16.7/17 已知 bug——
+ * 为什么不在本页打：WeebPaint 屏上是 2D canvas，但底下有 WebGL 合成器；iOS 16.7/17 已知 bug——
  *   打印 popover 这种模态一接管就丢 WebGL context（"WebGL: context lost"，见 Apple Dev Forums），
  *   打印期间任何 render 会把空 GL 结果 blit 到 2D 画布 → 主画布闪白/丢图。v370~v373 页内各招（@media
  *   print 覆盖层 / iframe / 每帧重绘 keep-alive / 持久 <img> 封面）都救不干净（用户逐版实测）。

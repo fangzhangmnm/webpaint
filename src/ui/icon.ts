@@ -6,7 +6,7 @@
 // 尺寸不在这里定：全部由 CSS 按语境给（.tool svg / .layers-foot-btn svg / .gallery-icon-btn svg …）。
 // 传 size 只用于 CSS 够不着的地方（比如塞进 v-html 的裸片段）。
 //
-// 图标名 = 共享库（20260708 SVG Icons）的 symbol id，或 assets/webpaint_legacy.svg 里的本地补丁。
+// 图标名 = 共享库（20260708 SVG Icons）的 symbol id，或 assets/weebpaint_legacy.svg 里的本地补丁。
 // 名字写了但两边都没有 → 页面上那个位置空白。加图标请走 assets/ 下的源文件 + 重跑脚本。
 
 export type IconName = string;

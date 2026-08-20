@@ -3,7 +3,7 @@ import { registerFilter, listFilters } from "./filters.ts";
 import { registerExporter, listExporters } from "./exporters.ts";
 declare global {
     interface Window {
-        WebPaint?: {
+        WeebPaint?: {
             fetchOraThumbnail?: typeof fetchOraThumbnail;
             cloudThumbStats?: () => unknown;
             cloudThumbResetStats?: () => void;

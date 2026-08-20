@@ -282,7 +282,7 @@ export function installDomShim() {
     alert: NOOP, confirm: () => false, prompt: () => null,
     setTimeout, clearTimeout, setInterval, clearInterval,
     fetch: () => Promise.reject(new Error("no-fetch-in-node")),
-    WebPaint: undefined,
+    WeebPaint: undefined,
   };
   win.window = win;
   win.self = win;

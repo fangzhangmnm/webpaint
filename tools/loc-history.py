@@ -543,9 +543,9 @@ def draw_bench(buckets, path, zh, by):
     if not buckets:
         return False
     unit = {'session': '坐', 'commit': 'commit', 'day': '天', 'month': '月'}[by] if zh else by
-    L = dict(title=f'WebPaint 逐{unit}自省 benchmark（每点=一次{unit}）', ent='变更熵 (0–1)',
+    L = dict(title=f'WeebPaint 逐{unit}自省 benchmark（每点=一次{unit}）', ent='变更熵 (0–1)',
              rew='返工率 (删/增)', x=f'{unit}（时间正序）') if zh else \
-        dict(title=f'WebPaint self-benchmark per {unit}', ent='change entropy (0–1)',
+        dict(title=f'WeebPaint self-benchmark per {unit}', ent='change entropy (0–1)',
              rew='rework ratio (del/add)', x=f'{by} (chronological)')
     labels = [k for k, _ in buckets]
     ent = [b['entropy'] for _, b in buckets]
@@ -715,11 +715,11 @@ def draw(commits, path, zh, milestones=None):
     now = loc[-1] if loc else 0
     L = dict(y_loc='整库真实代码行数 (LOC)', y_ent='结构熵 (bit)', y_delta='每 commit ΔLOC',
              x='commit 序号（时间正序）', up='净长', dn='净缩',
-             title=f'WebPaint 代码库演进（状态法）— {len(commits)} commits，现 {now} 行',
+             title=f'WeebPaint 代码库演进（状态法）— {len(commits)} commits，现 {now} 行',
              entl='结构熵') if zh else \
         dict(y_loc='real codebase LOC', y_ent='structural entropy (bit)', y_delta='per-commit ΔLOC',
              x='commit # (chronological)', up='grew', dn='shrank',
-             title=f'WebPaint codebase (state method) — {len(commits)} commits, now {now} lines',
+             title=f'WeebPaint codebase (state method) — {len(commits)} commits, now {now} lines',
              entl='structural entropy')
     xs = list(range(len(commits)))
 

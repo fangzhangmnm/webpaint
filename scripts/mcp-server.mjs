@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// WebPaint MCP server（C8 ④）——backend 接口的机械翻译（提案 §3：「这一份接口同时是 MCP 面、
+// WeebPaint MCP server（C8 ④）——backend 接口的机械翻译（提案 §3：「这一份接口同时是 MCP 面、
 // postMessage 面、multiplayer 序列化面（同一把刀）」）。stdio 传输、newline-delimited JSON-RPC 2.0，
 // 手搓协议零依赖（家规：vendor 一切、无 runtime npm install——MCP 官方 SDK 不进 repo）。
 //
 // 用法：node scripts/mcp-server.mjs（node ≥22.18，TS 直跑）；或 npm run mcp。
-// 注册示例（Claude Code）：claude mcp add webpaint -- node <repo>/scripts/mcp-server.mjs
+// 注册示例（Claude Code）：claude mcp add weebpaint -- node <repo>/scripts/mcp-server.mjs
 //
-// 语义（与 webpaint-backend-interface.ts 一致，不另立协议）：
+// 语义（与 weebpaint-backend-interface.ts 一致，不另立协议）：
 //   - 单租户会话：create/open_file 弃旧建新（旧 backend interrupt=cancel 后 dispose）。
 //   - 栅格/合成 = SoftGl2Port（决定论软域，ADR-0009）；exportImage/encodeOra 走注入合成面
 //     ——「SoftGl2Port 兜底也能跑（MCP server 成立）」（提案 §0）；浏览器用户路径不受影响。
@@ -30,12 +30,12 @@ if (typeof globalThis.ImageData === "undefined") {
     }
   };
 }
-import { WebPaintBackend } from "../src/backend/webpaint-backend.ts";
+import { WeebPaintBackend } from "../src/backend/weebpaint-backend.ts";
 import { SoftGl2Port } from "../src/backend/soft-gl2-port.ts";
 import { GlRoom, poolCapacityForBudget } from "../src/backend/gl/gl-room.ts";
 import { RasterService } from "../src/backend/gl/raster-service.ts";
 import { FILTER_KERNELS } from "../src/backend/filters/index.ts";
-import { WEBPAINT_VERSION } from "../src/version.ts";
+import { WEEBPAINT_VERSION } from "../src/version.ts";
 
 // ---- 会话状态（单租户）----
 let be = null;
@@ -47,7 +47,7 @@ function mkInject() {
   const room = new GlRoom(port, poolCapacityForBudget(256 * 1024 * 1024));
   const raster = new RasterService(room);
   return {
-    appVersion: WEBPAINT_VERSION,
+    appVersion: WEEBPAINT_VERSION,
     gl: port,
     compositorBytes: (nodes, w, h) => raster.compositeToBytes(nodes, w, h),
   };
@@ -88,7 +88,7 @@ const TOOLS = {
     description: "新建空白画布（弃旧建新）；返回 docInfo",
     inputSchema: obj({ width: num, height: num }, ["width", "height"]),
     handler: (a) => {
-      replaceBackend(WebPaintBackend.blank({ width: a.width, height: a.height }, mkInject()));
+      replaceBackend(WeebPaintBackend.blank({ width: a.width, height: a.height }, mkInject()));
       return be.docInfo();
     },
   },
@@ -96,7 +96,7 @@ const TOOLS = {
     description: "打开本地文件（.ora/.png/位图；魔数嗅探路由）；弃旧建新，返回 docInfo",
     inputSchema: obj({ path: str }, ["path"]),
     handler: async (a) => {
-      const { backend } = await WebPaintBackend.open(new Uint8Array(fs.readFileSync(a.path)), mkInject());
+      const { backend } = await WeebPaintBackend.open(new Uint8Array(fs.readFileSync(a.path)), mkInject());
       replaceBackend(backend);
       return be.docInfo();
     },
@@ -204,7 +204,7 @@ async function handle(msg) {
     return reply(id, {
       protocolVersion: params?.protocolVersion ?? "2024-11-05",
       capabilities: { tools: {} },
-      serverInfo: { name: "webpaint-backend", version: WEBPAINT_VERSION },
+      serverInfo: { name: "weebpaint-backend", version: WEEBPAINT_VERSION },
     });
   }
   if (method === "notifications/initialized" || method === "notifications/cancelled") return;   // 通知无应答

@@ -65,7 +65,7 @@ export class LayerTiles implements CollectorComponent {
     this._observerDispose = addTileSwapObserver((lp, key, old) => this._onTileSwap(lp, key, old));
   }
 
-  /** 退租（WebPaintBackend.dispose）：解除观察者注册。之后本实例不再收集（也不该再被写）。 */
+  /** 退租（WeebPaintBackend.dispose）：解除观察者注册。之后本实例不再收集（也不该再被写）。 */
   dispose(): void { this._observerDispose(); }
 
   /** 内部/装载协作面：自带记账的窗口挂起收集（exchange/computed verb 体内、load 灌入——收了=双记账）。 */

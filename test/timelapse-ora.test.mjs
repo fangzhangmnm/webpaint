@@ -47,7 +47,7 @@ describe("timelapse · ora 集成", () => {
     const bytes = await blobBytes(blob);
 
     const offMp4 = nameOffset(bytes, "timelapse.mp4");
-    const offJson = nameOffset(bytes, ".webpaint/timelapse.json");
+    const offJson = nameOffset(bytes, ".weebpaint/timelapse.json");
     const offThumb = nameOffset(bytes, "Thumbnails/thumbnail.png");
     assert(offMp4 > 0 && offJson > 0 && offThumb > 0, "三个 entry 都得在");
     assert(offMp4 < offThumb, "timelapse.mp4 必须排在 thumbnail 之前");
@@ -71,7 +71,7 @@ describe("timelapse · ora 集成", () => {
     const blob = await encodeDocToOra(mkDoc(), { wroteWith: "v-test", timelapse: saved });
     const bytes = await blobBytes(blob);
     eq(nameOffset(bytes, "timelapse.mp4"), -1);
-    assert(nameOffset(bytes, ".webpaint/timelapse.json") > 0, "json 应在");
+    assert(nameOffset(bytes, ".weebpaint/timelapse.json") > 0, "json 应在");
     const dec = await decodeOraToPainting(blob);
     const back = TimelapseDocState.restore(dec._timelapseJson ?? null, dec._timelapseMp4 ?? null);
     eq(back.restoreIssue, null);

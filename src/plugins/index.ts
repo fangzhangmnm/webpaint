@@ -3,7 +3,7 @@
 //
 // 加新内建插件：在下面 import 一行即可。
 // 第三方下载插件（mosaic、halftone、stained glass、教堂彩窗 等）后期走
-// fetch + dynamic import + window.WebPaint.registerFilter(...)，
+// fetch + dynamic import + window.WeebPaint.registerFilter(...)，
 // 不需要 ship 时打包进 bundle。论证：ai-docs/20260528-backlog.md AI 插件 / artist filter 段
 
 // 调色组（category="adjustment"）

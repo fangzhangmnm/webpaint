@@ -1,7 +1,7 @@
 // Timelapse 文档级录制态（纯数据+编排，node 可测）。
 // 持久化 = ora 内两个 entry（spec §5，consent 2026-08-19）：
 //   timelapse.mp4            全部样本 mux 成的直接可播 mp4（中部大块区，thumbnail 保持最后）
-//   .webpaint/timelapse.json 录制状态（开关 sticky / pin 的取景框 / n / motionSamples）
+//   .weebpaint/timelapse.json 录制状态（开关 sticky / pin 的取景框 / n / motionSamples）
 // 自愈原则（spec §3）：任何回读失败 = 止损——录像作废、画照画、ora 照存，绝不 throw 出保存/加载路径。
 import type { TimelapseSettings } from "./timelapse-core.ts";
 import { TIMELAPSE_LONG_EDGES, TIMELAPSE_ASPECTS, TimelapseSampler } from "./timelapse-core.ts";

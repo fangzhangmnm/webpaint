@@ -14,7 +14,7 @@ app 的编辑引擎暴露的最小面：`adopt(bytes)` / `encode()→{bytes,peek
 - 关系：`flushLocal` 把内存脏 → 落本地（内存脏清零，变成 sync 脏）；`flushAndPush` 再把 sync 脏推掉。「是否 dirty 该推」的**决策**是本模块 + policy 的事（按事件：退出/失焦/idle），不是查库。
 
 ## LifecyclePolicy（app 注入，app-agnostic）
-autosave / push 策略——**每 app 不同**：`autosaveMs`（本地自动存间隔）、`pushOn`（何时 consent-push：exit/blur/idle）、`idleMs`。本模块给机制 + 通用触发点，时机由 policy 定。WebPaint = `{autosaveMs:180000, pushOn:["exit"]}`。
+autosave / push 策略——**每 app 不同**：`autosaveMs`（本地自动存间隔）、`pushOn`（何时 consent-push：exit/blur/idle）、`idleMs`。本模块给机制 + 通用触发点，时机由 policy 定。WeebPaint = `{autosaveMs:180000, pushOn:["exit"]}`。
 
 ## consent-gated push（红线，继承 sync-store ADR-0016/0018）
 opaque Work（画作/PDF-as-bytes）的 push 必须**用户 consent**（退出/Ctrl+S）。autosave **只 `flushLocal`（不推）**——自动推 opaque Work = 违反 consent。故 `save({tryPush:false})` 是 autosave 的唯一合法路径。

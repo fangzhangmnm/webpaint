@@ -1190,7 +1190,7 @@ export function initToolbar(ctx: AppContext) {
     });
   }
   // 吸色取样模式 dropdown（composite 合并 / layer 当前图层 raw）。
-  //   持久化 = desk.colorPicker.layerMode（per-doc desk，进 .webpaint/editor-state.json）——**不是 LS**，
+  //   持久化 = desk.colorPicker.layerMode（per-doc desk，进 .weebpaint/editor-state.json）——**不是 LS**，
   //   v406 起设备级 webpaint.pickMode 已删。input._doPick 经 getPickMode 读（走 bindEditorReactive 的桥）。
   pickerToolbar = document.getElementById("pickerToolbar");
   pickModeSel = document.getElementById("pickModeSel") as HTMLSelectElement | null;

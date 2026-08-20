@@ -1,4 +1,4 @@
-// 加密的 app 胶水（WebPaint 对 peek 字节的**解释** = 缩略图 PNG；统一密码政策）。
+// 加密的 app 胶水（WeebPaint 对 peek 字节的**解释** = 缩略图 PNG；统一密码政策）。
 // store 对密码非交互——「弹密码框 + 验证 + 重试」的循环住这里，且**必须在 withBusy 之外调用**
 // （busy 遮罩 z 高于 sheet，盖住密码框 = 无限转圈死锁；sheets 护栏也会 throw）。
 

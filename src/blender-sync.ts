@@ -1,14 +1,14 @@
-// Blender 同步：从 WebPaint 推 / 拉贴图到 Blender（经 BlenderTextureProtocol）。
+// Blender 同步：从 WeebPaint 推 / 拉贴图到 Blender（经 BlenderTextureProtocol）。
 //
 // 插件式隔离的子功能：唯一对外入口 initBlenderSync(ctx)，外加随文档持久化的 get/applyBlenderSyncState。
 // 依赖面收窄到三处，全是别人家的深模块 / 契约，本模块零格式知识：
 //   - AppContext seam（doc / board / history / setStatus / withBusy / …）
 //   - vendored btp 客户端（../vendor/btp/v1/index.js）——BTPClient 走 fetch；连接 = 一个 baseUrl
 //     （本机 localhost / 另一台设备填能连到 server 的 HTTPS 地址，如 tailscale serve 的 *.ts.net）
-//   - 三个 WebPaint 深模块：renderDocToImageBlob（唯一合成器）、areaResampleBytes（安全缩放，
+//   - 三个 WeebPaint 深模块：renderDocToImageBlob（唯一合成器）、areaResampleBytes（安全缩放，
 //     面积平均抗锯齿，缩小到小贴图不糊）、ViewLeaf.replaceFromBytes（clear + 整块换像素）
 //
-// UI 中文（跟 WebPaint 一致）。交互沿用 app 既有「smart 按钮」范式：连接键 = 智能保存键那种
+// UI 中文（跟 WeebPaint 一致）。交互沿用 app 既有「smart 按钮」范式：连接键 = 智能保存键那种
 // 单键多态（连接/连接中/已连接，点击随态切动作）；拉取/推送 = 菜单里 smart 导入导出那种 main + ⋯ 配置。
 //
 // 协议立场（别在这重新发明）：贴图靠 name 识别；推 = 整张覆盖，无冲突解决 by design。
@@ -206,7 +206,7 @@ async function useSelection() {
   }
 }
 
-// ───────────────────────── 推（WebPaint → Blender）─────────────────────────
+// ───────────────────────── 推（WeebPaint → Blender）─────────────────────────
 
 // 保持比例缩进 maxSide 见方（长边 = min(长边, maxSide)，不放大）。给预设算实数填框。
 function fitAspect(maxSide: number): { w: number; h: number } {
@@ -273,7 +273,7 @@ async function push() {
   }
 }
 
-// ───────────────────────── 拉（Blender → WebPaint）─────────────────────────
+// ───────────────────────── 拉（Blender → WeebPaint）─────────────────────────
 
 // 拉到新图层：贴图按原生分辨率居中放入新层（doc 尺寸不变）。返回 false = 图层已达上限（已弹状态）。
 // v0.7.35：入 undo——旧「新层不入 undo」语义是抄 import 的越狱姿势，会让栈引用历史不知道的层
@@ -340,7 +340,7 @@ async function pull() {
   }
 }
 
-// ───────────────────── 随文档持久化（.ora webpaintState 搭便车）─────────────────────
+// ───────────────────── 随文档持久化（.ora weebpaintState 搭便车）─────────────────────
 // 由 session-state.storeEditorStateToOra / restoreEditorStateFromOra 编排，跟 reference/palette 同款。
 export function getBlenderSyncState():
   | { textureName: string; resW: string; resH: string; uploadSource: string; pullTarget: string; uploadAsRef: boolean }

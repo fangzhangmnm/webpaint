@@ -1,4 +1,4 @@
-// app-store —— WebPaint 装配 sync-store 的唯一点（cutover：薄库 + editor-session）。
+// app-store —— WeebPaint 装配 sync-store 的唯一点（cutover：薄库 + editor-session）。
 //   只做 config 注入（provider / ui bundle / crypto codec / crypt / validateAdopt）+ auth 转发 + gallery 列举适配。
 //   app 只碰 store 两面（**file / collection**）+ editor-session。绝不裸碰 kv/IDB/graph/vendor。
 //   （localSettings/syncedSettings 那两面已于 2026-07-13 删除 —— 全部 KV 化进 collection。别照旧注释找。）
@@ -36,7 +36,7 @@ const cryptoCodec = { zipPack, zipUnpack, pack7z, unpack7z };
 const _createRealStore = (provider: _Prov, auth: _Auth): Store => createStore({
   provider,
   ui: storeUI,
-  appId: "webpaint",   // 本 origin 内唯一命名空间（databaseId 默认 "defaultStore"）：IDB 库 webpaint.defaultStore + localStorage webpaint.defaultStore.* 键，与兄弟 PWA(JRP 等)隔离
+  appId: "weebpaint",   // 本 origin 内唯一命名空间（databaseId 默认 "defaultStore"）：IDB 库 weebpaint.defaultStore + localStorage weebpaint.defaultStore.* 键，与兄弟 PWA(JRP 等)隔离
   // 薄命名（身份=全名）：**app 不再注入 fileName/encFileName**——库默认 fileName 恒等（身份即云端文件名）、
   //   encFileName 追加 .zip（加密容器外扩展名 ADR-0012）。app 在**边界**用 sessionFileName 把裸 session 名转成全名
   //   （X→X.ora）再传库（见 session-state 的 _file / editor-session 的 name；OUT 侧 itemToG 用 stripSessionExt 还原显示）。
@@ -81,7 +81,7 @@ const _auth = _asm.auth;
 
 // ============ B2 窄接口（C7 裁定落地，2026-08-10）============
 // app 消费的 store 面**只有四个**：file / files / collection / encryption（全仓实测，其余 grep 命中皆旧注释）。
-// 裁定：全量手写镜像**不做**——「物理删除仍编译」的极端目标无受益方（headless 分层 = WebPaintBackend，
+// 裁定：全量手写镜像**不做**——「物理删除仍编译」的极端目标无受益方（headless 分层 = WeebPaintBackend，
 // 零 store 依赖；运行时缺席已由 null-store 达成），而镜像是 drift 源（维护成本 > 收益，
 // epoch-handoff §B2 的怀疑成立）。收敛形 = **派生窄 Port**（Pick 自库类型 SSoT，零镜像零 drift）：
 // 面收窄在此单点声明；app 若碰四面之外的成员 = 编译错。类型 import 也收拢本接缝（下方 re-export）。
@@ -107,7 +107,7 @@ export const getToken = (...a: Parameters<typeof _auth.getToken>) => _auth.getTo
 export const onAuthChanged = (cb: Parameters<typeof _auth.onAuthChanged>[0]) => _auth.onAuthChanged(cb);
 export const getAuthState = () => _auth.getAuthState();
 // wp:auth-changed window 广播由**接缝**派发（@internal/store 0.1.0 起库不再碰 browser 事件——
-//   订阅走 auth.onAuthChanged 回调，window 事件是 WebPaint 自己的 UI 约定）。缺席模式 dormant auth 的
+//   订阅走 auth.onAuthChanged 回调，window 事件是 WeebPaint 自己的 UI 约定）。缺席模式 dormant auth 的
 //   onAuthChanged 是 noop，天然不发。
 _auth.onAuthChanged(() => { try { window.dispatchEvent(new Event("wp:auth-changed")); } catch { /* node 测试环境无 window */ } });
 

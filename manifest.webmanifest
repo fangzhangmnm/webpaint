@@ -1,6 +1,6 @@
 {
-  "name": "WebPaint",
-  "short_name": "WebPaint",
+  "name": "WeebPaint",
+  "short_name": "WeebPaint",
   "description": "iPad 上的轻量绘画 PWA：压感、自定义笔刷、图层、液化、选区。OneDrive 同步，飞机模式可用。",
   "start_url": "./",
   "scope": "./",

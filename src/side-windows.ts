@@ -56,7 +56,7 @@ function composeLiveFrame(): RefLiveSource | null {
 
 // ---- 调色板小窗（v87）----
 // 256×256 mixer canvas + 刷 / 涂 / 吸 3 工具。吸色 → 主画 setColor。
-// 画布内容跟 doc 走（webpaint/state.json 持久化，跟 reference 同模式）
+// 画布内容跟 doc 走（weebpaint/state.json 持久化，跟 reference 同模式）
 export const paletteWindow = new PaletteWindow({
   root: document.getElementById("paletteWindow")!,
   onColorSampled: (hex: string) => setColor(hex),

@@ -1,6 +1,6 @@
 // ORA 嵌套组序列化（batch 2 step 3）：buildStackXml ↔ parseStackXml 树往返 + id + active。
 // 纯 XML 字符串往返（无 canvas / 无 PNG）。node 无 DOMParser → 极简 XML parser polyfill
-// （C7 抽共享 test/xml-shim.mjs——webpaint-backend round-trip 同用）。
+// （C7 抽共享 test/xml-shim.mjs——weebpaint-backend round-trip 同用）。
 // C3：fixture 从旧 PaintDoc 迁 OraDoc 鸭形直构（buildStackXml 的输入契约就是纯结构 duck——
 //   生产侧 ora.ts encode 喂的也是 exportData 冻结鸭形，不再有类依赖）。
 import { describe, it, assert, eq } from "./runner.mjs";
@@ -87,7 +87,7 @@ describe("ora-tree · 嵌套组 XML 往返", () => {
 });
 
 describe("ora-tree · 向后兼容（旧扁平 .ora）", () => {
-  T("无 webpaint:id / 无 active → id null、active 全 false、扁平解析", () => {
+  T("无 weebpaint:id / 无 active → id null、active 全 false、扁平解析", () => {
     const oldXml = `<?xml version="1.0" encoding="UTF-8"?>
 <image version="0.0.3" w="800" h="600">
   <stack name="root">
@@ -105,6 +105,37 @@ describe("ora-tree · 向后兼容（旧扁平 .ora）", () => {
     eq(nodes[0].mode, "multiply", "下 multiply");
     eq(nodes[1].name, "上", "n1=上");
     eq(nodes[1].isActive, false, "无 active 标记");
+    eq(parseStackXml(oldXml).formatVersion, 0, "无 format 戳（存量）→ 0");
+  });
+
+  T("改名双读：旧 webpaint:* 属性全保读（0.10.0 新写旧读，user 拍板）", () => {
+    // 改名前（≤v0.9.x）写出的 stack.xml：xmlns/属性全是旧前缀 webpaint:
+    const oldXml = `<?xml version="1.0" encoding="UTF-8"?>
+<image version="0.0.3" w="100" h="80" xmlns:webpaint="https://github.com/fangzhangmnm/webpaint/ns" webpaint:wrote-with="v0.9.35-2026-08-20">
+  <stack name="root">
+    <layer name="ref" src="data/layer3.png" x="0" y="0" opacity="1.0000" visibility="visible" composite-op="svg:src-over" webpaint:id="3" webpaint:reference="true" />
+    <layer name="clip" src="data/layer2.png" x="1" y="2" opacity="1.0000" visibility="visible" composite-op="svg:src-over" webpaint:id="2" webpaint:clipping="true" webpaint:active="true" />
+    <layer name="lock" src="data/layer1.png" x="0" y="0" opacity="1.0000" visibility="visible" composite-op="svg:src-over" webpaint:id="1" webpaint:lock-alpha="true" />
+  </stack>
+</image>`;
+    const { nodes, wroteWith, formatVersion } = parseStackXml(oldXml);
+    eq(wroteWith, "v0.9.35-2026-08-20", "旧 wrote-with 保读");
+    eq(formatVersion, 0, "旧文件无 format → 0");
+    // bottom-first：[lock, clip, ref]
+    eq(nodes[0].id, 1, "旧 webpaint:id 保读");
+    eq(nodes[0].lockAlpha, true, "旧 lock-alpha 保读");
+    eq(nodes[1].clippingMask, true, "旧 clipping 保读");
+    eq(nodes[1].isActive, true, "旧 active 保读");
+    eq(nodes[2].isReference, true, "旧 reference 保读");
+  });
+
+  T("新写端：weebpaint:* + format 戳（不再写旧前缀）", async () => {
+    const { ORA_FORMAT_VERSION } = await import("../src/backend/ora-stack-xml.ts");
+    const { d } = buildTreeDoc();
+    const xml = buildStackXml(d, "v0.10.0-test");
+    assert(!xml.includes("webpaint:"), "写端零旧前缀（拼写一致性红线）");
+    assert(xml.includes(`weebpaint:format="${ORA_FORMAT_VERSION}"`), "format 戳在场");
+    eq(parseStackXml(xml).formatVersion, ORA_FORMAT_VERSION, "format 往返");
   });
 });
 

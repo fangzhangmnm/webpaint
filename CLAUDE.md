@@ -1,4 +1,4 @@
-# WebPaint（家族总规则见上级 CLAUDE.md）
+# WeebPaint（家族总规则见上级 CLAUDE.md）
 
 Procreate 级绘画 PWA。UI 中文。iPad 是手感的最终裁判。
 
@@ -29,7 +29,7 @@ Procreate 级绘画 PWA。UI 中文。iPad 是手感的最终裁判。
 2. **commit 源**：先 `bash scripts/gen-api.sh` 重打 `api/`（.h 树，供人类参考——重构交付/大功能必打，
    小修看着办，user 要求时必打）；`git add src test api && git commit -m "vN: <一句话>"`。**重构策划**另须
    附「现状 .h + 提案 .h」两份（提案落 ai-docs/，形状改动要回写提案——它是 pin 住的契约）。
-3. **构建**：`bash scripts/build.sh`——前置 `tsc --noEmit` 门（不过不准发）；esbuild bundle → `dist/webpaint-<hash>.mjs`（content-hash 命名）；`sed` 改 `index.html` 指新 hash；清旧 hash bundle。**别手改 dist/ 或 index.html 的 hash**。
-4. **commit bundle + push**：`git add dist index.html && git commit -m "vN: dev bundle (webpaint-<hash>) — <一句话> smoke" && git push origin main`。
+3. **构建**：`bash scripts/build.sh`——前置 `tsc --noEmit` 门（不过不准发）；esbuild bundle → `dist/weebpaint-<hash>.mjs`（content-hash 命名）；`sed` 改 `index.html` 指新 hash；清旧 hash bundle。**别手改 dist/ 或 index.html 的 hash**。
+4. **commit bundle + push**：`git add dist index.html && git commit -m "vN: dev bundle (weebpaint-<hash>) — <一句话> smoke" && git push origin main`。
 
 跑测试：`npm test`（node test runner；全量 ~30s，每条自带耗时）。`bump.sh` 的 sed 目标是 `src/version.ts`（v315 起 .js→.ts，别再回 .js）。

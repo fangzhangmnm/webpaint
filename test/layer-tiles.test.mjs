@@ -216,11 +216,11 @@ describe("LayerTiles · computed 白名单", () => {
 });
 
 // ── C7 硬化（census §3.6）：无令牌 substrate 写 → throw；无主临时件/装载/驱逐路照旧 ──
-import { WebPaintBackend } from "../src/backend/webpaint-backend.ts";
+import { WeebPaintBackend } from "../src/backend/weebpaint-backend.ts";
 
 describe("LayerTiles · 无令牌像素写硬化（C7）", () => {
   it("有主 substrate 在令牌墙外换手 → 响亮 throw；令牌内照常记账", () => {
-    const backend = WebPaintBackend.blank({ width: 64, height: 64 });
+    const backend = WeebPaintBackend.blank({ width: 64, height: 64 });
     const wp2 = backend.wp2;
     const leaf = wp2.layerTree.view().nodes[0];
     const lp = wp2.layerTiles.tilesetPixels(leaf.pixelsRef);
@@ -236,7 +236,7 @@ describe("LayerTiles · 无令牌像素写硬化（C7）", () => {
   });
 
   it("无主临时件（scratch/替身同形）在令牌外写 → 放行不炸", () => {
-    const backend = WebPaintBackend.blank({ width: 64, height: 64 });   // 有 collector 在册（多播观察者活着）
+    const backend = WeebPaintBackend.blank({ width: 64, height: 64 });   // 有 collector 在册（多播观察者活着）
     const scratch = new LayerPixels(64, 64);
     scratch.putRegion(0, 0, 8, 8, solid(8, 8, 42));   // 令牌外写游离实例：合法（非 substrate）
     eq(scratch.sampleAt(1, 1)[0], 42);
@@ -245,7 +245,7 @@ describe("LayerTiles · 无令牌像素写硬化（C7）", () => {
   });
 
   it("load 灌入 / 换文档清栈（record 驱逐）在令牌外释放 → 不误伤", () => {
-    const backend = WebPaintBackend.blank({ width: 32, height: 32 });
+    const backend = WeebPaintBackend.blank({ width: 32, height: 32 });
     const r = backend.layerAdd("A");
     assert(r.ok, "加层");
     backend.wp2.load({ width: 16, height: 16, nodes: [{ name: "L", visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false, pixels: null }] });

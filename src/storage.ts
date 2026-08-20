@@ -1,5 +1,5 @@
-// app 自己的 IndexedDB（库名 `webpaint`）。**注意和 store 的库分开**：
-//   作品字节在 store 的 `webpaint.defaultStore` 库（分区 files/trash/backup/collections）；
+// app 自己的 IndexedDB（库名 `weebpaint`）。**注意和 store 的库分开**：
+//   作品字节在 store 的 `weebpaint.defaultStore` 库（分区 files/trash/backup/collections）；
 //   这里只放 app 专属、store 管不着的东西。
 //
 // 现存 object store（v5 终态）：
@@ -10,7 +10,7 @@
 
 import type { CheckpointRecord } from "./checkpoint-policy.ts";
 
-const DB_NAME = "webpaint";
+const DB_NAME = "weebpaint";
 // 版本史：v4（2026-07-18）建 checkpoints + 删 sessions；v5（2026-08-20，cloud-image-picker spec §6）建 image-thumbs。
 // ⚠ v0.9.31（QA ②）起**不再硬编码 DB 版本**：prod（/）和 dev（/dev/）同源共享这个库，
 //   硬编码版本 = dev 升库后旧渠道 open(旧版本号) 直接 VersionError，缩略图/revert 整库打不开。
@@ -37,7 +37,7 @@ function _openRaw(version?: number): Promise<IDBDatabase> {
     };
     // 升级被别的连接挡住（旧 bundle 的 tab 不听 versionchange、永不让路）→ 响亮 reject，
     //   别静默 pending 到天荒地老（长跑纪律：挂死→响亮红）。缩略图/revert 各自 catch，开画不受影响。
-    req.onblocked = () => reject(new Error("IndexedDB upgrade blocked by another WebPaint tab (old bundle holding the DB) — close other WebPaint tabs"));
+    req.onblocked = () => reject(new Error("IndexedDB upgrade blocked by another WeebPaint tab (old bundle holding the DB) — close other WeebPaint tabs"));
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
@@ -77,7 +77,7 @@ function openDB(): Promise<IDBDatabase> {
 // meta store（getMeta/setMeta + STORE_META object store）已于 2026-07 删除：笔架本地持久化迁到
 //   store.collection("brush-rack")；设置/状态早已走 collection（app-prefs.ts / app-state.ts）。别再加回。
 
-// gallery 缩略图缓存：webpaint DB 的 gallery-thumbs store，key = store 文件身份 X.ora。value 见 cloud-thumb-cache。
+// gallery 缩略图缓存：weebpaint DB 的 gallery-thumbs store，key = store 文件身份 X.ora。value 见 cloud-thumb-cache。
 export async function getThumb(key: string): Promise<unknown> {
   const db = await openDB();
   return new Promise((resolve, reject) => {

@@ -69,7 +69,7 @@ describe("mcp-redteam · 握手与全流程", () => {
     try {
       // ── ① 握手 ──
       const init = await c.rpc("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "redteam", version: "0" } });
-      eq(init.result.serverInfo.name, "webpaint-backend");
+      eq(init.result.serverInfo.name, "weebpaint-backend");
       c.raw(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }));
       const tools = (await c.rpc("tools/list", {})).result.tools.map((t) => t.name);
       for (const need of ["create", "draw", "crop", "undo", "redo", "export_image", "stroke_begin", "filter_begin", "encode_ora"]) {

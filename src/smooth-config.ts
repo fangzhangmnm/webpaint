@@ -5,7 +5,7 @@
 // 自测每个参数是否真起作用（×100 没变化 = 死参数），杀「饱和假阴性」式煤气灯。
 //
 // 注：这些是**全局**常数；per-preset 的两参（streamline / stabilization）在 brush settings。
-// 持久化（2026-07-14）：从 webpaint.smooth.v4 LS 迁 synced-user-preference collection（key stylus-smooth-params）。
+// 持久化（2026-07-14）：从（旧名时代）webpaint.smooth.v4 LS 迁 synced-user-preference collection（key stylus-smooth-params）。
 //   SMOOTH 仍是**同步读的可变对象**（手感热路径不变）；boot 门后 hydrateSmoothFromPrefs() 把 collection 值合并进来。
 
 import { syncedUserPreference, PREF_DEFAULTS } from "./app-prefs.ts";

@@ -1,6 +1,6 @@
 // 云盘图片 picker 的缩略图：整张下载 → 字节缩 → jpeg 自压 → IDB 缓存（spec 20260820 §6）。
 //
-// 与 ora 的 cloud-thumb-cache **分开存**（user 2026-08-20 拍板）：webpaint DB 的 image-thumbs store。
+// 与 ora 的 cloud-thumb-cache **分开存**（user 2026-08-20 拍板）：weebpaint DB 的 image-thumbs store。
 //   派生缓存家族形状照旧：key = store 文件身份（全名 path 含扩展名，图片没有裸名代数）、
 //   token = lastModified 优先退 size（变 = 重拉覆盖同 key）、全删无损可再生。
 // 管线守家规「字节进出不走 canvas」：decodeImageFile（解码边界读出一次）→ resampleBytes（纯字节）→
@@ -78,5 +78,5 @@ export async function getOrFetchImageThumb(path: string, token: string): Promise
   try { return await job; } finally { _inflight.delete(path); }
 }
 
-/** 调试：清空全部图片缩略图缓存（无损可再生）。window.WebPaint 挂载见 dev-console。 */
+/** 调试：清空全部图片缩略图缓存（无损可再生）。window.WeebPaint 挂载见 dev-console。 */
 export const clearImageThumbCache = (): Promise<number> => clearImageThumbs();

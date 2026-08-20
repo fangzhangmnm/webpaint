@@ -7,7 +7,7 @@
 //   - files.watchFolder → 立即空帧（gallery 空态，不是 boot 卡死——「gallery 要列表所以必须有 store」是幻觉）
 //   - file().open → null、save → {pushed:false}（editor-session 的 push-pending 语义自然成立）
 //   - 加密 dormant（不注入即静默，与 JRP 同构）；auth isAuthConfigured=false → initAuth 整段跳过
-// 开关：URL ?nostore 或 localStorage "webpaint.nostore"="1"（体检/mhtml 排练用；正常用户永远走真 store）。
+// 开关：URL ?nostore 或 localStorage "weebpaint.nostore"="1"（体检/mhtml 排练用；正常用户永远走真 store）。
 // ⚠ 本文件是接缝（与 app-store.ts 同级），只准 import store 的**类型**——零 store 运行时代码、零 IDB。
 
 import type { Collection, CollectionEntry, ReconcileResult, Store } from "@internal/store";
@@ -16,9 +16,9 @@ export function detectStoreAbsent(): boolean {
   try {
     // node 子进程 boot smoke（test/nostore-boot-child.mjs）经 env 开缺席模式（浏览器不认 env）。
     const env = (globalThis as { process?: { env?: Record<string, string> } }).process?.env;
-    if (env?.WEBPAINT_NOSTORE === "1") return true;
+    if (env?.WEEBPAINT_NOSTORE === "1") return true;
     if (typeof location !== "undefined" && new URLSearchParams(location.search).has("nostore")) return true;
-    if (typeof localStorage !== "undefined" && localStorage.getItem("webpaint.nostore") === "1") return true;
+    if (typeof localStorage !== "undefined" && localStorage.getItem("weebpaint.nostore") === "1") return true;
   } catch { /* 环境无 location/localStorage（node）→ 视为在场（测试显式建 null store） */ }
   return false;
 }

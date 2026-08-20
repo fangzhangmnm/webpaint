@@ -7,7 +7,7 @@
 //   ③ 先 dispose A，B 继续画/导出照常（退租不拖累邻居）
 import { describe, it, assert, eq } from "./runner.mjs";
 
-const { WebPaintBackend } = await import("../src/backend/webpaint-backend.ts");
+const { WeebPaintBackend } = await import("../src/backend/weebpaint-backend.ts");
 const { SoftGl2Port } = await import("../src/backend/soft-gl2-port.ts");
 
 const bytesEq = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
@@ -47,19 +47,19 @@ function scriptB(be) {
 describe("full · mock multiplayer（共享 SoftGl2Port 双租户）", () => {
   it("交错作画字节 = 各自 solo 参考逐位；per-backend 令牌墙；dispose A 不拖累 B", async () => {
     // ── solo 参考（各自独享 Port）──
-    const ref1 = WebPaintBackend.blank({ width: W, height: H }, { gl: new SoftGl2Port() });
+    const ref1 = WeebPaintBackend.blank({ width: W, height: H }, { gl: new SoftGl2Port() });
     scriptA(ref1);
     const soloA = layerBytes(ref1, W, H);
     ref1.dispose();
-    const ref2 = WebPaintBackend.blank({ width: W, height: H }, { gl: new SoftGl2Port() });
+    const ref2 = WeebPaintBackend.blank({ width: W, height: H }, { gl: new SoftGl2Port() });
     scriptB(ref2);
     const soloB = layerBytes(ref2, W, H);
     ref2.dispose();
 
     // ── 共享 Port 交错跑（步级穿插：A begin→B 整笔→A append/end→B filter 期间 A 画……）──
     const port = new SoftGl2Port();
-    const A = WebPaintBackend.blank({ width: W, height: H }, { gl: port });
-    const B = WebPaintBackend.blank({ width: W, height: H }, { gl: port });
+    const A = WeebPaintBackend.blank({ width: W, height: H }, { gl: port });
+    const B = WeebPaintBackend.blank({ width: W, height: H }, { gl: port });
     // A 的第一笔拆开，中间塞 B 的整笔（②：A open stroke 期间 B 照画不误 = 跨租户互斥不存在）
     const a1 = A.strokeBegin(1, BRUSH_A);
     A.strokeAppend(a1, pts(4, 20, 20, 12, 9));

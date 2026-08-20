@@ -1,7 +1,7 @@
 // 无地本地文件模式的**浏览器 API 边界**（File System Access；spec ai-docs/20260819-clipboard-and-local-file-spec.md §7）。
 // 壳域合法名单同类成员（与剪贴板/任意格式解码并列：浏览器 API 边界，不可 headless 化）。
 // 本文件**零 app 依赖**（不 import session/store/els）——无地状态机在 session-state（_localFile + _esMuted 双墙），
-// 这里只有：能力探测 / picker / 句柄读写 / mtime / drop·launchQueue 提取 / WebPaint 痕迹检测（纯函数，node 可测）。
+// 这里只有：能力探测 / picker / 句柄读写 / mtime / drop·launchQueue 提取 / WeebPaint 痕迹检测（纯函数，node 可测）。
 // 数据安全：写走 createWritable（浏览器临时文件、close 时原子替换）；陈旧检查（mtime 对表）由调用方在写前做。
 // 核心路径不依赖 PWA：picker 和 drop 句柄在浏览器标签页全功能；launchQueue/file_handlers 是安装态锦上添花。
 
@@ -76,7 +76,7 @@ export function droppedOraHandle(dt: DataTransfer | null): Promise<LocalFileHand
   })();
 }
 
-/** 安装态 PWA 的「双击 .ora 用 WebPaint 打开」（manifest file_handlers）。浏览器缓存 launch 事件，
+/** 安装态 PWA 的「双击 .ora 用 WeebPaint 打开」（manifest file_handlers）。浏览器缓存 launch 事件，
  *  boot 后再 setConsumer 也收得到。非安装态/不支持 → 静默 no-op。 */
 export function consumeLaunchFiles(cb: (h: LocalFileHandle) => void): void {
   const lq = (globalThis as unknown as { launchQueue?: { setConsumer(f: (p: { files?: unknown[] }) => void): void } }).launchQueue;
@@ -84,8 +84,8 @@ export function consumeLaunchFiles(cb: (h: LocalFileHandle) => void): void {
   lq.setConsumer((p) => { for (const f of p.files ?? []) cb(f as LocalFileHandle); });
 }
 
-/** WebPaint 痕迹检测（纯函数）：decode 出的 ora 带我们任一 sidecar/元数据 → 是 WebPaint 写的 →
+/** WeebPaint 痕迹检测（纯函数）：decode 出的 ora 带我们任一 sidecar/元数据 → 是 WeebPaint 写的 →
  *  可原位编辑。外来 ora（Krita 等）三样全无 → 走导入（绝不用我们的有损解读原位覆写别人的文件）。 */
-export function hasWebPaintTraces(loaded: { _webpaintState?: unknown; _editorState?: unknown; _wroteWith?: unknown }): boolean {
-  return loaded._webpaintState != null || loaded._editorState != null || loaded._wroteWith != null;
+export function hasWeebPaintTraces(loaded: { _weebpaintState?: unknown; _editorState?: unknown; _wroteWith?: unknown }): boolean {
+  return loaded._weebpaintState != null || loaded._editorState != null || loaded._wroteWith != null;
 }

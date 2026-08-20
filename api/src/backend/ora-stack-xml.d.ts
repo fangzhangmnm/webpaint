@@ -40,11 +40,13 @@ export type ParsedNode = (ParsedCommon & {
 });
 export declare function oraCompositeOp(canvasMode: string): string;
 export declare function canvasModeFromOra(op: string): string;
+export declare const ORA_FORMAT_VERSION = 1;
 export declare function buildStackXml(doc: OraDoc, wroteWithVersion?: string): string;
 export declare function parseStackXml(xmlText: string): {
     w: number;
     h: number;
     nodes: ParsedNode[];
     wroteWith: string | null;
+    formatVersion: number;
 };
 export {};

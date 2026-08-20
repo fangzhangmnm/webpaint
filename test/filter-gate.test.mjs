@@ -1,4 +1,4 @@
-// C8 filter 档口锚（webpaint-backend filterBegin/SetParams/Commit/Cancel 真实现；
+// C8 filter 档口锚（weebpaint-backend filterBegin/SetParams/Commit/Cancel 真实现；
 // kernel 清单 = backend/filters/index.ts，adjust surrogate 的 headless 升格）：
 //   ① 未注册 id / 空层 / 不存在叶 → 响亮 throw
 //   ② 参数重算一步落层（commit=true；层字节 = kernel 对冻结源的参考 bake 逐位；undo/redo 逐位）
@@ -11,7 +11,7 @@
 //   ⑨ dispose 时 open filter → cancel 收口不 throw（interrupt=cancel 家规）
 import { describe, it, assert, eq } from "./runner.mjs";
 
-const { WebPaintBackend } = await import("../src/backend/webpaint-backend.ts");
+const { WeebPaintBackend } = await import("../src/backend/weebpaint-backend.ts");
 const { findViewNodeById } = await import("../src/backend/workpiece/painting-view.ts");
 const { FILTER_KERNELS, getFilterKernel } = await import("../src/backend/filters/index.ts");
 const { HsbKernel } = await import("../src/backend/filters/hsb-kernel.ts");
@@ -27,7 +27,7 @@ function throws(fn, re, msg) {
 
 // 铺一笔确定性底色（stroke 档自产——两个 fresh backend 同图，backend-stroke ⑤ 已锚）
 function mkPainted() {
-  const be = WebPaintBackend.blank({ width: W, height: H }, { appVersion: "v0.0.0-test" });
+  const be = WeebPaintBackend.blank({ width: W, height: H }, { appVersion: "v0.0.0-test" });
   const id = be.strokeBegin(1, BRUSH);
   const n = 8;
   const pts = new Float32Array(n * 4);
@@ -46,7 +46,7 @@ describe("filter-gate · 响亮拒绝", () => {
     const be = mkPainted();
     throws(() => be.filterBegin(1, "nope"), /kernel not registered/, "未注册 id");
     throws(() => be.filterBegin(99, "hsb"), /leaf missing/, "不存在叶");
-    const blank = WebPaintBackend.blank({ width: 32, height: 32 });
+    const blank = WeebPaintBackend.blank({ width: 32, height: 32 });
     throws(() => blank.filterBegin(1, "hsb"), /no pixels/, "空层");
     blank.dispose(); be.dispose();
   });

@@ -1,4 +1,4 @@
-// C8 stroke 档口锚（webpaint-backend strokeBegin/Append/End/Cancel 真实现；栅格域缺省 SoftGl2Port）：
+// C8 stroke 档口锚（weebpaint-backend strokeBegin/Append/End/Cancel 真实现；栅格域缺省 SoftGl2Port）：
 //   ① 一笔一步（begin→append→end=true；undo/redo 逐位还原）
 //   ② no-op 不占步（begin+end 零点 → false、栈不动）
 //   ③ cancel 无痕（引擎丢状态+令牌 cancel；下一笔照常）
@@ -10,11 +10,11 @@
 // node 无 GL 无 DOM：全链 = BrushEngine(平滑/压感) → StrokeSession → RasterService.bakeStamps(SoftGl2Port)。
 import { describe, it, assert, eq } from "./runner.mjs";
 
-const { WebPaintBackend } = await import("../src/backend/webpaint-backend.ts");
+const { WeebPaintBackend } = await import("../src/backend/weebpaint-backend.ts");
 
 const W = 200, H = 150;
 const INJ = { appVersion: "v0.0.0-test" };
-const mk = () => WebPaintBackend.blank({ width: W, height: H }, INJ);
+const mk = () => WeebPaintBackend.blank({ width: W, height: H }, INJ);
 
 // (x,y,p,t) stride=4 斜线序列（t = 事件钟，16ms 步进）
 function diagPts(n = 10, x0 = 40, y0 = 50, dx = 12, dy = 8, p = 0.8) {

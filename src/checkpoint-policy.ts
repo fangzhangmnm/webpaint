@@ -1,6 +1,6 @@
 // checkpoint（撤销更改 / revert）的**纯策略**：key 怎么拼、哪些时刻封存、加密件怎么处理。
 // 纯模块：无 DOM / 无 IDB / 无 store —— 所以能 node 测（IDB 那层进真机批）。
-// 落盘在 storage.ts（app 自己的 `webpaint` 库，不是 store 的库）；编排在 session-state.ts。
+// 落盘在 storage.ts（app 自己的 `weebpaint` 库，不是 store 的库）；编排在 session-state.ts。
 //
 // 语义（human 拍板 2026-07-18）：
 //   · 快照点 = **打开这幅画的那一刻**（从图库点开 / 新建 / 另存为新身份），不是自动定时。

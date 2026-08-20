@@ -1,4 +1,4 @@
-// 职责（单一）：boot 期的 **localStorage 快照** —— 只有两个键，`webpaint.boot.theme` / `webpaint.boot.lang`。
+// 职责（单一）：boot 期的 **localStorage 快照** —— 只有两个键，`weebpaint.boot.theme` / `weebpaint.boot.lang`。
 //
 // 为什么必须存在（v409；别再当成"违反了无 localStorage 镜像"而删掉）：
 //   设置的 SSoT 是 collection（IDB）。但有两个值在 IDB 就绪**之前**就要用，而 IDB 是异步的：
@@ -20,8 +20,8 @@
 //   顺序不能反：先写快照再 reload，否则 reload 后 eval 期又读到旧快照 → 死循环。
 
 const KEYS = {
-  theme: "webpaint.boot.theme",
-  lang: "webpaint.boot.lang",
+  theme: "weebpaint.boot.theme",
+  lang: "weebpaint.boot.lang",
 } as const;
 export type BootSnapshotKey = keyof typeof KEYS;
 

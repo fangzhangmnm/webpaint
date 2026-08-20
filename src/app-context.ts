@@ -13,7 +13,7 @@
 //     避免 cascade 把屎山拖进门）——随各源逐步类型化再收敛引用。本接口是增量推进的锚，不是终态。
 
 import type { PaintingView } from "./backend/workpiece/painting-view.ts";
-import type { WebPaintBackend } from "./backend/webpaint-backend.ts";
+import type { WeebPaintBackend } from "./backend/weebpaint-backend.ts";
 import type { Board } from "./board.ts";
 import type { InputController } from "./input.ts";
 import type { EditMode } from "./edit-mode.ts";
@@ -103,10 +103,10 @@ export interface AppContext {
   currentBrush: CurrentBrushRef;
 
   // 核心引擎单例
-  // C7 后棒：唯一装配根 = WebPaintBackend（app.ts 不再自装配 history/wp2/view/layers）。
+  // C7 后棒：唯一装配根 = WeebPaintBackend（app.ts 不再自装配 history/wp2/view/layers）。
   //   下方 doc/history/layers/wp2/layerTiles 五键 = backend 进程内协作面的直取投影
   //   （热路径便捷引用，同一批对象）——模块逐步类型化后再考虑收敛为只经 backend 取。
-  backend: WebPaintBackend;
+  backend: WeebPaintBackend;
   editMode: EditMode;
   doc: PaintingView;             // T3b-2：树模式端口（DocView 同形读面 + 选区过渡宿）。docRaw 已杀——
                                  // 装载/换文档走 wp2.load()（令牌写），不存在 raw 逃生门。

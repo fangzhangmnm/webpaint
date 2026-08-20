@@ -1,4 +1,4 @@
-# WebPaint 打开即用的开源画画软件
+# WeebPaint 打开即用的开源画画软件
 
 开源的网页版画画软件。目标是在二次元和3D手绘贴图领域追上Procreate的手感和画质，同时保持开源的灵活可修改性。
 
@@ -8,7 +8,7 @@
 
 ### 怎么用？
 
-1. 点开：https://fangzhangmnm.github.io/webpaint/
+1. 点开：https://fangzhangmnm.github.io/weebpaint/
 2. 开始画
 
 ## 这是一款什么样的软件
@@ -228,14 +228,14 @@ Apple Pencil 2 / Pencil Pro 的"双击笔身"我让 iPadOS 自己处理（系统
 
 ### 如何安装离线版本
 
-WebPaint 是 PWA（Progressive Web App），不用进 App Store，浏览器直接装。
+WeebPaint 是 PWA（Progressive Web App），不用进 App Store，浏览器直接装。
 
 #### iPad / iPhone (Safari)
 
-1. 用 Safari 打开 https://fangzhangmnm.github.io/webpaint/
+1. 用 Safari 打开 https://fangzhangmnm.github.io/weebpaint/
 2. 底部「分享」(↑ 框) 图标
 3. 选「添加到主屏幕」
-4. 主屏出现 WebPaint 图标，点开 = 全屏 PWA，没浏览器边框，跟原生 App 一样
+4. 主屏出现 WeebPaint 图标，点开 = 全屏 PWA，没浏览器边框，跟原生 App 一样
 
 #### Mac (Safari 17+)
 
@@ -243,7 +243,7 @@ WebPaint 是 PWA（Progressive Web App），不用进 App Store，浏览器直�
 
 #### Windows / Mac (Chrome / Edge)
 
-地址栏右侧会有一个安装小图标，或菜单 → 「安装 WebPaint」。
+地址栏右侧会有一个安装小图标，或菜单 → 「安装 WeebPaint」。
 
 装完之后：
 
@@ -257,7 +257,7 @@ WebPaint 是 PWA（Progressive Web App），不用进 App Store，浏览器直�
 
 1. 顶栏右上角点头像 / 状态栏「未登录」处
 2. 弹微软登录窗，用你的 Microsoft 账号登（个人 / 企业都行）
-3. 授权 Apps folder 访问权限——它**只能读写** `Apps/WebPaint/` 这一个文件夹，碰不到你网盘里的别的东西
+3. 授权 Apps folder 访问权限——它**只能读写** `Apps/WeebPaint/` 这一个文件夹，碰不到你网盘里的别的东西
 4. 之后每次 Ctrl+S（或顶栏的保存按钮）= 推送到云端
 5. 多端登同一账号，第二台机器开图库 → 看到云端 tile → 双击拉下来打开 = 多端同步
 
@@ -272,7 +272,7 @@ WebPaint 是 PWA（Progressive Web App），不用进 App Store，浏览器直�
 设计目标：
 
 - Blender 装一个 addon，本机起一个 WebRTC peer（不需要互联网，纯局域）
-- 在 WebPaint 里编辑某张贴图 → 改完 apply → 通过 WebRTC 直推 Blender 内存
+- 在 WeebPaint 里编辑某张贴图 → 改完 apply → 通过 WebRTC 直推 Blender 内存
 - Blender 自动刷新对应 material 的 texture，所见即所得
 
 每次开 session 都要你**显式 consent** 才开通道，不会偷偷握手。
@@ -297,9 +297,9 @@ WebPaint 是 PWA（Progressive Web App），不用进 App Store，浏览器直�
 
 想自己接的欢迎 PR。
 
-### 如何让AI定制属于你自己的WebPaint，或者只是托管一个自己的本地版本
+### 如何让AI定制属于你自己的WeebPaint，或者只是托管一个自己的本地版本
 
-WebPaint 是纯静态站点，没后端。把它跑在自己电脑上、改成自己喜欢的样子，门槛比想象中低——你甚至不用会写代码，让 Coding Agent（比如 Claude Code）帮你写就行。本软件本身就是这么写出来的。
+WeebPaint 是纯静态站点，没后端。把它跑在自己电脑上、改成自己喜欢的样子，门槛比想象中低——你甚至不用会写代码，让 Coding Agent（比如 Claude Code）帮你写就行。本软件本身就是这么写出来的。
 
 #### 装开发环境
 
@@ -310,8 +310,8 @@ WebPaint 是纯静态站点，没后端。把它跑在自己电脑上、改成�
 #### 如何自己托管并开发自己的定制版本
 
 ```bash
-git clone https://github.com/fangzhangmnm/webpaint.git
-cd webpaint
+git clone https://github.com/fangzhangmnm/weebpaint.git
+cd weebpaint
 bash scripts/build.sh  # 跑 esbuild → 生成 hash 文件名进 dist/（首次会自动拉 esbuild 二进制）
 ```
 
@@ -391,7 +391,7 @@ store 深模块不直接持有 UI：它们 funnel 到库内 `src/store/error-han
 OneDrive 同步用的是 **Microsoft Entra (Azure AD)** OAuth，我的 client id 写死在 `src/config.ts`。你 fork 之后部署到自己的域名、想用同步：
 
 1. 去 https://portal.azure.com → Microsoft Entra ID → 应用注册
-2. 新建一个 SPA 应用，加 Redirect URI = 你部署的 URL（例如 `https://yourname.github.io/webpaint/`）
+2. 新建一个 SPA 应用，加 Redirect URI = 你部署的 URL（例如 `https://yourname.github.io/weebpaint/`）
 3. 拿到 Application (client) ID
 4. 改 `src/config.ts` 里的 `CLIENT_ID` 换成你自己的
 

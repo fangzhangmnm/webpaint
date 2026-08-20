@@ -46,7 +46,7 @@ export interface StoreLike {
 /** app-agnostic 的 autosave / push 策略（每 app 不同 → 注入）。 */
 export interface LifecyclePolicy {
   autosaveMs?: number;                           // 本地自动存间隔（0/缺 = 不自动，app 自己驱动 flushLocal）
-  pushOn?: Array<"exit" | "blur" | "idle">;      // 何时 consent-push（WebPaint = ["exit"]）；缺 = 只 exit
+  pushOn?: Array<"exit" | "blur" | "idle">;      // 何时 consent-push（WeebPaint = ["exit"]）；缺 = 只 exit
   idleMs?: number;                               // pushOn 含 "idle" 时的空闲阈值（缺 = 不 idle-push）
 }
 
@@ -133,7 +133,7 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
       // push-pending 按**实际结果**清，不再乐观清（v432）。旧版在 save 之前就 `_pushPending = false`，
       //   而 store 内部把 push 失败 catch 成 banner 后 save() 照常 resolve → 这里永远看不到失败 →
       //   badge 画干净、退出不再重推、下次 autosave 也不补 → 云端始终停在旧版而 UI 从没说过失败。
-      //   （旧注释说"store 内部 queue 补推"是假保证：WebPaint 用默认 "manual" 策略，upload-queue 第一行就返回，
+      //   （旧注释说"store 内部 queue 补推"是假保证：WeebPaint 用默认 "manual" 策略，upload-queue 第一行就返回，
       //    那个队列永不 drain。）
       //   `res?.pushed !== true` 而非 `!res.pushed`：store 没报告结果（旧适配器/mock）时**假定没推上去**，
       //   保住 push-pending 下次重试。宁可多推一次，也不要静默清干净（优先级②）。

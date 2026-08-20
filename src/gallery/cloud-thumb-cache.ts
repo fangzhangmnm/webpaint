@@ -1,6 +1,6 @@
 // 云端 ora thumbnail 的 IDB 缓存（v137；store-cutover 2026-07-12 重锚；v401 专用 store + key 对齐 store 身份）
 //
-// 存法：webpaint DB 的 **gallery-thumbs 专用 object store**（不挤 meta 大篮子），
+// 存法：weebpaint DB 的 **gallery-thumbs 专用 object store**（不挤 meta 大篮子），
 //   key = store 文件身份 = sessionFileName(裸名) = 全名 X.ora（与 cloud-thumbs.ts 传给 store.file 的 key 逐字一致）。
 //   value = { token, blob, at }。
 //   - token = 新鲜度戳（cloud.lastModifiedDateTime 优先，退 size）。token 变 = 文件改了 → 重拉 + 覆盖同 key。
@@ -13,7 +13,7 @@
 //   caller（gallery）拿密文当「这是加密项」信号，经 store getPeek 按锁态解。
 //
 // 容量：256×256 PNG ~25KB/张；500 张 ≈ 12MB。本机 IDB 配额 GB 级，可忽略。
-// 真要清：window.WebPaint.clearCloudThumbCache()
+// 真要清：window.WeebPaint.clearCloudThumbCache()
 //
 // 不在这处理：网络拉取本身 / IntersectionObserver / 并发限流（caller 负责）
 
@@ -32,12 +32,12 @@ interface CachedThumb {
   at: number;
 }
 
-// cache stats（console 用：WebPaint.cloudThumbStats()）
+// cache stats（console 用：WeebPaint.cloudThumbStats()）
 export const stats: { hits: number; misses: number; errors: number } = { hits: 0, misses: 0, errors: 0 };
 export function resetStats() { stats.hits = 0; stats.misses = 0; stats.errors = 0; }
 
 // debug toggle：开了就不读 IDB cache，每次走网络 → 看 telemetry 路径分布
-// 用法：WebPaint.cloudThumbSkipCache(true)
+// 用法：WeebPaint.cloudThumbSkipCache(true)
 export const config: { skipCache: boolean } = { skipCache: false };
 
 /** 读 cache。返回 { token, blob, at } 或 null */

@@ -20,7 +20,7 @@ interface DialKeyboardDeps { board: Board; leftDial: { flashSize: () => void }; 
 export function makeDialControls({ state, rack, getEditMode }: DialControlsDeps) {
   // brush 工具的 size/opacity 归 desk.brushTool SSoT（per-doc；desk 不标脏，见 editor-state.ts:117）；其他工具 dial（eraser/filterBrush）
   //   未进 desk（留下一轮）→ 仍走 rack.writeCurrentTool*。desk.brushTool.size 经 binding 写同一 reactive dial，
-  //   与 writeCurrentToolSize（ts.size=v）等价 + 额外标脏。删 webpaint.size/opacity 设备级 LS 种子。
+  //   与 writeCurrentToolSize（ts.size=v）等价 + 额外标脏。删 weebpaint.size/opacity 设备级 LS 种子。
   const isBrushTool = () => rack.getRackToolKey(getEditMode().current()) === "brush";
   const setSize = (v: number) => {
     v = Math.max(1, Math.round(v));        // clamp to int

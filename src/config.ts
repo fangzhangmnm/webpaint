@@ -1,12 +1,12 @@
-// Azure AD App registration for WebPaint。Phase 2（云同步）会用到 MSAL；
+// Azure AD App registration for WeebPaint。Phase 2（云同步）会用到 MSAL；
 // phase 1 本地持久化暂时不读取这里。
 //
 // 部署清单（已建好的 SPA app，All Microsoft account users）：
-//   - Display name:  WebPaint
+//   - Display name:  WeebPaint
 //   - Application (client) ID: 18c496a6-5d86-4ff5-8dd0-67d565480a3e
 //   - Object ID:     7ef0ff74-cdcc-44a6-8dca-60ec903fe3aa
 //   - Tenant ID:     c1fef054-68f1-48db-9097-61acbe59b8ac
-//   - Redirect URIs: SPA × 2（dev http://localhost / prod https://fangzhangmnm.github.io/webpaint/）
+//   - Redirect URIs: SPA × 2（dev http://localhost / prod https://fangzhangmnm.github.io/weebpaint/）
 //
 // CLIENT_ID 占位时（"REPLACE_ME..."）走纯离线，不去碰 MSAL bundle。
 export const CLIENT_ID = "18c496a6-5d86-4ff5-8dd0-67d565480a3e";

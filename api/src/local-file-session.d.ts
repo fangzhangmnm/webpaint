@@ -24,13 +24,13 @@ export declare function writeHandleBlob(h: LocalFileHandle, blob: Blob): Promise
  *  ⚠ DataTransferItemList 在事件处理器首个 await 之后失效——getAsFileSystemHandle 的调用
  *  必须**同步**发生；本函数同步收集全部 promise，await 留给返回值。不支持（Safari/Firefox）→ null。 */
 export declare function droppedOraHandle(dt: DataTransfer | null): Promise<LocalFileHandle | null>;
-/** 安装态 PWA 的「双击 .ora 用 WebPaint 打开」（manifest file_handlers）。浏览器缓存 launch 事件，
+/** 安装态 PWA 的「双击 .ora 用 WeebPaint 打开」（manifest file_handlers）。浏览器缓存 launch 事件，
  *  boot 后再 setConsumer 也收得到。非安装态/不支持 → 静默 no-op。 */
 export declare function consumeLaunchFiles(cb: (h: LocalFileHandle) => void): void;
-/** WebPaint 痕迹检测（纯函数）：decode 出的 ora 带我们任一 sidecar/元数据 → 是 WebPaint 写的 →
+/** WeebPaint 痕迹检测（纯函数）：decode 出的 ora 带我们任一 sidecar/元数据 → 是 WeebPaint 写的 →
  *  可原位编辑。外来 ora（Krita 等）三样全无 → 走导入（绝不用我们的有损解读原位覆写别人的文件）。 */
-export declare function hasWebPaintTraces(loaded: {
-    _webpaintState?: unknown;
+export declare function hasWeebPaintTraces(loaded: {
+    _weebpaintState?: unknown;
     _editorState?: unknown;
     _wroteWith?: unknown;
 }): boolean;

@@ -59,7 +59,7 @@ for sid, text, box, note in SPECS:
     syms.append(f'  <symbol id="{sid}" data-cat="stopgap" data-src="baked:DroidSansFallbackFull(Apache-2.0)/DejaVuSans-Bold(Bitstream-Vera)" data-note="{note}" viewBox="0 0 24 24"><path d="{d}" fill="currentColor" stroke="none"/></symbol>')
 
 HEADER = '''<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none">
-<!-- WebPaint 本地 stopgap 补丁 sprite —— 共享库（20260708 SVG Icons）里还没有的图标先用
+<!-- WeebPaint 本地 stopgap 补丁 sprite —— 共享库（20260708 SVG Icons）里还没有的图标先用
      【中文字烤成轮廓 path】顶位（旧协议：占地不解决 pictogram，每条都是过渡态待真图形）。
      字形烤自系统 DroidSansFallbackFull（Apache-2.0），不依赖设备字体，无豆腐块。
 

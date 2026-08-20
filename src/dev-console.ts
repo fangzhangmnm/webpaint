@@ -1,5 +1,5 @@
-// 职责（单一）：window.WebPaint 调试/POC 控制台接口——云缩略图 POC + 插件注册暴露 + thumb 缓存统计。
-//   纯调试面：console 里手敲 WebPaint.* 验证云缩略图 byte-range 拉取、看缓存命中、给插件挂注册口。
+// 职责（单一）：window.WeebPaint 调试/POC 控制台接口——云缩略图 POC + 插件注册暴露 + thumb 缓存统计。
+//   纯调试面：console 里手敲 WeebPaint.* 验证云缩略图 byte-range 拉取、看缓存命中、给插件挂注册口。
 //   非业务逻辑，所有依赖直接 import（无 ctx），由 app 启动时调一次 initDevConsole()。
 import { fetchOraThumbnail } from "./gallery/cloud-thumbs.ts";
 import { store } from "./app-store.ts";
@@ -16,7 +16,7 @@ import { clearImageThumbCache } from "./gallery/image-thumbs.ts";
 // 调试控制台 = 一袋 console 手敲的函数（非业务）。诚实描述实际挂上的成员，index 兜底插件扩展。
 declare global {
   interface Window {
-    WebPaint?: {
+    WeebPaint?: {
       fetchOraThumbnail?: typeof fetchOraThumbnail;
       cloudThumbStats?: () => unknown;
       cloudThumbResetStats?: () => void;
@@ -34,8 +34,8 @@ declare global {
 
 export function initDevConsole() {
   // v136 POC: 云缩略图 byte-range 拉取 — console 调试
-  //   await WebPaint.pocFetchThumb()  默认拉云列表第一个 ora 验证
-  const WP = (window.WebPaint = window.WebPaint || {});
+  //   await WeebPaint.pocFetchThumb()  默认拉云列表第一个 ora 验证
+  const WP = (window.WeebPaint = window.WeebPaint || {});
   WP.fetchOraThumbnail = fetchOraThumbnail;
   WP.cloudThumbStats = () => ({ cache: { ...cloudThumbStats } });   // 路径分布（硬扫/CD/加密）已下沉进库 getPeek，不再从 app 暴露
   WP.cloudThumbResetStats = () => { cloudThumbResetStats(); };
@@ -79,7 +79,7 @@ export function initDevConsole() {
   WP.emptyTrash = (scope: "local" | "cloud" | "both" = "both") => store.files.emptyTrash({ scope });
   WP.emptyBackup = (scope: "local" | "cloud" | "both" = "both") => store.files.emptyBackup({ scope });
 
-  // 暴露给 plugin（v131）：window.WebPaint.registerFilter(FilterClass)
+  // 暴露给 plugin（v131）：window.WeebPaint.registerFilter(FilterClass)
   // 插件自己写 buildBody，可以放色环 / 自定义 canvas / 任何 DOM（user：「插件自己提供 UI」）
   WP.registerFilter = registerFilter;
   WP.listFilters = listFilters;

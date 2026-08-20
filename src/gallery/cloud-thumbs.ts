@@ -1,6 +1,6 @@
 // 云端/本地 ora 缩略图取字节 —— **薄封装**（zip 解析在库 store/zip-peek.ts；v399 起格式盲、按文件名取）。
 //
-// 这里只剩 app 域知识：WebPaint 的缩略图 = ora 内 `Thumbnails/thumbnail.png`、先拉尾窗口 80KB。
+// 这里只剩 app 域知识：WeebPaint 的缩略图 = ora 内 `Thumbnails/thumbnail.png`、先拉尾窗口 80KB。
 //   库的 ZipFile.getPeek({bytesLength, zipEntry}) 负责：本地切片∨云端 byte-range 取尾片 → 解 EOCD/CD →
 //   **按文件名**抓 entry（CD/entry 溢出尾片则各一次额外 byte-range）。明文 ora → entry 原始字节 blob(无 type)；
 //   加密 ora → 密文 peek blob(ENC_PEEK_MIME，caller 缓存原样存密文)。库不认 PNG/任何内容格式。

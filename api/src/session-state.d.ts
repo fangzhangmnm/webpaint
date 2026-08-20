@@ -4,7 +4,7 @@ import { type LocalFileHandle } from "./local-file-session.ts";
 import type { AppContext } from "./app-context.ts";
 import type { GalleryItem } from "./gallery/gallery-model.ts";
 type LoadedDoc = DecodedPainting;
-/** 打开本地 .ora：明文 + 有 WebPaint 痕迹 → 原位打开（返回 null）；
+/** 打开本地 .ora：明文 + 有 WeebPaint 痕迹 → 原位打开（返回 null）；
  *  加密容器 / 外来 ora → 不原位，把 File 还给调用方走导入路径（返回 File）。 */
 declare function openLocalFile(handle: LocalFileHandle): Promise<File | null>;
 /** 离开无地模式（回图库/开别的画/新建/导入前必过的门）。脏 → 问保存/丢弃；取消 → false（调用方中止）。

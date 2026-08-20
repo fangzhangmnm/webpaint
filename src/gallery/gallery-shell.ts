@@ -111,7 +111,7 @@ function _selectPreset(val: string) {
 
 // 作品占用 = store 本地缓存 files 分区的字节和件数（**不**走 storage.estimate —— 它把 SW
 // 预缓存 / localStorage 算进去虚高几 MB）。
-//   口径诚实交代：这是「本地存了多少作品」，**不含**缩略图缓存（在 app 自己的 webpaint 库）、
+//   口径诚实交代：这是「本地存了多少作品」，**不含**缩略图缓存（在 app 自己的 weebpaint 库）、
 //   不含回收站/备份箱、不含纯云端未缓存的作品。所以文案是「作品占用」不是「本地占用」。
 //   （v415 前这里读的是早已没有写入者的 sessions 库 → 恒显 0 B / 0 件。）
 // quota 来自 storage.estimate，是**浏览器愿意分配的上限**（iOS Safari 通常 ~ 60-80% 可用

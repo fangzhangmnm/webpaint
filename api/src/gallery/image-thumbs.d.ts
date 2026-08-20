@@ -9,5 +9,5 @@ export declare function makeImageThumb(fileBlob: Blob): Promise<Blob>;
  * @param token imageThumbToken(item)；变 = 文件改了 → 重拉覆盖同 key
  */
 export declare function getOrFetchImageThumb(path: string, token: string): Promise<Blob>;
-/** 调试：清空全部图片缩略图缓存（无损可再生）。window.WebPaint 挂载见 dev-console。 */
+/** 调试：清空全部图片缩略图缓存（无损可再生）。window.WeebPaint 挂载见 dev-console。 */
 export declare const clearImageThumbCache: () => Promise<number>;

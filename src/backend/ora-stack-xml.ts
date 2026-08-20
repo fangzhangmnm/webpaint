@@ -32,7 +32,7 @@ export interface OraDoc {
   referenceLayerId?: number | null;
 }
 
-// 读取端产出的 spec 节点（id 可能为 null：旧 .ora 无 webpaint:id，decode 时再发新 id）。
+// 读取端产出的 spec 节点（id 可能为 null：旧 .ora 无 weebpaint:id，decode 时再发新 id）。
 interface ParsedCommon {
   id: number | null;
   name: string;
@@ -79,11 +79,16 @@ export function canvasModeFromOra(op: string): string {
   return ORA_TO_MODE[op] || "source-over";
 }
 
+// 私有扩展 schema 版本（0.10.0 起写入 weebpaint:format；与 app 版本解耦，只在**格式**变更时 bump）：
+//   1 = 首个显式版本（= 改名前隐式格式：id/clipping/active/lock-alpha/reference/wrote-with + sidecar 三件）。
+//   旧文件无此属性 → 读端按 0 处理（完全可读）。读到 > ORA_FORMAT_VERSION → 上层警告 + 覆盖守卫（session-state）。
+export const ORA_FORMAT_VERSION = 1;
+
 // ---- 写：doc 树 → stack.xml 字符串 ----
 
 // 单节点 → XML（递归）。indent = 缩进层级（root stack 的直接子 = 2）。
 //   Layer → 自闭合 <layer ... />；LayerGroup → <stack ...>children</stack>。
-//   组与叶共享 name/opacity/visibility/composite-op/webpaint:id/clipping/active；
+//   组与叶共享 name/opacity/visibility/composite-op/weebpaint:id/clipping/active；
 //   叶独有 src/x/y/lock-alpha/reference。
 function nodeToXml(node: OraNode, doc: OraDoc, indent: number): string {
   const pad = "  ".repeat(indent);
@@ -92,9 +97,9 @@ function nodeToXml(node: OraNode, doc: OraDoc, indent: number): string {
     `opacity="${(node.opacity ?? 1).toFixed(4)}"`,
     `visibility="${node.visible ? "visible" : "hidden"}"`,
     `composite-op="${oraCompositeOp(node.mode || "source-over")}"`,
-    `webpaint:id="${node.id}"`,
-    ...(node.clippingMask ? [`webpaint:clipping="true"`] : []),
-    ...(doc.activeId === node.id ? [`webpaint:active="true"`] : []),
+    `weebpaint:id="${node.id}"`,
+    ...(node.clippingMask ? [`weebpaint:clipping="true"`] : []),
+    ...(doc.activeId === node.id ? [`weebpaint:active="true"`] : []),
   ];
   if (node.isGroup) {
     // ORA baseline 组隔离模型（与我们 layer-composite.groupNeedsIsolation 一致，故用**标准** isolation 属性，
@@ -120,8 +125,8 @@ function nodeToXml(node: OraNode, doc: OraDoc, indent: number): string {
     `x="${node.bboxX}"`,
     `y="${node.bboxY}"`,
     ...common.slice(1),                          // opacity/visibility/composite-op/id/clipping/active
-    ...(node.lockAlpha ? [`webpaint:lock-alpha="true"`] : []),
-    ...(doc.referenceLayerId === node.id ? [`webpaint:reference="true"`] : []),
+    ...(node.lockAlpha ? [`weebpaint:lock-alpha="true"`] : []),
+    ...(doc.referenceLayerId === node.id ? [`weebpaint:reference="true"`] : []),
   ];
   return `${pad}<layer ${attrs.join(" ")} />`;
 }
@@ -133,12 +138,12 @@ export function buildStackXml(doc: OraDoc, wroteWithVersion = ""): string {
   for (let i = doc.layers.length - 1; i >= 0; i--) {
     nodes.push(nodeToXml(doc.layers[i], doc, 2));
   }
-  // wrote-with：记录写入这份 .ora 时的 WebPaint 版本号（调用方传入；encodeDocToOra 必填透传）。
+  // wrote-with：记录写入这份 .ora 时的 WeebPaint 版本号（调用方传入；encodeDocToOra 必填透传）。
   // 用途：读取端若发现比自己版本高 → 警告（避免旧版客户端静默吃掉新版图层属性）
   // 论证见 conversation v71→v72。
   const wroteWith = wroteWithVersion;
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<image version="0.0.3" w="${doc.width}" h="${doc.height}" xres="72" yres="72" xmlns:webpaint="https://github.com/fangzhangmnm/webpaint/ns" webpaint:wrote-with="${escapeXml(wroteWith)}">
+<image version="0.0.3" w="${doc.width}" h="${doc.height}" xres="72" yres="72" xmlns:weebpaint="https://github.com/fangzhangmnm/weebpaint/ns" weebpaint:format="${ORA_FORMAT_VERSION}" weebpaint:wrote-with="${escapeXml(wroteWith)}">
   <stack name="root">
 ${nodes.join("\n")}
   </stack>
@@ -153,18 +158,24 @@ ${nodes.join("\n")}
 function elemTag(el: Element): string {
   return (el.tagName || el.nodeName || "").toLowerCase().replace(/^.*:/, "");
 }
+// 私有属性双读（2026-08-20 WebPaint→WeebPaint 改名，user 拍板「新写旧读」）：
+//   写端只写 weebpaint:*；读端 weebpaint:* 优先、旧 webpaint:* 兜底——存量 .ora 的
+//   id/clipping/active/lock-alpha/reference/wrote-with 全部保读，打开保存即自动升级。
+function wpAttr(el: Element, name: string): string | null {
+  return el.getAttribute(`weebpaint:${name}`) ?? el.getAttribute(`webpaint:${name}`);
+}
 // 单 DOM 元素 → spec（递归）。<layer> → 叶 spec；<stack> → 组 spec（含 children）。
-//   id 解析自 webpaint:id（旧 .ora 无此属性 → null，decode 时发新 id）。
+//   id 解析自 weebpaint:id（旧 .ora 无此属性 → null，decode 时发新 id）。
 function parseNode(el: Element): ParsedNode {
-  const idAttr = el.getAttribute("webpaint:id");
+  const idAttr = wpAttr(el, "id");
   const common: ParsedCommon = {
     id: idAttr != null && idAttr !== "" ? parseInt(idAttr, 10) : null,
     name: el.getAttribute("name") || "Layer",   // 无名层的兜底名（写回文件的数据）
     opacity: parseFloat(el.getAttribute("opacity") || "1"),
     visible: (el.getAttribute("visibility") || "visible") === "visible",
     mode: canvasModeFromOra(el.getAttribute("composite-op") || "svg:src-over"),
-    clippingMask: el.getAttribute("webpaint:clipping") === "true",
-    isActive: el.getAttribute("webpaint:active") === "true",
+    clippingMask: wpAttr(el, "clipping") === "true",
+    isActive: wpAttr(el, "active") === "true",
   };
   if (elemTag(el) === "stack") {
     // 组 mode 按 ORA baseline 隔离规则反推（standard isolation 属性）：
@@ -182,8 +193,8 @@ function parseNode(el: Element): ParsedNode {
     src: el.getAttribute("src") || "",
     x: parseInt(el.getAttribute("x") || "0", 10),
     y: parseInt(el.getAttribute("y") || "0", 10),
-    lockAlpha: el.getAttribute("webpaint:lock-alpha") === "true",
-    isReference: el.getAttribute("webpaint:reference") === "true",
+    lockAlpha: wpAttr(el, "lock-alpha") === "true",
+    isReference: wpAttr(el, "reference") === "true",
   };
 }
 // 一个 stack 的直接子节点 → bottom-first spec 数组。
@@ -197,7 +208,7 @@ function parseChildren(stackEl: Element): ParsedNode[] {
   return kids.map(parseNode);
 }
 
-export function parseStackXml(xmlText: string): { w: number; h: number; nodes: ParsedNode[]; wroteWith: string | null } {
+export function parseStackXml(xmlText: string): { w: number; h: number; nodes: ParsedNode[]; wroteWith: string | null; formatVersion: number } {
   const dom = new DOMParser().parseFromString(xmlText, "application/xml");
   const err = dom.querySelector("parsererror");
   if (err) throw new Error("stack.xml parse failed: " + err.textContent);
@@ -209,6 +220,7 @@ export function parseStackXml(xmlText: string): { w: number; h: number; nodes: P
   // root <stack>（image 的直接子 stack）。递归建树。
   const rootStack = [...image.children].find((c) => elemTag(c) === "stack");
   const nodes = rootStack ? parseChildren(rootStack) : [];
-  const wroteWith = image.getAttribute("webpaint:wrote-with") || null;
-  return { w, h, nodes, wroteWith };
+  const wroteWith = wpAttr(image, "wrote-with") || null;
+  const formatVersion = parseInt(wpAttr(image, "format") || "0", 10) || 0;   // 无戳（改名前存量）= 0
+  return { w, h, nodes, wroteWith, formatVersion };
 }

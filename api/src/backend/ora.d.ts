@@ -53,17 +53,18 @@ interface EncodeOpts {
 export interface DecodedPainting {
     data: PaintingData;
     _referenceBlob?: Blob;
-    _webpaintState?: unknown;
+    _weebpaintState?: unknown;
     _editorState?: unknown;
     _timelapseJson?: string;
     _timelapseMp4?: Uint8Array;
     _wroteWith: string | null;
+    _formatVersion: number;
 }
 /** doc → Blob (.ora)
  *
- * WebPaint 私有扩展（都在 webpaint/ 命名空间下，第三方 reader 会忽略或剥离）：
- *   webpaint/reference.png     — ref 小窗当前显示的图（原 Blob bytes）
- *   .webpaint/editor-state.json — desk struct（desk per-doc；含 toolDials/palette/blender 三组）
+ * WeebPaint 私有扩展（都在 weebpaint/ 命名空间下，第三方 reader 会忽略或剥离）：
+ *   weebpaint/reference.png     — ref 小窗当前显示的图（原 Blob bytes）
+ *   .weebpaint/editor-state.json — desk struct（desk per-doc；含 toolDials/palette/blender 三组）
  *   （旧轨 webpaint/state.json **v0.8.21 起停写**——ADR-0008 §9；decode 读兼容保留存量，拔除另议）
  *
  * opts.referenceImage: optional Blob

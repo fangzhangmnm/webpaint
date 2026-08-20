@@ -5,7 +5,7 @@
 // 数据解析（本地⊕云 merge / dirty）在 store（app-store.listGallery）；文件夹切片 / 路径代数
 // 在 gallery-model.js + gallery-path.js（已测）；这里只补**展示层派生**：徽章 4 态、面包屑、tile 字段。
 //
-// 复用形状：item 形状通用、徽章/面包屑无 ORA 依赖 → 整块可抬给 AtlasMaker/RealHome（WebPaint 专用 example）。
+// 复用形状：item 形状通用、徽章/面包屑无 ORA 依赖 → 整块可抬给 AtlasMaker/RealHome（WeebPaint 专用 example）。
 
 import { t } from "../i18n/index.ts";
 import { pathBasename } from "./gallery-path.ts";

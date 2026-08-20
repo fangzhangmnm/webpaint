@@ -1,6 +1,6 @@
 // 平滑管线全局参数的**出厂默认**（纯数据；C8 迁 common）。
 // 运行时可变副本 SMOOTH + synced-pref 持久化在 src/smooth-config.ts（frontend 域）；
-// backend 档口（webpaint-backend strokeBegin）吃这份 DEFAULTS 做 streamline/stabilization →
+// backend 档口（weebpaint-backend strokeBegin）吃这份 DEFAULTS 做 streamline/stabilization →
 // {tau, deadzone} 推导——headless 无 prefs，决定论要求常数固定（同输入序列 → 同输出）。
 // 详 ai-docs/20260613-brush-procreate-smoothing.md。
 

@@ -14,7 +14,7 @@ import { appState } from "./app-state.ts";
 export interface VerifierRecord { v: 1; salt: string; iv: string; ct: string }
 
 const PBKDF2_ITERS = 250_000;                       // 对齐 store peek 的强度（独立实现）
-const PLAINTEXT = "webpaint-gallery-password-v1";   // 固定明文（验证只看 GCM tag 是否解得开）
+const PLAINTEXT = "webpaint-gallery-password-v1";   // 固定明文（验证只看 GCM tag 是否解得开）；v1 格式常量——云端存量 verifier 按它加密，改名（0.10.0 WeebPaint）不追改
 
 const b64 = (u: Uint8Array) => btoa(String.fromCharCode(...u));
 const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));

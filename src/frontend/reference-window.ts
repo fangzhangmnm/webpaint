@@ -31,7 +31,7 @@ export interface RefLabels { load?: string; cloud?: string; live?: string; fit?:
 const REF_LONG_PRESS_MS = 450;                // 长按吸色延迟（对齐 input.ts）
 const REF_LONG_PRESS_CANCEL_SQ = 64;          // 8px²：长按期间移动超此 → 取消，回 pan
 const LIVE_THROTTLE_MS = 300;                 // S9：live 全量合成节流；到期 timer 补帧收尾
-// WebPaint 布局事实（组件自有默认；宿主布局大改时同步这里）：
+// WeebPaint 布局事实（组件自有默认；宿主布局大改时同步这里）：
 const SPAWN_LEFT = 112, SPAWN_TOP = 104;      // v112/v267：默认避开 topbar(56)+左栏(80)+iPad 状态栏
 const CLAMP_MIN_LEFT = 96, CLAMP_MIN_TOP = 96;   // v268b：旧持久化位置钳进安全区
 const DRAG_TOP_FLOOR = 60;                    // 拖窗 top 地板=出血区（v0.4.11，同 layers-panel）

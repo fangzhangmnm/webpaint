@@ -8,7 +8,7 @@
   手贴一次之后，改了 assets/icons.svg 就得记得再贴一遍，没有任何机制会提醒。
   这个脚本让「重新贴」变成一条命令，--check 让「忘了贴」变成一个非零退出码。
 
-assets/icons.svg 是 WebPaint 的图标 SSoT（钉死的拷贝，见该文件头部）。
+assets/icons.svg 是 WeebPaint 的图标 SSoT（钉死的拷贝，见该文件头部）。
 本脚本不认识上游共享库，也不做子集挑选——那是改图标时的手工步骤。
 
 本地补丁（stopgap 自愈机制）：assets/icons-local.svg 若存在，其 symbol 会被并进内联区——

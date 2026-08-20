@@ -1,4 +1,4 @@
-// WebPaint 的密码**政策**模块（ADR-0012 / encryption-model：WebPaint = unified password）。
+// WeebPaint 的密码**政策**模块（ADR-0012 / encryption-model：WeebPaint = unified password）。
 // store 对密码非交互（seam 只要 getPassword）；本模块持有内存密码 + 弹窗 + 记忆政策。
 //   getPassword(name)        → store seam 唯一接口：统一图库密码（per-name 覆盖兜底）
 //   promptPassword(opts)     → in-app 输入 sheet（弹窗实现由 composition root 注入，无 DOM 依赖）

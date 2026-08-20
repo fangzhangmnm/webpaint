@@ -1,5 +1,5 @@
 // 极简 XML parser polyfill（node 无 DOMParser；C7 从 ora-tree.test.mjs 抽出共享——
-// webpaint-backend round-trip 也要走 decodeOraToPainting → parseStackXml）。
+// weebpaint-backend round-trip 也要走 decodeOraToPainting → parseStackXml）。
 // recursive descent；只够解析我们自己 emit 的 well-formed XML：元素 / 属性 / 自闭合 / 嵌套 stack。
 function decodeEntities(s) {
   return s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");

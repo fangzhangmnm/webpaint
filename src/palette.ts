@@ -9,7 +9,7 @@
 //   .open() / .close() / .isOpen()
 //   .setMode("brush" | "mix" | "picker")
 //   .clear()
-//   .getSerializedState() / .applySerializedState(s)  ← 持久化 to webpaint/state.json
+//   .getSerializedState() / .applySerializedState(s)  ← 持久化 to weebpaint/state.json
 
 import { raiseWindow } from "./surfaces.ts";
 

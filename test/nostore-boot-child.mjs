@@ -1,4 +1,4 @@
-// nostore boot smoke **子进程**（store-absent.test.mjs spawn，env WEBPAINT_NOSTORE=1）。
+// nostore boot smoke **子进程**（store-absent.test.mjs spawn，env WEEBPAINT_NOSTORE=1）。
 // 为什么子进程：detectStoreAbsent 在 app-store 模块 eval 期定死，同进程二次 import 换不了模式。
 // 形态 = app-boot.test.mjs 的瘦身克隆：装 DOM shim → 断言缺席模式已生效 → import app.ts 整段
 // boot → settle 捕逃逸抛错 → exit 0/1。父测试只看退出码 + stderr。
@@ -24,7 +24,7 @@ process.on("uncaughtException", (e) => errors.push(["uncaughtException", e]));
 
 const appStore = await import("../src/app-store.ts");
 if (!appStore.storeAbsent) {
-  console.error("WEBPAINT_NOSTORE=1 没让 app-store 进缺席模式");
+  console.error("WEEBPAINT_NOSTORE=1 没让 app-store 进缺席模式");
   process.exit(1);
 }
 if (appStore.isAuthConfigured() !== false || appStore.isSignedIn() !== false) {

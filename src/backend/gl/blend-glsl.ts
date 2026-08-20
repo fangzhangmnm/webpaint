@@ -1,5 +1,5 @@
 // 12 个可分离 blend 模式的 GLSL（W3C Compositing and Blending L1 §10.1 逐字实现）。
-// 这 12 个 = WebPaint UI 实际可选的全部（layers-panel.ts:71 LAYER_MODE_LABEL）；非可分离的
+// 这 12 个 = WeebPaint UI 实际可选的全部（layers-panel.ts:71 LAYER_MODE_LABEL）；非可分离的
 //   hue/sat/color/luminosity UI 选不到（只在 PSD 互转），故不实现。
 //
 // 正确性策略：Canvas2D 的原生 blend = 同一份 W3C 规范 → GL 输出必须逐像素匹配 Canvas2D。

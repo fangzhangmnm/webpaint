@@ -13,19 +13,19 @@
 //   session-state   ← 活动文档生命周期（存/换/退）     Store(app-store) ← 本地+云同步机制
 //   currentBrush    ← 不可变 ResolvedBrush（从 dial+预设纯派生，引擎唯一吃）
 
-import { WEBPAINT_VERSION } from "./version.ts";
+import { WEEBPAINT_VERSION } from "./version.ts";
 import { initI18n, t, reconcileLangFromPrefs } from "./i18n/index.ts";   // 本地化：<html lang> + 静态 HTML data-i18n 填充
 import { Board } from "./board.ts";
 import { InputController, bindPressureDisabled } from "./input.ts";
 import { makeCurrentBrush } from "./resolved-brush.ts";   // 当前笔派生 computed + 引擎桥（手感数学在 resolveBrush，同文件）
 import { registerPanel, openExclusive, closeExclusive, getCurrentExclusive } from "./panel-state.ts";
-import { WebPaintBackend } from "./backend/webpaint-backend.ts";
+import { WeebPaintBackend } from "./backend/weebpaint-backend.ts";
 import { type PaintingView, setDeviceMemoryGB } from "./backend/workpiece/painting-view.ts";
 import { installPngDecodeFallback } from "./shell/image-io.ts";
 import { setOraLogReporter } from "./backend/ora.ts";
 import { EditMode } from "./edit-mode.ts";
 import { referenceWindow, paletteWindow, initSideWindows } from "./side-windows.ts";   // 参考/调色板浮窗（construct+wiring）
-import { initDevConsole } from "./dev-console.ts";   // window.WebPaint 调试接口
+import { initDevConsole } from "./dev-console.ts";   // window.WeebPaint 调试接口
 import { mountGallery } from "./gallery/gallery.ts";          // candidate 1 · 图库深模块
 import { BrushRackController } from "./brush-rack-controller.ts";
 import { PwaShell } from "./pwa-shell.ts";
@@ -116,12 +116,12 @@ if (navigator.maxTouchPoints > 0) {
   document.body.dataset.inputTouchscreen = "1";
 }
 initI18n();   // 本地化 boot：设 <html lang> + 填静态 HTML data-i18n（早于任何 JS 设标签/首帧）
-// ============ v2 纪元核心装配（C7 后棒：app.ts 消费 WebPaintBackend）============
-// 组合根不再自装配 history/wp2/view/layers——WebPaintBackend 是唯一装配根（headless/MCP 同一套件，
+// ============ v2 纪元核心装配（C7 后棒：app.ts 消费 WeebPaintBackend）============
+// 组合根不再自装配 history/wp2/view/layers——WeebPaintBackend 是唯一装配根（headless/MCP 同一套件，
 // undo 配额也归它）。壳编排（error banner/面板刷新/wp:histchange/状态栏）经 inject.hooks 注入；
 // 换文档仍走 wp2.load（进程内协作面；tab 管理器「弃旧建新」= embedding 纪元的事）。
-const backend = WebPaintBackend.blank({ width: 2048, height: 2048 }, {
-  appVersion: WEBPAINT_VERSION,
+const backend = WeebPaintBackend.blank({ width: 2048, height: 2048 }, {
+  appVersion: WEEBPAINT_VERSION,
   // per-tenant 合成注入（C7）：本 backend 的 merged 合成面走 board GL（thunk——board 在下方 const，
   // 调用恒在 boot 后）。doc-render 全局接缝仍在（psd/session 等壳模块单租户消费，见下方 setDocCompositor*）。
   compositorBytes: (nodes, w, h) => board.compositeNodesToBytes(nodes, w, h),
@@ -146,10 +146,10 @@ const wp2 = backend.wp2;
 const doc: PaintingView = backend.view;
 const board = new Board(els.board as HTMLCanvasElement, doc);
 els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
-els.versionLabel.textContent = t("menu.version", { v: WEBPAINT_VERSION || "?" });   // 挪到「强制更新」旁的菜单信息行
+els.versionLabel.textContent = t("menu.version", { v: WEEBPAINT_VERSION || "?" });   // 挪到「强制更新」旁的菜单信息行
 // gallery 也显版本号（footer 水印 + 菜单信息行）——配合「强制更新」让用户知道自己在哪个版本。
-if (els.galleryFootVersion) els.galleryFootVersion.textContent = WEBPAINT_VERSION || "?";
-if (els.galleryMenuVersion) els.galleryMenuVersion.textContent = t("menu.version", { v: WEBPAINT_VERSION || "?" });
+if (els.galleryFootVersion) els.galleryFootVersion.textContent = WEEBPAINT_VERSION || "?";
+if (els.galleryMenuVersion) els.galleryMenuVersion.textContent = t("menu.version", { v: WEEBPAINT_VERSION || "?" });
 
 // 编辑器「当前设成什么样」的反应式 RAM SSoT（主色 / 每工具 dial / 压感开关 / 棋盘等）= editor-state.ts。
 // 当前笔（currentBrush computed）从这束 dial + 笔架预设纯派生（见下，组合接线留 app）。
@@ -392,7 +392,7 @@ board.render = function () {
 
 // 顶栏 save 按钮点击 = topbar-menu.ts。
 
-// window.WebPaint 调试/POC 控制台接口 = dev-console.ts。
+// window.WeebPaint 调试/POC 控制台接口 = dev-console.ts。
 initDevConsole();
 // adjust 面板拖动 = topbar-menu.ts。
 

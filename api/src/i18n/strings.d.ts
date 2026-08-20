@@ -109,10 +109,10 @@ export declare const S: {
         readonly tok: "o open e lipu lon ilo ni…";
     };
     readonly "menu.installApp": {
-        readonly zh: "安装 WebPaint 到桌面";
-        readonly en: "Install WebPaint";
-        readonly ja: "WebPaint をインストール";
-        readonly tok: "o pana e WebPaint tawa supa ilo";
+        readonly zh: "安装 WeebPaint 到桌面";
+        readonly en: "Install WeebPaint";
+        readonly ja: "WeebPaint をインストール";
+        readonly tok: "o pana e WeebPaint tawa supa ilo";
     };
     readonly "nav.trash": {
         readonly zh: "回收站";
@@ -2551,9 +2551,9 @@ export declare const S: {
         readonly tok: "o moli e insa pi poki jaki (poki sewi)";
     };
     readonly "gal.chrome.versionTip": {
-        readonly zh: "当前 WebPaint 版本";
-        readonly en: "Current WebPaint version";
-        readonly ja: "現在の WebPaint バージョン";
+        readonly zh: "当前 WeebPaint 版本";
+        readonly en: "Current WeebPaint version";
+        readonly ja: "現在の WeebPaint バージョン";
         readonly tok: "nanpa mi pi tenpo ni";
     };
     readonly "gal.menu.theme": {
@@ -3728,7 +3728,7 @@ export declare const S: {
     };
     readonly "lf.staleTitle": {
         readonly zh: "文件已被外部修改";
-        readonly en: "File changed outside WebPaint";
+        readonly en: "File changed outside WeebPaint";
         readonly ja: "ファイルが外部で変更されています";
         readonly tok: "lipu li ante tan ilo ante";
     };

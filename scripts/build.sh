@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# scripts/build.sh —— src/ → dist/webpaint-<hash>.mjs；in-place 改 index.html 引新 hash
-# （注：bundle 名是 webpaint-；service-worker.js install regex 必须跟这个名一致）
+# scripts/build.sh —— src/ → dist/weebpaint-<hash>.mjs；in-place 改 index.html 引新 hash
+# （注：bundle 名是 weebpaint-；service-worker.js install regex 必须跟这个名一致）
 #
 # 用法：编辑 src/ → 跑这个 → git commit && git push origin main
 # (push 后 GH Actions 把 main 分支的 dist + 源原样部署到 /dev/ 路径)
@@ -35,7 +35,7 @@ if [ ! -x "$ESBUILD" ]; then
 fi
 
 mkdir -p "$OUT_DIR"
-TMP_OUT="$OUT_DIR/webpaint-tmp.mjs"
+TMP_OUT="$OUT_DIR/weebpaint-tmp.mjs"
 
 # 0. 类型检查门（store 深模块被 Uint8Array/Blob 类型 bug 雷击两次 → 把 tsc --noEmit 设成构建前置）。
 #    esbuild 只 strip 类型不检查；这道才是真护栏。tsc 装在 devDependencies（npm i 一次）。
@@ -129,22 +129,22 @@ node scripts/lint-dirs.mjs
 
 # 2. content hash 截 12 位作文件名
 HASH=$(sha256sum "$TMP_OUT" | awk '{print substr($1, 1, 12)}')
-OUT="$OUT_DIR/webpaint-$HASH.mjs"
+OUT="$OUT_DIR/weebpaint-$HASH.mjs"
 
 # 3. mv 到最终名（先 mv 后清，否则 find 误删 main-tmp）
 mv "$TMP_OUT"     "$OUT"
 mv "$TMP_OUT.map" "$OUT.map"
 
 # 老 hashed bundle 清掉，不堆积
-find "$OUT_DIR" -maxdepth 1 -name 'webpaint-*.mjs' -not -name "webpaint-$HASH.mjs" -delete
-find "$OUT_DIR" -maxdepth 1 -name 'webpaint-*.mjs.map' -not -name "webpaint-$HASH.mjs.map" -delete
+find "$OUT_DIR" -maxdepth 1 -name 'weebpaint-*.mjs' -not -name "weebpaint-$HASH.mjs" -delete
+find "$OUT_DIR" -maxdepth 1 -name 'weebpaint-*.mjs.map' -not -name "weebpaint-$HASH.mjs.map" -delete
 
 # 4. sed 改 index.html 里引用，指向新 hash
-if grep -q 'src="./dist/webpaint-' index.html; then
+if grep -q 'src="./dist/weebpaint-' index.html; then
   # 兼容 PLACEHOLDER (大写) 和 hash (小写 hex)
-  sed -i "s|src=\"./dist/webpaint-[A-Za-z0-9-]*\\.mjs\"|src=\"./dist/webpaint-$HASH.mjs\"|" index.html
+  sed -i "s|src=\"./dist/weebpaint-[A-Za-z0-9-]*\\.mjs\"|src=\"./dist/weebpaint-$HASH.mjs\"|" index.html
 else
-  echo "[build] 警告：index.html 里没找到 ./dist/webpaint-*.mjs script tag" >&2
+  echo "[build] 警告：index.html 里没找到 ./dist/weebpaint-*.mjs script tag" >&2
 fi
 
 # 4b. styles.css 版本 buster（v0.5.18：新 HTML+HTTP缓存旧 CSS 曾出真机 UI 崩——bundle 有 hash CSS 没有）。

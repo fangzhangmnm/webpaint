@@ -1,4 +1,4 @@
-// StoreUI adapter —— WebPaint 给 sync-store 的 ui bundle（createStore 必填 busy/resolveConflict/reportError + 可选 offlineEscape）。
+// StoreUI adapter —— WeebPaint 给 sync-store 的 ui bundle（createStore 必填 busy/resolveConflict/reportError + 可选 offlineEscape）。
 //   cutover：freshness 逻辑进引擎（freshness.ts）后，旧 cloud-freshness.ts 幸存的那点 UI——
 //   ① 冲突二选一 sheet（ADR-0009 冲突必 surface）② 「跳过到离线」逃生闸（iOS 老 token fetchMeta 挂死的唯一逃生）
 //   ③ 错误 surface——塌进这一个模块。app 只在 app-store 装配时把它传进 createStore。
