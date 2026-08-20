@@ -157,10 +157,16 @@ export class GlRoom {
   }
 
   // ---- sync：CPU tile → GPU 驻留（原 RenderTreeGL._syncPixels 族） ----
-  syncLeafSafe(leafId: number, pixels: LayerPixels, docW: number, docH: number): void {
-    try { this._syncPixels(leafId, pixels, docW, docH); } catch (e) {
-      // 池连驱逐后都塞不下（内容超显存 quota）：该层保持陈旧/部分显示，压力缓解后自愈。
+  // 驻留降级计数（v0.10.8）：吞掉的 EXHAUSTED 不再无声——HUD/board 读这里出声（夏音案教训：
+  //   静默跳层 + 结果被缓存冻结，用户只看到"图层丢了"，连 console 都无痕）。
+  readonly syncStats = { drops: 0 };
+
+  /** false = 池连驱逐后都塞不下（内容超显存 quota）：该层保持陈旧/部分显示。 */
+  syncLeafSafe(leafId: number, pixels: LayerPixels, docW: number, docH: number): boolean {
+    try { this._syncPixels(leafId, pixels, docW, docH); return true; } catch (e) {
       if (!(e instanceof Error) || !e.message.startsWith("GPU_POOL_EXHAUSTED")) throw e;
+      this.syncStats.drops++;
+      return false;
     }
   }
 

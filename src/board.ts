@@ -153,6 +153,10 @@ export class Board {
   _fps?: number | null;
   _fpsEl?: HTMLElement;
   _lastStampCount = 0;   // 上帧 overlay stamp 数（HUD；§1 长描边二次爆炸的直读量，仅 _showFps 时填）
+  // GPU 驻留降级观测（v0.10.8 夏音案）：syncLeafSafe 吞 EXHAUSTED 曾完全无声——跳层被段缓存冻结，
+  //   用户只看到「图层丢了」。这里盯 room 计数器，涨了就出声（log 级、5s 节流，不打扰作画）。
+  _lastSyncDrops = 0;
+  _lastDropReportT = 0;
   static _dispatchingDirty?: boolean;
   // WebGL2 渲染（v351 起唯一 display 路径）。init 失败 → _glBoard=null → _renderFull 显「需 WebGL2」。
   _glBoard?: GLBoard | null;
@@ -595,7 +599,9 @@ export class Board {
     const poolStr = pool ? ` ${pool.count}fbo/${Math.round(pool.bytes / 1048576)}mb` : "";
     // S7 段缓存读数：sb=本帧建段 sh=段命中 !=降级（quota 塞不下段缓存）。描边中理想形态 = sb0 shN。
     const fs = this._glBoard?.frameStats;
-    const segStr = fs ? ` sb${fs.segBuilds} sh${fs.segHits}${fs.cachingDegraded ? "!" : ""}` : "";
+    // 尾缀：`!`=本帧降级（quota 塞不下段缓存）、`dN`=累计掉层数（sync 驻留失败次数，v0.10.8）。
+    const drops = this._glBoard?.syncDrops ?? 0;
+    const segStr = fs ? ` sb${fs.segBuilds} sh${fs.segHits}${fs.cachingDegraded ? "!" : ""}${drops ? ` d${drops}` : ""}` : "";
     const line2 = s ? `\n${s.passes}p ${s.floatPasses}f ${this._lastStampCount}s${poolStr}${segStr}` : "";
     this._ensureFpsEl().textContent = `${this._fps ? this._fps.toFixed(0) : "--"} fps${line2}`;
   }
@@ -625,6 +631,20 @@ export class Board {
 
   // GL 渲染路径：GL canvas 渲 doc（void 底 + doc 背景 + 图层 + live overlay，视口仿射）；
   //   本 2D canvas 清透明、只画 lasso overlay + doc 边框（GL 透出 doc）。
+  // 掉层出声（错误路径不吞掉之后照常渲染=煤气灯，家规）：drops 涨 = 本帧有图层没能驻留 GPU、
+  //   显示为陈旧/缺失。log 级走 console（良性降级、CPU 数据无损），5s 节流防刷屏。
+  _reportGlResidencyDrops() {
+    const drops = this._glBoard?.syncDrops ?? 0;
+    if (drops <= this._lastSyncDrops) return;
+    const grew = drops - this._lastSyncDrops;
+    this._lastSyncDrops = drops;
+    const now = Date.now();
+    if (now - this._lastDropReportT < 5000) return;
+    this._lastDropReportT = now;
+    reportError(new Error(`[board] GPU tile residency degraded: ${grew} layer sync drop(s) this frame `
+      + `(doc working set exceeds GPU tile quota; layers may render stale/missing until pressure eases)`), "log");
+  }
+
   _renderFullGL(ctx: Ctx2D, W: number, H: number) {
     // 白纸=显示常量（doc 无纸色）。透明显示（v0.10.5，Procreate 式）：不再画棋盘——doc 真透明
     //   （bg=null），present 叠在「主题底(void)+屏幕空间点网格」上，拖动时内容滑过静止的点。
@@ -644,6 +664,7 @@ export class Board {
       liveSync as unknown as GLLeaf | null, this._glSurrogate(),
       transparentBg ? { dotColor: this._voidDotColor, stepPx: 24 * this.dpr, radiusPx: 1.25 * this.dpr } : null,
     );
+    this._reportGlResidencyDrops();
     // 2D 叠层（透明底）：lasso 蚂蚁线/handles + doc 边框（透明显示=与点网格同色同软度；白纸=淡黑）
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, W, H);

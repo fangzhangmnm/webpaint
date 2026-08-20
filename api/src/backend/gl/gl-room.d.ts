@@ -126,7 +126,11 @@ export declare class GlRoom {
     invalidateTree(): void;
     dispose(): void;
     handleContextRestored(): void;
-    syncLeafSafe(leafId: number, pixels: LayerPixels, docW: number, docH: number): void;
+    readonly syncStats: {
+        drops: number;
+    };
+    /** false = 池连驱逐后都塞不下（内容超显存 quota）：该层保持陈旧/部分显示。 */
+    syncLeafSafe(leafId: number, pixels: LayerPixels, docW: number, docH: number): boolean;
     private _syncPixels;
     syncSurrogate(s: SurrogatePlaneInput, docW: number, docH: number): void;
     recAlive(rec: {

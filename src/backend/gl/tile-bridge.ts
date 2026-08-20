@@ -57,6 +57,12 @@ export class CpuGpuTileBridge {
   // FBO/readback 同时造出 cpu+gpu 双份时登记对应关系（防下次重复劳动）。
   registerPair(cpuId: number, gpuId: number): void { this._map.set(cpuId, gpuId); }
 
+  // 需求精算探针（v0.10.8 frame-demand）：该 cpu tile 在 GPU 有活副本吗（不 touch LRU）。
+  hasLive(cpuId: number): boolean {
+    const g = this._map.get(cpuId);
+    return g !== undefined && this._pool.isAlive(g);
+  }
+
   // 清掉任一侧已死的条目。cpuAlive 由 cpu 池提供存活谓词；gpu 侧问 pool.isAlive。
   purgeDead(cpuAlive: (cpuId: number) => boolean): void {
     for (const [cpuId, gpuId] of this._map) {

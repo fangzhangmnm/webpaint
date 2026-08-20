@@ -178,6 +178,8 @@ export declare class Board {
     _fps?: number | null;
     _fpsEl?: HTMLElement;
     _lastStampCount: number;
+    _lastSyncDrops: number;
+    _lastDropReportT: number;
     static _dispatchingDirty?: boolean;
     _glBoard?: GLBoard | null;
     _glCanvas?: HTMLCanvasElement | null;
@@ -236,6 +238,7 @@ export declare class Board {
     _tickFps(): void;
     _renderFull(): void;
     _drawGLRequiredMessage(ctx: Ctx2D, W: number, H: number): void;
+    _reportGlResidencyDrops(): void;
     _renderFullGL(ctx: Ctx2D, W: number, H: number): void;
     setPerspGizmoProvider(fn: (() => PerspGizmoData | null) | null): void;
     _drawPerspGizmo(ctx: Ctx2D, scale: number): void;

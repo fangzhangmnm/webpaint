@@ -34,12 +34,12 @@ export declare const TIMELAPSE_FORCED_KEY_INTERVAL = 300;
 export declare const TIMELAPSE_FRAME_US = 100000;
 /** 尾帧定格 5s（常数不做旋钮，user 2026-08-19）。 */
 export declare const TIMELAPSE_TAIL_HOLD_US = 5000000;
-/** debounce 窗口 = 2s × (1 + n/N₀)。体积走 log 曲线，无预算无 consolidation。 */
-export declare function timelapseDebounceMs(n: number, longEdge: number): number;
+/** debounce 窗口 = 固定 2s（平采样）。调和衰减 `2s × (1 + n/N₀)` park，签名保留以便复议。 */
+export declare function timelapseDebounceMs(_n: number, _longEdge: number): number;
 /**
  * 采样闸门（leading-edge：窗口开头的 commit 采，其余合并进下一帧；
  * 收尾状态永远由 F 尾帧兜底，不怕漏掉安静期前的最后一笔）。
- * n 计数所有见过的 commit（含被合并的）——衰减的自变量是干活量。
+ * n 计数所有见过的 commit（含被合并的）——现只做统计，衰减复议时是自变量。
  */
 export declare class TimelapseSampler {
     n: number;

@@ -9,6 +9,7 @@ import type { DocNode, DocLeaf } from "./gl-doc-bridge.ts";
 import type { LayerPixels } from "../tiles/tile-layer.ts";
 import type { Stamp, StrokeShape } from "./gl-stamp.ts";
 import { buildPlan } from "./render-plan.ts";
+import { residentMissTiles, residentIds } from "./frame-demand.ts";
 import type { PooledFBO } from "../../common/gl2-port.ts";
 import type { GlRoom, OverlayInput, SurrogateInput } from "./gl-room.ts";
 import { overlayEmpty } from "./gl-room.ts";
@@ -106,20 +107,32 @@ export class RasterService {
     const leafById = new Map<number, DocLeaf>();
     const planNodes = room.toPlanNodes(nodes, new Set(), overlay?.layerId ?? null, leafById);
     const plan = buildPlan(planNodes, new Set(), bg === "checker" ? "checker" : bg ? "color" : "none");
-    const all = new Set<number>(plan.liveLeaves);
-    for (const b of plan.builds.values()) for (const id of b.members) all.add(id);
-    for (const id of all) {
+    // 驻留准入（v0.10.8，与 renderFrame 同口径，病史见 frame-demand.ts）：一次性合成全走
+    //   transient（零拷贝目标），需求 = miss 上传数。旧版**完全没有 reserve**——冷池（64 slot）
+    //   上保存/导出会走同一条连环驱逐路，mergedimage/导出图静默缺层。
+    //   reserve 被拒（超 quota）也没关系：下面逐段就地驻留，成员 sync 紧贴该段合成。
+    const builds = [...plan.builds.values()];
+    room.pool.reserve(room.pool.allocatedCount
+      + residentMissTiles(residentIds(plan.liveLeaves, builds), (id) => leafById.get(id)?.pixels, (cpuId) => room.bridge.hasLive(cpuId)));
+    let surrogateSynced = false;   // 同叶重复 sync：真叶走身份快路径免费；平面替身重传不免费，闸一次
+    const syncOne = (id: number) => {
       if (surrogate && id === surrogate.layerId) {
+        if (surrogateSynced) return;
+        surrogateSynced = true;
         // 影子变体（C6 stroke 替身叶）增量 sync；平面变体（adjust）全 bbox 重传。
         if ("pixels" in surrogate) room.syncLeafSafe(id, surrogate.pixels, docW, docH);
         else room.syncSurrogate(surrogate, docW, docH);
-        continue;
+        return;
       }
       const leaf = leafById.get(id); if (leaf) room.syncLeafSafe(id, leaf.pixels, docW, docH);
-    }
+    };
+    for (const id of plan.liveLeaves) syncOne(id);
     room.comp.begin(docW, docH);
     const transient = new Map<string, PooledFBO>();
-    for (const b of plan.builds.values()) transient.set(b.key, room.composeSegTransient(b, docW, docH, bg));
+    for (const b of builds) {
+      for (const id of b.members) syncOne(id);
+      transient.set(b.key, room.composeSegTransient(b, docW, docH, bg));
+    }
     const acc = room.comp.newAcc(docW, docH, plan.rootBgLive ? bg : undefined);
     room.composeSteps(plan.rootSteps, acc, docW, docH, transient, null);
     const out = room.comp.finishAcc(acc);

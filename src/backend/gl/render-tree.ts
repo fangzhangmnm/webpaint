@@ -20,6 +20,7 @@ import type { Background, ScreenGridBg } from "./gl-compositor.ts";
 import type { DocNode, DocLeaf } from "./gl-doc-bridge.ts";
 import { buildPlan } from "./render-plan.ts";
 import type { Plan, PlanStep, SegBuild, BgKind } from "./render-plan.ts";
+import { residentMissTiles, segCopyTiles, residentIds, admitWithRegrow } from "./frame-demand.ts";
 import type { PooledFBO } from "../../common/gl2-port.ts";
 import type { GlRoom, FloatInput, OverlayInput, SurrogateInput } from "./gl-room.ts";
 
@@ -123,43 +124,57 @@ export class RenderTree {
     }
     this._lastPlan = plan;
 
-    // 缺段判定 + 孤儿段回收（key 不在本分区 → 丢记录）。
-    const missing: SegBuild[] = [];
-    for (const key of plan.cacheKeys) {
-      const seg = this._segCache.get(key);
-      if (seg && this._segValid(seg)) { this.frameStats.segHits++; continue; }
-      if (seg) { seg.index.dispose(); this._segCache.delete(key); }
-      missing.push(plan.builds.get(key)!);
-    }
+    // 孤儿段回收（key 不在本分区 → 丢记录）。
     for (const key of [...this._segCache.keys()]) if (!plan.cacheKeys.has(key)) { this._segCache.get(key)!.index.dispose(); this._segCache.delete(key); }
 
-    // 容量预检：live 叶 + 缺段覆盖（估算）。放不下 → 本帧不建段（segs 走临时 acc 直算，慢但对）。
-    let needed = 0;
-    for (const id of plan.liveLeaves) needed += leafById.get(id)?.pixels.tileCount ?? 0;
+    // 驻留准入（v0.10.8 深修，病史见 frame-demand.ts 头注）：
+    //   缺段判定 + 需求精算（miss 上传 + 拷贝目标，成员驻留**必须**计入——夏音案病根①）
+    //   + 两段式 reserve（grow=recreate 会使刚判定「命中」的段全体作废 → 重扫重估——病根②）。
+    //   放不下（到 quota 顶）→ 本帧不建段缓存，但段照样逐段驻留合成（transient），慢但对。
     const allTiles = tilesAcross(docW) * tilesDown(docH);
-    for (const b of missing) needed += b.withBg ? allTiles : this._coverageEstimate(b, leafById);
-    const cachingEnabled = room.pool.reserve(room.pool.allocatedCount + needed);
+    const scanMissing = (): SegBuild[] => {
+      this.frameStats.segHits = 0;
+      const out: SegBuild[] = [];
+      for (const key of plan.cacheKeys) {
+        const seg = this._segCache.get(key);
+        if (seg && this._segValid(seg)) { this.frameStats.segHits++; continue; }
+        if (seg) { seg.index.dispose(); this._segCache.delete(key); }
+        out.push(plan.builds.get(key)!);
+      }
+      return out;
+    };
+    const leafOf = (id: number) => leafById.get(id)?.pixels;
+    const demandOf = (ms: SegBuild[]) => {
+      let n = residentMissTiles(residentIds(plan.liveLeaves, ms), leafOf, (cpuId) => room.bridge.hasLive(cpuId));
+      for (const b of ms) n += segCopyTiles(b, leafOf, allTiles, tilesAcross(docW));
+      return n;
+    };
+    const { ok: cachingEnabled, missing } = admitWithRegrow(room.pool, scanMissing, demandOf);
     this.frameStats.cachingDegraded = !cachingEnabled;
 
-    // sync：live 叶 + （建段时）缺段成员。surrogate 叶从替身 canvas 换源。
-    const toSync = new Set<number>(plan.liveLeaves);
-    if (cachingEnabled) for (const b of missing) for (const id of b.members) toSync.add(id);
-    for (const id of toSync) {
+    // sync 一叶（surrogate 叶从替身换源；surrogate/updated 恒 live，不会藏在段成员里）。
+    const syncOne = (id: number) => {
       if (surrogate && id === surrogate.layerId) {
         // 影子变体（C6 stroke 替身叶）：真 LayerPixels，走增量 sync；平面变体（adjust）全 bbox 重传。
         if ("pixels" in surrogate) room.syncLeafSafe(id, surrogate.pixels, docW, docH);
         else room.syncSurrogate(surrogate, docW, docH);
-        continue;
+        return;
       }
       const leaf = leafById.get(id);
       if (leaf) room.syncLeafSafe(id, leaf.pixels, docW, docH);
-    }
+    };
+    for (const id of plan.liveLeaves) syncOne(id);
 
-    // 合成
+    // 合成：逐段「就地 sync 成员 → 立刻合成」——sync 与 compose 之间不再隔着其他段的上传
+    //   （驱逐窗口=0；准入被拒时后段的 sync 只可能驱逐**已合成完**的前段成员，正确性不受损）。
+    //   live 叶 tile 由 pin provider 保 required 档，不会被段成员上传挤掉。
     room.comp.begin(docW, docH);
     const transient = new Map<string, PooledFBO>();   // 建不了的段本帧的临时合成结果（复用，别重算）
-    if (cachingEnabled) for (const b of missing) this._buildSeg(b, docW, docH, bg, transient);
-    else for (const b of missing) transient.set(b.key, room.composeSegTransient(b, docW, docH, bg));
+    for (const b of missing) {
+      for (const id of b.members) syncOne(id);
+      if (cachingEnabled) this._buildSeg(b, docW, docH, bg, transient);
+      else transient.set(b.key, room.composeSegTransient(b, docW, docH, bg));
+    }
     const acc = room.comp.newAcc(docW, docH, plan.rootBgLive ? bg : undefined);
     room.composeSteps(plan.rootSteps, acc, docW, docH, transient, (key) => this._segCache.get(key)?.index);
     const fresh = room.comp.finishAcc(acc);
@@ -193,12 +208,6 @@ export class RenderTree {
   private _invalidateSegs(): void {
     for (const seg of this._segCache.values()) seg.index.dispose();
     this._segCache.clear();
-  }
-
-  private _coverageEstimate(b: SegBuild, leafById: Map<number, DocLeaf>): number {
-    let n = 0;
-    for (const id of b.members) n += leafById.get(id)?.pixels.tileCount ?? 0;
-    return n;
   }
 
   // ---- 内部：段建造 ----

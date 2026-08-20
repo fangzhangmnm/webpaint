@@ -22,7 +22,6 @@ export declare class RenderTree {
     private _planSig;
     private _segValid;
     private _invalidateSegs;
-    private _coverageEstimate;
     private _buildSeg;
     private _present;
 }

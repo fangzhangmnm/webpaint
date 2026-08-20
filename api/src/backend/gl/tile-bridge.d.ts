@@ -13,6 +13,7 @@ export declare class CpuGpuTileBridge {
     constructor(pool: GpuTilePool);
     ensureUploaded(entries: UploadEntry[]): number[];
     registerPair(cpuId: number, gpuId: number): void;
+    hasLive(cpuId: number): boolean;
     purgeDead(cpuAlive: (cpuId: number) => boolean): void;
     clear(): void;
     get size(): number;

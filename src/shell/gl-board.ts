@@ -44,6 +44,8 @@ export class GLBoard {
   get stats(): { passes: number; floatPasses: number } { return this._room.stats; }
   get fboPoolStats(): { count: number; bytes: number } { return this._room.fboPoolStats; }
   get frameStats() { return this._tree.frameStats; }
+  // 驻留降级累计（v0.10.8）：syncLeafSafe 吞掉的 GPU_POOL_EXHAUSTED 次数（board 盯涨出声）。
+  get syncDrops(): number { return this._room.syncStats.drops; }
   markContentDirty(): void { this._tree.markDirty(); }
 
   // S8 brush commit：merge(base⊕stroke) 在 GPU（live 同一 shader）→ tile-diff 落盘 → GPU 收养。

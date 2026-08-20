@@ -35,6 +35,7 @@ export declare class GLBoard {
         segHits: number;
         cachingDegraded: boolean;
     };
+    get syncDrops(): number;
     markContentDirty(): void;
     commitBrushStroke(leafId: number, pixels: LayerPixels, ov: OverlayInput, docW: number, docH: number, apply: (px: Uint8ClampedArray, x: number, y: number, w: number, h: number) => {
         tx: number;
