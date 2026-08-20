@@ -8,10 +8,10 @@
 
 ### 怎么用？
 
-1. 点开：https://fangzhangmnm.github.io/weebpaint/
+1. 点开：https://weebpaint.com/
 2. 开始画
 
-尝鲜通道（nightly）：https://fangzhangmnm.github.io/weebpaint/dev/ ——最新功能先到这里，但可能带着还没修完的 bug；正式版链接稳定优先。两个通道的本地数据互相独立。
+尝鲜通道（nightly）：https://weebpaint.com/dev/ ——最新功能先到这里，但可能带着还没修完的 bug；正式版链接稳定优先。两个通道的本地数据互相独立。
 
 ## 这是一款什么样的软件
 
@@ -234,7 +234,7 @@ WeebPaint 是 PWA（Progressive Web App），不用进 App Store，浏览器直�
 
 #### iPad / iPhone (Safari)
 
-1. 用 Safari 打开 https://fangzhangmnm.github.io/weebpaint/
+1. 用 Safari 打开 https://weebpaint.com/
 2. 底部「分享」(↑ 框) 图标
 3. 选「添加到主屏幕」
 4. 主屏出现 WeebPaint 图标，点开 = 全屏 PWA，没浏览器边框，跟原生 App 一样
