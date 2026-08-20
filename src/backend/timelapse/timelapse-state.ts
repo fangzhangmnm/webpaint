@@ -13,7 +13,7 @@ export interface TimelapseJsonV1 {
   on: boolean;              // sticky：跨 session 续录开关
   aspect: [number, number]; // pin 的比例（开录烤死）
   longEdge: number;         // pin 的最长边
-  n: number;                // 调和衰减 commit 计数
+  n: number;                // 累计 commit 计数（衰减 park 中仍持久化，复议时无缝续）
   motionSamples: number;    // mp4 里前多少个样本是运动帧（其余=尾帧，回读时截掉）
 }
 

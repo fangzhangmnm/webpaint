@@ -2,6 +2,7 @@
 
 > as-of 2026-08-19 · 基线 main=e052714 (v0.9.10) · 本文 = 2026-08-19 grill 收敛终稿，**已获实现 consent**（含 ora 格式新 entry 的显式同意，见 §5）。
 > supersedes `docs/20260727-timelapse-design.md`（只存在于分支 worktree-timelapse-doc@628ed8d，从未 merge）。翻案项标 ⚡ 并注明旧案，防止实现者读到旧 doc 时被带偏。
+> **修正案 2026-08-20（user 原话：「录像还是不要compact不要自动缩。先做成平的，等我第一个视频录好了再论证」）**：§2 调和衰减 **park**——采样窗口先做平的（固定 2s，不随 n 变），n 计数与 N₀ 常数保留在码里等复议。§2 的衰减公式段落照旧留档，读时按本条覆盖。
 
 读者预设：不熟 WebPaint 的实现 agent。目标场景 = **宣发素材**（找画手用 WebPaint 画图发视频引流）+ 学习分享。7-27 旧 doc 的场景 1「proof of work」已随 opt-in 决策一起死（见 §3）。
 

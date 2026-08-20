@@ -1,5 +1,6 @@
-// Timelapse 核心域：取景框几何 / 调和衰减采样 / 帧合成（纯数学，node 可测）。
+// Timelapse 核心域：取景框几何 / 采样闸门 / 帧合成（纯数学，node 可测）。
 // spec = ai-docs/20260819-timelapse-spec.md。翻案史勿回 docs/20260727 旧案（分段/预算/consolidation 全废）。
+// ⚡ 2026-08-20 user：调和衰减 park——采样先做平的（固定 2s 窗口），等第一个真视频录出来再论证。
 import { areaResampleBytes } from "../algorithms/resample-bytes.ts";
 
 // ---- 取景框（开录 pin 死，中途不可改；改 = 清除重录） ----
@@ -39,7 +40,7 @@ export function timelapseFitRect(cw: number, ch: number, fw: number, fh: number)
 // 数据/契约层一律裸字节数（单位双层制，UX 显示才走 KiB/MiB）。
 
 interface TierConst {
-  n0: number;           // 调和衰减常数：全速录 1 个参考 MiB 的 commit 数
+  n0: number;           // 调和衰减常数（衰减已 park，现不参与采样；留着等真视频论证）
   motionBps: number;    // 运动编码器 M 目标码率（10fps 虚拟节奏下的 bps）
   tailBps: number;      // 尾帧编码器 F 码率（1fps 单帧，全部码字给一张 IDR）
   refBytes: number;     // 选单参考体积（一位有效数字口径；「约」不是承诺）
@@ -60,7 +61,7 @@ export function timelapseTier(longEdge: number): TierConst {
   return t;
 }
 
-// ---- 调和衰减采样（spec §2 核心公式；按 commit 数不按时间——time-is-ticking 焦虑，user 拍板） ----
+// ---- 采样闸门（⚡ 平采样：调和衰减 park，user 2026-08-20「先做成平的，等第一个视频录好再论证」） ----
 
 export const TIMELAPSE_BASE_DEBOUNCE_MS = 2000;
 /** 每 N 帧强制一张 IDR（seek 保底）。 */
@@ -70,15 +71,15 @@ export const TIMELAPSE_FRAME_US = 100_000;
 /** 尾帧定格 5s（常数不做旋钮，user 2026-08-19）。 */
 export const TIMELAPSE_TAIL_HOLD_US = 5_000_000;
 
-/** debounce 窗口 = 2s × (1 + n/N₀)。体积走 log 曲线，无预算无 consolidation。 */
-export function timelapseDebounceMs(n: number, longEdge: number): number {
-  return TIMELAPSE_BASE_DEBOUNCE_MS * (1 + n / timelapseTier(longEdge).n0);
+/** debounce 窗口 = 固定 2s（平采样）。调和衰减 `2s × (1 + n/N₀)` park，签名保留以便复议。 */
+export function timelapseDebounceMs(_n: number, _longEdge: number): number {
+  return TIMELAPSE_BASE_DEBOUNCE_MS;
 }
 
 /**
  * 采样闸门（leading-edge：窗口开头的 commit 采，其余合并进下一帧；
  * 收尾状态永远由 F 尾帧兜底，不怕漏掉安静期前的最后一笔）。
- * n 计数所有见过的 commit（含被合并的）——衰减的自变量是干活量。
+ * n 计数所有见过的 commit（含被合并的）——现只做统计，衰减复议时是自变量。
  */
 export class TimelapseSampler {
   n: number;

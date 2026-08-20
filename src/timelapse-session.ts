@@ -68,7 +68,7 @@ export function timelapseAdopt(loaded: { _timelapseJson?: string; _timelapseMp4?
 
 function _onCommit(): void {
   if (_detached || !_doc || _supported !== true || !_st.active || !_st.settings) return;
-  if (!_st.noteCommit(Date.now())) return;   // 调和衰减 debounce（n 照涨）
+  if (!_st.noteCommit(Date.now())) return;   // 平采样 debounce（衰减 park；n 照涨）
   void _captureFrame();
 }
 

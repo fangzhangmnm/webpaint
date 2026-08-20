@@ -1,4 +1,4 @@
-// Timelapse 核心域验收：取景框几何 / 调和衰减 / 帧合成 / mux↔demux round-trip / 录制态自愈 / 编码器注入槽。
+// Timelapse 核心域验收：取景框几何 / 平采样闸门 / 帧合成 / mux↔demux round-trip / 录制态自愈 / 编码器注入槽。
 // spec = ai-docs/20260819-timelapse-spec.md
 import { describe, it, assert, eq } from "./runner.mjs";
 const jeq = (a, b, msg) => eq(JSON.stringify(a), JSON.stringify(b), msg);   // eq 是严格 ===，对象/数组走序列化比较
@@ -28,14 +28,14 @@ describe("timelapse · 取景框", () => {
   it("fit：小画布允许放大（诚实占满）", () => eq(timelapseFitRect(64, 64, 512, 512).dw, 512));
 });
 
-// ---- 调和衰减 ----
+// ---- 采样闸门（⚡ 平采样：调和衰减 park，user 2026-08-20；等第一个真视频再论证） ----
 
-describe("timelapse · 调和衰减", () => {
-  it("n=0 → 基础 2s；n=N₀ → 4s；n=3N₀ → 8s（线性走调和）", () => {
+describe("timelapse · 平采样", () => {
+  it("debounce 窗口平的：n 涨到天上去也还是基础 2s", () => {
     const n0 = timelapseTier(512).n0;
     eq(timelapseDebounceMs(0, 512), TIMELAPSE_BASE_DEBOUNCE_MS);
-    eq(timelapseDebounceMs(n0, 512), TIMELAPSE_BASE_DEBOUNCE_MS * 2);
-    eq(timelapseDebounceMs(3 * n0, 512), TIMELAPSE_BASE_DEBOUNCE_MS * 4);
+    eq(timelapseDebounceMs(n0, 512), TIMELAPSE_BASE_DEBOUNCE_MS);
+    eq(timelapseDebounceMs(100 * n0, 512), TIMELAPSE_BASE_DEBOUNCE_MS);
   });
   it("未知档位 throw（防手滑塞任意分辨率）", () => {
     let threw = false;
@@ -50,7 +50,7 @@ describe("timelapse · 调和衰减", () => {
     eq(s.n, 3);
     assert(s.noteCommit(1000 + timelapseDebounceMs(4, 512) + 1) === true, "过窗采帧");
   });
-  it("sampler：n 从持久化值续起（衰减跨 session 连续）", () => {
+  it("sampler：n 从持久化值续起（跨 session 统计连续）", () => {
     const s = new TimelapseSampler(512, 1000);
     s.noteCommit(0);
     eq(s.n, 1001);
