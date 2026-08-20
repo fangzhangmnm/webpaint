@@ -134,6 +134,9 @@ export function initSelectionOps(ctx: AppContext) {
     const dbl = isDoubleCopy(_lastCopyAt, now);
     _lastCopyAt = now;
     if (dbl) { window.dispatchEvent(new CustomEvent("wp:copyMerged")); return; }
+    // v0.9.26（user 真机反馈 2026-08-20：「float 没落地的时候 ctrl c 无反应」）：按决定性动作惯例
+    //   （saveNow/导入收口同款）先 commit 悬着的 transform 再复制——用户按 Ctrl+C 的意图是"拿走现在看到的"。
+    if (editMode.hasPendingTransient()) editMode.applyPendingTransient();
     const got = grabActiveLayerBytes();
     if (!got) return;
     try {
@@ -146,6 +149,7 @@ export function initSelectionOps(ctx: AppContext) {
   // Ctrl+Shift+C / 双击 Ctrl+C：合并复制——合成图 ∩ 选区 mask（无选区 = 整张合成图）。
   // 零配置直出透明 PNG（不吃导出菜单 defringe/bg 配置——快捷键是反射动作，配置留给导出菜单）。
   window.addEventListener("wp:copyMerged", async () => {
+    if (editMode.hasPendingTransient()) editMode.applyPendingTransient();   // 浮层先落地：合成里才有它（v0.9.26）
     const sel = doc.selection as unknown as Selection | null;
     const rect = sel ? { x: sel.bboxX, y: sel.bboxY, w: sel.bboxW, h: sel.bboxH } : null;
     const mask = sel ? sel.materializeMaskRegion(sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH) : null;
@@ -159,6 +163,7 @@ export function initSelectionOps(ctx: AppContext) {
   // Ctrl+X：剪切 = 复制 + 从活层擦除（选区形状 dst-out；无选区 = 清整层 bbox）。一次 undo。
   // 复制失败就不擦——剪切绝不许退化成纯删除（数据安全词典序）。
   window.addEventListener("wp:cut", async () => {
+    if (editMode.hasPendingTransient()) editMode.applyPendingTransient();   // 浮层先落地再剪（v0.9.26，同 Ctrl+C）
     const got = grabActiveLayerBytes();
     if (!got) return;
     try { await writePngBytes(got.px); }

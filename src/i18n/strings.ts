@@ -31,6 +31,7 @@ export const S = {
   "menu.backToGallery": { zh: "回到图库",      en: "Back to gallery", ja: "ギャラリーに戻る", tok: "o tawa tomo sitelen" },
   "menu.newArtwork":    { zh: "新建…",         en: "New…",            ja: "新規…",         tok: "sitelen sin…" },
   "menu.openLocalFile": { zh: "打开本地文件…", en: "Open local file…", ja: "ローカルファイルを開く…", tok: "o open e lipu lon ilo ni…" },
+  "menu.installApp": { zh: "安装 WebPaint 到桌面", en: "Install WebPaint", ja: "WebPaint をインストール", tok: "o pana e WebPaint tawa supa ilo" },
   "nav.trash":      { zh: "回收站",            en: "Trash",           ja: "ゴミ箱", tok: "poki jaki" },
   "save.tip":       { zh: "保存 / 上传",       en: "Save / Upload",   ja: "保存 / アップロード", tok: "awen / pana tawa poki sewi" },
   "enc.locked":     { zh: "已加密 · 点击解除加密", en: "Encrypted · tap to decrypt", ja: "暗号化済み · タップで解除", tok: "ni li len. sina luka e ni la len li weka." },
