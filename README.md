@@ -11,6 +11,8 @@
 1. 点开：https://fangzhangmnm.github.io/weebpaint/
 2. 开始画
 
+尝鲜通道（nightly）：https://fangzhangmnm.github.io/weebpaint/dev/ ——最新功能先到这里，但可能带着还没修完的 bug；正式版链接稳定优先。两个通道的本地数据互相独立。
+
 ## 这是一款什么样的软件
 
 ### 开源 = 你可以按需修改
