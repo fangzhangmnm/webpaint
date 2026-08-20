@@ -130,15 +130,25 @@ export function initSelectionOps(ctx: AppContext) {
   // v0.9.22 双击升级（human 拍板）：短窗内第二次 = 合并复制覆写（第一下已照常入剪贴板，无丢失）。
   let _lastCopyAt = 0;
   window.addEventListener("wp:copy", async () => {
+    // v0.9.27→28（user 两轮勘误 2026-08-20）：复制是**读操作，零副作用**（不 commit——PS 变换期
+    //   copy 置灰；收口惯例只属于写操作=粘贴/保存）。但「浮层的时候应该也能 ctrl c」——所以浮层期
+    //   复制的是**浮层当前的样子**（含变换，只读烤制到透明底；比先 commit 再复制还多带画布外像素）。
+    //   烤不出（非刚体且 GL 不可用）→ 明确 toast（明确反馈 > 无响应，user 拍板）。
+    //   浮层分支放在双击判窗**之前**：浮层期连按两下 = 两次复制浮层，不升级 merged（merged 在
+    //   浮层期本就软拒——合成树里没有浮层，升级只会换来一句拒绝）。
+    if (input.lasso.hasFloating()) {
+      const px = input.lasso.renderFloatingBytes();
+      if (!px || px.w <= 0 || px.h <= 0) { setStatus(t("se.floatCopyUnavailable"), true); return; }
+      try {
+        await writePngBytes({ data: px.data, w: px.w, h: px.h });
+        setStatus(t("se.copiedFloatToClipboard"));
+      } catch (e) { reportError(new Error(t("se.copyFailed", { error: errMsg(e) })), "warning"); }
+      return;
+    }
     const now = Date.now();
     const dbl = isDoubleCopy(_lastCopyAt, now);
     _lastCopyAt = now;
     if (dbl) { window.dispatchEvent(new CustomEvent("wp:copyMerged")); return; }
-    // v0.9.27（user 勘误 2026-08-20：「ctrl c 在浮层时反而不应该 commit」，推翻 v0.9.26 的收口）：
-    //   复制是**读操作，零副作用**——把 commit 变换当 Ctrl+C 的副作用很怪（PS 变换期 copy 直接置灰）。
-    //   浮层期软拒 + 明确 toast（v0.9.26 之前的问题是「无反应」，修的是反馈缺失不是语义）。
-    //   收口惯例只属于**写操作**：粘贴（importImageAsLayer 连贴自动 enter）、保存（saveNow）。
-    if (input.lasso.hasFloating()) { setStatus(t("se.floatBeforeClipboard"), true); return; }
     const got = grabActiveLayerBytes();
     if (!got) return;
     try {

@@ -532,6 +532,9 @@ export class LassoEngine {
   _warpBakeProvider: (() => WarpBakeFn | null) | null = null;
   setWarpBakeProvider(fn: (() => WarpBakeFn | null) | null) { this._warpBakeProvider = fn; }
   stamp() { return this._ft.stamp(this._warpBakeProvider?.() ?? null); }
+  // v0.9.28 只读烤制（Ctrl+C 复制浮层）：当前浮层烤成透明底字节（doc 坐标 rect），零副作用
+  //   （不落层不进栈）。非刚体且 GL 不可用 → null（调用方明确 toast）。
+  renderFloatingBytes() { return this._ft.bakeStandalone(this._warpBakeProvider?.() ?? null); }
   // accept：烤层 + 收摊浮层，一个 compound 整点（operator 编排全在 FloatingTransform；
   //   旧「手拼 entry → input 再 push」链 v0.4.7 死）。返回是否真提交了。
   commit(): boolean {

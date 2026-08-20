@@ -550,6 +550,76 @@ export class FloatingTransform {
     return r.ok;
   }
 
+  // v0.9.28 只读烤制（user 2026-08-20：「浮层的时候应该也能 ctrl c」）：与 _bakeDown 同一套采样
+  //   路径（刚体快路零重采样 / GPU warp），但**不落层、不进栈、零副作用**——各 float 烤成独立字节块
+  //   后 source-over 合成到透明底，返回 doc 坐标 rect + straight RGBA。浮层可越出画布：**不夹 doc**，
+  //   复制带走全部像素（这正是它比"先 commit 再复制"强的地方——commit 会把画布外那圈裁死）。
+  //   非刚体且 bakeFn 缺席（GL 不可用）→ 返回 null，调用方给明确 toast（不出半个结果=不说谎）。
+  bakeStandalone(bakeFn: WarpBakeFn | null): { x: number; y: number; w: number; h: number; data: Uint8ClampedArray } | null {
+    const fs = this._float?.view();
+    if (!fs || !this._live || !fs.floats.length) return null;
+    const lv = this._live;
+    const parts: { x: number; y: number; w: number; h: number; data: Uint8ClampedArray }[] = [];
+    for (const f of fs.floats) {
+      const dq = sourceDestQuad(f.rect, lv.gizmoFrame, lv.mesh);
+      const rigid = dq ? integerRigidOf(f.rect, dq) : null;
+      if (rigid) {
+        if (rigid.dw <= 0 || rigid.dh <= 0) continue;
+        const src = floatBytes(f);
+        const out = new Uint8ClampedArray(rigid.dw * rigid.dh * 4);
+        for (let v = 0; v < rigid.dh; v++) {
+          for (let u = 0; u < rigid.dw; u++) {
+            const sx = rigid.m11 * u + rigid.m12 * v + rigid.s0x;
+            const sy = rigid.m21 * u + rigid.m22 * v + rigid.s0y;
+            if (sx < 0 || sx >= src.w || sy < 0 || sy >= src.h) continue;
+            const si = (sy * src.w + sx) * 4, di = (v * rigid.dw + u) * 4;
+            out[di] = src.data[si]; out[di + 1] = src.data[si + 1]; out[di + 2] = src.data[si + 2]; out[di + 3] = src.data[si + 3];
+          }
+        }
+        parts.push({ x: rigid.dx0, y: rigid.dy0, w: rigid.dw, h: rigid.dh, data: out });
+        continue;
+      }
+      if (!bakeFn) return null;
+      const wp = sourceWarpMatrix(f, lv.gizmoFrame, lv.mesh);
+      if (!wp || wp.bw <= 0 || wp.bh <= 0) continue;
+      let rendered;
+      if (this._sampleMode === "rotsprite") {
+        const up = floatRotspritePlane(f);
+        rendered = bakeFn(up, up.w, up.h, wp.hinv, 0, wp.bx, wp.by, wp.bw, wp.bh);
+      } else {
+        const mode = this._sampleMode === "nearest" ? 0 : this._sampleMode === "bicubic" ? 2 : this._sampleMode === "spline" ? 3 : 1;
+        const src = this._sampleMode === "spline" ? floatSplinePlane(f) : floatBytes(f);
+        rendered = bakeFn(src, f.rect.w, f.rect.h, wp.hinv, mode, wp.bx, wp.by, wp.bw, wp.bh);
+      }
+      if (rendered && rendered.w > 0 && rendered.h > 0) parts.push({ x: rendered.dstX, y: rendered.dstY, w: rendered.w, h: rendered.h, data: rendered.data });
+    }
+    if (!parts.length) return null;
+    if (parts.length === 1) return parts[0];
+    // 多 float：并集 bbox 透明底逐块 source-over（straight alpha，与 composeOverWriteback 同式；顺序=floats 序）
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of parts) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x + p.w); y1 = Math.max(y1, p.y + p.h); }
+    const W = x1 - x0, H = y1 - y0;
+    const out = new Uint8ClampedArray(W * H * 4);
+    for (const p of parts) {
+      for (let v = 0; v < p.h; v++) {
+        for (let u = 0; u < p.w; u++) {
+          const si = (v * p.w + u) * 4;
+          const sa = p.data[si + 3];
+          if (!sa) continue;
+          const di = ((v + p.y - y0) * W + (u + p.x - x0)) * 4;
+          const da = out[di + 3];
+          if (sa === 255 || !da) { out[di] = p.data[si]; out[di + 1] = p.data[si + 1]; out[di + 2] = p.data[si + 2]; out[di + 3] = sa; continue; }
+          const oa = sa + da * (255 - sa) / 255;
+          out[di]     = Math.round((p.data[si]     * sa + out[di]     * da * (255 - sa) / 255) / oa);
+          out[di + 1] = Math.round((p.data[si + 1] * sa + out[di + 1] * da * (255 - sa) / 255) / oa);
+          out[di + 2] = Math.round((p.data[si + 2] * sa + out[di + 2] * da * (255 - sa) / 255) / oa);
+          out[di + 3] = Math.round(oa);
+        }
+      }
+    }
+    return { x: x0, y: y0, w: W, h: H, data: out };
+  }
+
   // -------- accept / reject --------
   // accept（commit）：各 float 烤进源层 + FloatLayerComponent.drop 收摊，一个令牌整点。
   //   选区在 lift 时已清（spec:213）——accept 不再碰 selection（现状「清」保持，UX 待人类拍板）。

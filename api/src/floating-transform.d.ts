@@ -105,6 +105,13 @@ export declare class FloatingTransform {
     private _bakeDown;
     private _leafFor;
     stamp(bakeFn?: WarpBakeFn | null): boolean;
+    bakeStandalone(bakeFn: WarpBakeFn | null): {
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+        data: Uint8ClampedArray;
+    } | null;
     commit(bakeFn?: WarpBakeFn | null): boolean;
     cancel(): boolean;
     getFloatingScreenBbox(): number[] | null;

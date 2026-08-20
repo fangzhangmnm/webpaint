@@ -5238,6 +5238,24 @@ export declare const S: {
         readonly ja: "現在のレイヤーをクリップボードに切り取りました";
         readonly tok: "lipu ni li kipisi tawa poki kipisi";
     };
+    readonly "se.floatBeforeClipboard": {
+        readonly zh: "浮层未落地：Enter 应用或 Esc 取消后再进行此操作";
+        readonly en: "Floating transform pending: press Enter to apply or Esc to cancel first";
+        readonly ja: "浮遊変形が未確定です：Enterで適用、Escで取消してから";
+        readonly tok: "lipu sewi li awen ala. o luka e Enter anu Esc lon tenpo open.";
+    };
+    readonly "se.copiedFloatToClipboard": {
+        readonly zh: "已复制浮层到剪贴板";
+        readonly en: "Copied floating layer to clipboard";
+        readonly ja: "浮遊レイヤーをクリップボードにコピーしました";
+        readonly tok: "lipu sewi li tawa poki kipisi";
+    };
+    readonly "se.floatCopyUnavailable": {
+        readonly zh: "浮层复制暂不可用（需要 WebGL）";
+        readonly en: "Copying the floating layer is unavailable (WebGL required)";
+        readonly ja: "浮遊レイヤーのコピーは現在利用できません（WebGL が必要）";
+        readonly tok: "pana pi lipu sewi li ken ala lon tenpo ni";
+    };
     readonly "se.copyFailed": {
         readonly zh: "复制失败：{error}";
         readonly en: "Copy failed: {error}";

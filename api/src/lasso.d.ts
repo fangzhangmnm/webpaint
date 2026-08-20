@@ -174,6 +174,13 @@ export declare class LassoEngine {
     _warpBakeProvider: (() => WarpBakeFn | null) | null;
     setWarpBakeProvider(fn: (() => WarpBakeFn | null) | null): void;
     stamp(): boolean;
+    renderFloatingBytes(): {
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+        data: Uint8ClampedArray;
+    } | null;
     commit(): boolean;
     cancel(): boolean;
     hasFloating(): boolean;
