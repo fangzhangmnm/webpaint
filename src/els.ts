@@ -83,6 +83,7 @@ export const els = {
   addNew: byId("addNew"),
   addImportPhoto: byId("addImportPhoto"),
   addImportClipboard: byId("addImportClipboard"),
+  addImportCloud: byId("addImportCloud"),
   cloudIconBtn: byId("cloudIconBtn"),
   cloudAccountPopup: byId("cloudAccountPopup"),
   cloudAccountInfo: byId("cloudAccountInfo"),

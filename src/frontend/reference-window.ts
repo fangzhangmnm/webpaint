@@ -26,7 +26,7 @@ export interface RefPanelRect { left: number; top: number; width: number; height
 export type RefBitmapSource = (ImageBitmap | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas) & { close?: () => void };
 export interface SetBitmapOpts { persistBlob?: Blob | null; skipFit?: boolean; }   // skipFit：doc 恢复时保住载入的 vp
 export type RefLiveSource = HTMLCanvasElement | OffscreenCanvas | ImageBitmap;
-export interface RefLabels { load?: string; live?: string; fit?: string; close?: string; resize?: string; resizeAria?: string; }
+export interface RefLabels { load?: string; cloud?: string; live?: string; fit?: string; close?: string; resize?: string; resizeAria?: string; }
 
 const REF_LONG_PRESS_MS = 450;                // 长按吸色延迟（对齐 input.ts）
 const REF_LONG_PRESS_CANCEL_SQ = 64;          // 8px²：长按期间移动超此 → 取消，回 pan
@@ -47,6 +47,7 @@ const ICON_FOLDER = `<svg ${SVG_ATTRS}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0
 const ICON_PIP = `<svg ${SVG_ATTRS}><rect x="3" y="4" width="18" height="14" rx="2"/><rect x="12" y="10" width="7" height="5" rx="1"/></svg>`;
 const ICON_MAXVP = `<svg ${SVG_ATTRS}><polyline points="4 9 4 4 9 4"/><polyline points="20 9 20 4 15 4"/><polyline points="4 15 4 20 9 20"/><polyline points="20 15 20 20 15 20"/></svg>`;
 const ICON_X = `<svg ${SVG_ATTRS}><path d="M6.5 6.5 L17.5 17.5 M17.5 6.5 L6.5 17.5"/></svg>`;
+const ICON_CLOUD = `<svg ${SVG_ATTRS}><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>`;   // sprite#cloud（从云盘选参考图，spec 20260820 §4）
 
 // chrome 样式 = 旧 styles.css 的 .float-panel(-head/-title/-close) + .reference-* 逐条翻入 shadow；
 // 宿主文档样式对 host 元素（position/z-index 覆盖等）仍然生效——document 规则赢过 :host 默认。
@@ -128,6 +129,7 @@ canvas:active { cursor: grabbing; }
 <div class="head" part="head">
   <span class="title" part="title"><slot name="title">参考</slot></span>
   <button class="act" data-act="load" type="button">${ICON_FOLDER}</button>
+  <button class="act" data-act="cloud" type="button">${ICON_CLOUD}</button>
   <button class="act" data-act="live" type="button" aria-pressed="false">${ICON_PIP}</button>
   <button class="act" data-act="fit" type="button">${ICON_MAXVP}</button>
   <button class="close" data-act="close" type="button">${ICON_X}</button>
@@ -232,6 +234,7 @@ export class WpReferenceWindow extends HTMLElement {
       if (aria || title) b.setAttribute("aria-label", aria || title!);
     };
     set('[data-act="load"]', l.load);
+    set('[data-act="cloud"]', l.cloud);
     set('[data-act="live"]', l.live);
     set('[data-act="fit"]', l.fit);
     set('[data-act="close"]', l.close);
@@ -332,6 +335,7 @@ export class WpReferenceWindow extends HTMLElement {
   private _bind(root: ShadowRoot) {
     // 头部按钮（closest 找 data-act；head 拖窗对按钮点击让路）
     root.querySelector('[data-act="load"]')!.addEventListener("click", () => this._emit("requestload"));
+    root.querySelector('[data-act="cloud"]')!.addEventListener("click", () => this._emit("requestcloudload"));   // 云盘选图：组件只发意图，picker 是宿主知识
     root.querySelector('[data-act="live"]')!.addEventListener("click", () => this._emit("requestlivetoggle"));
     root.querySelector('[data-act="fit"]')!.addEventListener("click", () => this.fitToPanel());
     root.querySelector('[data-act="close"]')!.addEventListener("click", () => {

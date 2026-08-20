@@ -2580,6 +2580,12 @@ export declare const S: {
         readonly ja: "クリップボードから新規";
         readonly tok: "sitelen sin tan poki kipisi";
     };
+    readonly "gal.menu.newFromCloud": {
+        readonly zh: "从云盘新建…";
+        readonly en: "New from cloud…";
+        readonly ja: "クラウドから新規…";
+        readonly tok: "sitelen sin tan poki sewi…";
+    };
     readonly "gal.menu.newFolder": {
         readonly zh: "新建文件夹…";
         readonly en: "New folder…";
@@ -2676,6 +2682,12 @@ export declare const S: {
         readonly ja: "クリップボードから読み込む";
         readonly tok: "o kama jo tan poki kipisi";
     };
+    readonly "lp.foot.importCloud": {
+        readonly zh: "从云盘导入…";
+        readonly en: "Import from cloud…";
+        readonly ja: "クラウドから読み込む…";
+        readonly tok: "o kama jo tan poki sewi…";
+    };
     readonly "lp.foot.stampAll": {
         readonly zh: "合并全部为新层";
         readonly en: "Collapse all into new layer";
@@ -2699,6 +2711,60 @@ export declare const S: {
         readonly en: "Fit to window";
         readonly ja: "ウィンドウに合わせる";
         readonly tok: "suli sama lupa";
+    };
+    readonly "ref.cloud": {
+        readonly zh: "从云盘选图";
+        readonly en: "Pick from cloud";
+        readonly ja: "クラウドから選ぶ";
+        readonly tok: "o kama jo tan poki sewi";
+    };
+    readonly "cp.title": {
+        readonly zh: "从云盘选图";
+        readonly en: "Pick an image from cloud";
+        readonly ja: "クラウドから画像を選ぶ";
+        readonly tok: "o kama jo e sitelen tan poki sewi";
+    };
+    readonly "cp.root": {
+        readonly zh: "根目录";
+        readonly en: "Root";
+        readonly ja: "ルート";
+        readonly tok: "open";
+    };
+    readonly "cp.back": {
+        readonly zh: "上一级";
+        readonly en: "Up one level";
+        readonly ja: "一つ上へ";
+        readonly tok: "o tawa sewi";
+    };
+    readonly "cp.loading": {
+        readonly zh: "正在列出云端图片…";
+        readonly en: "Listing cloud images…";
+        readonly ja: "クラウドの画像を一覧中…";
+        readonly tok: "mi lukin e poki sewi…";
+    };
+    readonly "cp.empty": {
+        readonly zh: "此文件夹没有图片";
+        readonly en: "No images in this folder";
+        readonly ja: "このフォルダーに画像はありません";
+        readonly tok: "poki ni la sitelen li lon ala";
+    };
+    readonly "cp.downloading": {
+        readonly zh: "正在下载 {name}…";
+        readonly en: "Downloading {name}…";
+        readonly ja: "{name} をダウンロード中…";
+        readonly tok: "mi kama jo e {name}…";
+    };
+    readonly "cp.downloadFailed": {
+        readonly zh: "拿不到 {name}（离线且本地无缓存？）";
+        readonly en: "Could not fetch {name} (offline with no local copy?)";
+        readonly ja: "{name} を取得できません（オフラインでローカルコピーなし？）";
+        readonly tok: "mi ken ala kama jo e {name}";
+    };
+    readonly "cp.importFailed": {
+        readonly zh: "云盘导入失败：{err}";
+        readonly en: "Cloud import failed: {err}";
+        readonly ja: "クラウドからの読み込みに失敗：{err}";
+        readonly tok: "kama jo tan poki sewi li pakala: {err}";
     };
     readonly "ref.resizeAria": {
         readonly zh: "拖动调整窗口大小";

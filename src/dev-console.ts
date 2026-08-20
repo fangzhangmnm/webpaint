@@ -11,6 +11,7 @@ import {
   config as cloudThumbConfig,
   resetStats as cloudThumbResetStats,
 } from "./gallery/cloud-thumb-cache.ts";
+import { clearImageThumbCache } from "./gallery/image-thumbs.ts";
 
 // 调试控制台 = 一袋 console 手敲的函数（非业务）。诚实描述实际挂上的成员，index 兜底插件扩展。
 declare global {
@@ -45,6 +46,12 @@ export function initDevConsole() {
   WP.clearCloudThumbCache = async () => {
     const n = await clearCloudThumbCache();
     console.log(`[cloud-thumb] cleared ${n} cached thumbnails`);
+    return n;
+  };
+  // 云盘图片 picker 的缩略图缓存（image-thumbs store，与 ora 缩略图分开；无损可再生）
+  WP.clearImageThumbCache = async () => {
+    const n = await clearImageThumbCache();
+    console.log(`[image-thumbs] cleared ${n} cached thumbnails`);
     return n;
   };
   WP.pocFetchThumb = async function (name?: string) {

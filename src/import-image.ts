@@ -24,6 +24,7 @@ import { openChoiceSheet } from "./sheets.ts";
 import { setReferenceFromFile } from "./side-windows.ts";
 import { importGuardLimit, needsBigImportSheet } from "./clipboard-policy.ts";
 import { droppedOraHandle, consumeLaunchFiles } from "./local-file-session.ts";
+import { pickCloudImage } from "./cloud-picker-host.ts";
 import { _suppressTransientPanels, _commitTransform, _cancelTransform } from "./transient-panels.ts";
 import type { AppContext } from "./app-context.ts";
 
@@ -264,6 +265,15 @@ export function initImportImage(ctx: AppContext) {
 
   // 图层面板「导入图片」按钮 → file picker（强制叠层，复位 _addImportAsNewDoc）。
   document.getElementById("layerImportPhotoBtn")?.addEventListener("click", _openImagePicker);
+  // 从云盘导入 → 叠为当前 doc 新层（spec 20260820 §4；大图护栏照旧走 importImageAsLayer 内部）
+  document.getElementById("layerImportCloudBtn")?.addEventListener("click", async () => {
+    try {
+      const file = await pickCloudImage();
+      if (file) await importImageAsLayer(file);
+    } catch (e) {
+      reportError(new Error(t("cp.importFailed", { err: errMsg(e) })), "warning");
+    }
+  });
   // v0.5.19 导入剪贴板（+菜单）：复用 Ctrl+V 全链路（selection-ops 的 wp:paste——读剪贴板→新层视口居中→错误上 banner）
   document.getElementById("layerImportClipboardBtn")?.addEventListener("click", () => window.dispatchEvent(new CustomEvent("wp:paste")));
 

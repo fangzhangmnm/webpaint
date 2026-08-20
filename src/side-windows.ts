@@ -19,6 +19,7 @@ import { setMenuOpen } from "./settings-menu.ts";
 import { raiseWindow } from "./surfaces.ts";
 import { desk } from "./workbench-state.ts";
 import { renderNodesToCanvas } from "./backend/doc-render.ts";
+import { pickCloudImage } from "./cloud-picker-host.ts";
 import type { AppContext } from "./app-context.ts";
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
 
@@ -90,6 +91,15 @@ export function initSideWindows(ctx: AppContext) {
     els.referenceFileInput.value = "";
     els.referenceFileInput.click();
   });
+  // 云盘选参考图（spec 20260820 §4）：picker 是宿主知识，组件只发意图
+  ref.addEventListener("requestcloudload", async () => {
+    try {
+      const file = await pickCloudImage();
+      if (file) await setReferenceFromFile(file);
+    } catch (err) {
+      setStatus(t("mi.referenceLoadFailed", { err: errMsg(err) }));
+    }
+  });
   ref.addEventListener("requestlivetoggle", () => {
     if (ref.live) ref.stopLive();
     else ref.setLiveProvider(composeLiveFrame);
@@ -135,7 +145,7 @@ export function initSideWindows(ctx: AppContext) {
   // i18n：shadow 内按钮 tooltip 走 labels property（slot 够不到 title 属性）。
   // 语言切换 = 整页 reload（i18n 约定），boot 一次即可。
   ref.labels = {
-    load: t("ref.load"), live: t("ref.live"), fit: t("ref.fit"),
+    load: t("ref.load"), cloud: t("ref.cloud"), live: t("ref.live"), fit: t("ref.fit"),
     close: t("common.close.aria"), resize: t("ref.resize"), resizeAria: t("ref.resizeAria"),
   };
 

@@ -58,6 +58,7 @@ import { initTransientPanels, _suppressTransientPanels, _restoreTransientPanels,
 import { initImportImage, importImageAsLayer } from "./import-image.ts";   // importImageAsNewDoc/setAddImportAsNewDoc 仅 gallery-shell/export-menu 用
 import { initExportImportMenu } from "./export-import-menu.ts";
 import { initGalleryShell, setGalleryOpen, checkQuotaAndWarn, uniqueNameFor } from "./gallery/gallery-shell.ts";
+import { initCloudPickerHost } from "./cloud-picker-host.ts";   // 云盘图片 picker 宿主层（spec 20260820）
 import { initTopbarMenu } from "./topbar-menu.ts";
 import { initBlenderSync, reconcileBlenderUrlFromPrefs } from "./blender-sync.ts";   // 推/拉贴图到 Blender（BlenderTextureProtocol，插件式隔离子功能）
 import { initPlatformGuards } from "./platform-guards.ts";
@@ -444,6 +445,7 @@ setSessionGallery(gallery);   // session 的晚绑 gallery handle（getter 已�
 initSession(ctx);
 initImportImage(ctx);      // 图片/.ora 导入（需 late ctx：applyCheckerboard/renderLayersPanel/setGalleryOpen/uniqueNameFor）
 initGalleryShell(ctx);     // 图库外壳（需 ctx.gallery + late keys）
+initCloudPickerHost(ctx);  // <wp-cloud-picker> 宿主层（需 ctx.gallery.getFolder / withBusy；三入口共用，spec 20260820）
 initTopbarMenu(ctx);       // 顶栏/菜单/sheet/save 触发 事件接线（需 ctx.gallery）
 initBlenderSync(ctx);      // Blender 同步面板（菜单入口 menuBlender → 自建 float panel）
 initCloudAuthUI(ctx);

@@ -30,6 +30,7 @@ import { lang, setLang, LANGS, langDisplayName } from "../i18n/index.ts";
 import { openInputSheet, openConfirmSheet } from "../sheets.ts";
 import { pathJoin } from "./gallery-path.ts";
 import { setAddImportAsNewDoc, importImageAsNewDoc } from "../import-image.ts";
+import { pickCloudImage } from "../cloud-picker-host.ts";
 import { isUnlocked, lock, setPassword, promptPassword } from "../crypto-state.ts";
 import { hasVerifier, checkVerifier, clearVerifier } from "../password-verifier.ts";
 import { t } from "../i18n/index.ts";
@@ -310,11 +311,26 @@ export function initGalleryShell(ctx: AppContext) {
     try {
       const blob = await readImageFromClipboard();
       if (!blob) { setStatus(t("gs.clipboardNoImage")); return; }
-      const file = new File([blob], "clipboard.png", { type: blob.type || "image/png" });
+      // 命名规范「有名保名，无名日期」（spec 20260820 §7）：剪贴板无来源名 → 走新建同款
+      // yyyymmdd-xxxx 生成器（旧 "clipboard" 死名产出 clipboard 1/2/3… 分叉，已废）。
+      const file = new File([blob], `${_newDocName()}.png`, { type: blob.type || "image/png" });
       await importImageAsNewDoc(file);
       setGalleryOpen(false);
     } catch (e) {
       reportError(new Error(t("gs.clipboardNewFailed", { err: errMsg(e) })), "warning");   // #34：iPad 权限被拒要看得见
+    }
+  });
+
+  // 从云盘新建（spec 20260820 §4）：picker 选图 → 新画打底（与「从图片新建」同语义，来源换云盘）。
+  els.addImportCloud.addEventListener("click", async () => {
+    els.galleryAddPopup.classList.add("hidden");
+    try {
+      const file = await pickCloudImage();
+      if (!file) return;
+      await importImageAsNewDoc(file);
+      setGalleryOpen(false);
+    } catch (e) {
+      reportError(new Error(t("cp.importFailed", { err: errMsg(e) })), "warning");
     }
   });
 

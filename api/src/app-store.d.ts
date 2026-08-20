@@ -42,6 +42,20 @@ export declare function watchFolder(folder: string, cb: (snap: {
     items: ReturnType<typeof itemToG>[];
     folderNames: string[];
 }) => void): () => void;
+export interface CloudImageItem {
+    path: string;
+    name: string;
+    size?: number;
+    lastModified?: number;
+    cached: boolean;
+}
+export declare function watchFolderImages(folder: string, cb: (snap: {
+    path: string;
+    images: CloudImageItem[];
+    folderNames: string[];
+}) => void): () => void;
+/** picker 选中后取整份图片字节（本地缓存优先、整份拉云、autoCacheOpenedFile 顺手落缓存）。拿不到 → null。 */
+export declare const openCloudImage: (path: string) => Promise<Blob | null>;
 export declare const listGalleryTrash: () => Promise<{
     name: string;
     deletedAt: number;

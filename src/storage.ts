@@ -2,21 +2,21 @@
 //   作品字节在 store 的 `webpaint.defaultStore` 库（分区 files/trash/backup/collections）；
 //   这里只放 app 专属、store 管不着的东西。
 //
-// 现存 object store（v4 终态）：
+// 现存 object store（v5 终态）：
 //   · gallery-thumbs —— 图库缩略图缓存（加密件存**密文** peek，明文永不落盘）
+//   · image-thumbs   —— 云盘图片 picker 缩略图缓存（自压 jpeg 派生物；与 gallery-thumbs 分开存 = user 2026-08-20 拍板）
 //   · checkpoints    —— 撤销更改（revert）的打开态快照，key `<X.ora>:<slot>`，加密件存密文容器
 //   （sessions —— v415 删；meta —— 2026-07 已删。都别加回来。）
 
 import type { CheckpointRecord } from "./checkpoint-policy.ts";
 
 const DB_NAME = "webpaint";
-// v4（2026-07-18，本轮唯一一次 bump，两件事一起做）：
-//   ① 建 checkpoints store（revert 功能，store cutover 时丢的）
-//   ② 删 sessions store —— cutover 后写入侧零调用者、只出不进恒空，读侧却还在读它（四处静默失效）。
-//      human 明确 consent 删（「sessions 应该全死」+「还没进 prealpha，不用考虑 backward compatibility」）。
-const DB_VERSION = 4;
+// v4（2026-07-18）：① 建 checkpoints ② 删 sessions（详见 git 史；别加回）。
+// v5（2026-08-20，cloud-image-picker spec §6，user 批准的派生缓存）：建 image-thumbs。
+const DB_VERSION = 5;
 const STORE_SESSIONS = "sessions";        // 仅 v4 upgrade 里用来 deleteObjectStore，别再读写
 const STORE_THUMBS = "gallery-thumbs";    // 图库缩略图缓存专用 store，key = store 文件身份 X.ora（cloud-thumb-cache.ts）
+const STORE_IMAGE_THUMBS = "image-thumbs"; // 云盘图片缩略图缓存，key = 全名 path 含扩展名（gallery/image-thumbs.ts）
 const STORE_CHECKPOINTS = "checkpoints";  // revert 快照，key = checkpointKey(fullName, slot)
 
 let _dbPromise: Promise<IDBDatabase> | null = null;
@@ -28,6 +28,7 @@ function openDB(): Promise<IDBDatabase> {
     req.onupgradeneeded = (ev) => {
       const db = (ev.target as IDBOpenDBRequest).result;
       if (!db.objectStoreNames.contains(STORE_THUMBS)) db.createObjectStore(STORE_THUMBS);
+      if (!db.objectStoreNames.contains(STORE_IMAGE_THUMBS)) db.createObjectStore(STORE_IMAGE_THUMBS);
       if (!db.objectStoreNames.contains(STORE_CHECKPOINTS)) db.createObjectStore(STORE_CHECKPOINTS);
       // v4：sessions 整个删掉（恒空的死 store；见下方说明）。deleteObjectStore 只能在 upgrade 事务里调。
       if (db.objectStoreNames.contains(STORE_SESSIONS)) db.deleteObjectStore(STORE_SESSIONS);
@@ -87,6 +88,47 @@ export async function clearThumbs(): Promise<number> {
   return new Promise<number>((resolve, reject) => {
     const tx = db.transaction(STORE_THUMBS, "readwrite");
     const store = tx.objectStore(STORE_THUMBS);
+    const countReq = store.count();
+    let n = 0;
+    countReq.onsuccess = () => { n = countReq.result; store.clear(); };
+    tx.oncomplete = () => resolve(n);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+// ── image-thumbs（云盘图片 picker 缩略图缓存，key = 全名 path）──────────────────────────────
+// 形状同 gallery-thumbs 四件套；value 形态见 gallery/image-thumbs.ts。
+export async function getImageThumb(key: string): Promise<unknown> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(STORE_IMAGE_THUMBS, "readonly").objectStore(STORE_IMAGE_THUMBS).get(key);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+export async function setImageThumb(key: string, value: unknown): Promise<void> {
+  const db = await openDB();
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_IMAGE_THUMBS, "readwrite");
+    tx.objectStore(STORE_IMAGE_THUMBS).put(value, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+export async function deleteImageThumb(key: string): Promise<void> {
+  const db = await openDB();
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_IMAGE_THUMBS, "readwrite");
+    tx.objectStore(STORE_IMAGE_THUMBS).delete(key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+export async function clearImageThumbs(): Promise<number> {
+  const db = await openDB();
+  return new Promise<number>((resolve, reject) => {
+    const tx = db.transaction(STORE_IMAGE_THUMBS, "readwrite");
+    const store = tx.objectStore(STORE_IMAGE_THUMBS);
     const countReq = store.count();
     let n = 0;
     countReq.onsuccess = () => { n = countReq.result; store.clear(); };

@@ -16,6 +16,7 @@ export interface SetBitmapOpts {
 export type RefLiveSource = HTMLCanvasElement | OffscreenCanvas | ImageBitmap;
 export interface RefLabels {
     load?: string;
+    cloud?: string;
     live?: string;
     fit?: string;
     close?: string;

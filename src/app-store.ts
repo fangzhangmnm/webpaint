@@ -14,6 +14,7 @@ import { getPassword } from "./crypto-state.ts";
 import { wirePreferences } from "./app-prefs.ts";
 import { wireAppState, appState } from "./app-state.ts";
 import { builtinBrushInitData } from "./brushes.ts";
+import { isDocPath, isImagePath, imageBasename } from "./gallery/cloud-image-model.ts";
 
 // ============ 显式装配（v0.8.7 · B 骑士）============
 // store = 插件不是地基：装配收进 _assemble()，按 detectStoreAbsent()（?nostore / localStorage 开关）
@@ -52,10 +53,17 @@ const _createRealStore = (provider: _Prov, auth: _Auth): Store => createStore({
   //   明文 ora = zip（PK\x03\x04）；加密容器 = 外壳 zip 或裸 7z —— 两者的头都在这四个字节里判得出，
   //   7z 魔数 "7z\xBC\xAF\x27\x1C" 前四字节即可识别。挡的是 captive-portal HTML / 截断字节。
   validateAdopt: async (blob) => {
-    const h = new Uint8Array(await blob.slice(0, 6).arrayBuffer());
-    const eq = (...b: number[]) => b.every((v, i) => h[i] === v);
-    if (eq(0x50, 0x4B, 0x03, 0x04)) return true;                     // ZIP "PK\x03\x04"：明文 ora，或加密件的明文外壳
-    if (eq(0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C)) return true;         // 7z  "7z\xBC\xAF\x27\x1C"：裸 .7z 容器（老格式）
+    const h = new Uint8Array(await blob.slice(0, 8).arrayBuffer());
+    const eq = (at: number, ...b: number[]) => b.every((v, i) => h[at + i] === v);
+    if (eq(0, 0x50, 0x4B, 0x03, 0x04)) return true;                  // ZIP "PK\x03\x04"：明文 ora，或加密件的明文外壳
+    if (eq(0, 0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C)) return true;      // 7z  "7z\xBC\xAF\x27\x1C"：裸 .7z 容器（老格式）
+    // 云盘图片 picker（spec 20260820 §5）：图片是合法 store 内容了——魔数放行，仍挡 captive-portal HTML/截断字节。
+    if (eq(0, 0x89, 0x50, 0x4E, 0x47)) return true;                  // PNG
+    if (eq(0, 0xFF, 0xD8, 0xFF)) return true;                        // JPEG
+    if (eq(0, 0x47, 0x49, 0x46, 0x38)) return true;                  // GIF8
+    if (eq(0, 0x52, 0x49, 0x46, 0x46)) return true;                  // RIFF（WebP 外壳）
+    if (eq(0, 0x42, 0x4D)) return true;                              // BMP
+    if (eq(4, 0x66, 0x74, 0x79, 0x70)) return true;                  // ISO-BMFF "ftyp"（AVIF/HEIF）
     return false;
   },
   autoCacheOpenedFile: true,
@@ -106,6 +114,8 @@ _auth.onAuthChanged(() => { try { window.dispatchEvent(new Event("wp:auth-change
 // 上次登录 flag（设备级 auth flag → local-app-state collection，经 appState struct）。boot 门 init 后才读写。
 
 // ---- gallery 数据：统一列举（local ∪ cloud，每项带 syncState）。reconcile 已进库（watchFolder 惰性 per-folder）。----
+// 扩展名路由（spec 20260820 §2/§3）：库零内容格式知识——扩展名知识全在 gallery/cloud-image-model.ts（纯模块，可测）。
+//   gallery 白名单 = 画作/加密容器；图片走 watchFolderImages（picker）；其余杂物只在 OneDrive 侧可见。
 const _CLOUD_STATES = new Set(["cloud-only", "synced", "unpushed", "newer-on-cloud", "conflict"]);   // 有云版的 syncState
 // Item{path,syncState} → 旧 GalleryItem{name,local,cloud,dirty,ghost}（gallery-view-model 兼容；派生自 syncState）。
 function itemToG(it: { path: string; syncState: string; lastModified?: number; size?: number }) {
@@ -133,11 +143,49 @@ export function watchFolder(
       path: snap.path,
       // 文件名**倒序**（localeCompare numeric）：新文档名 yyyymmdd-xxxx → 新日期在前，稳定（不随存盘时间跳）。
       //   store 列举顺序不保证；排序是 app 展示策略（对齐 gallery-model.sliceFolder 的既定倒序），故在此 app 层做。
-      items: snap.items.map(itemToG).sort((a, b) => b.name.localeCompare(a.name, undefined, { numeric: true })),
+      // 白名单：gallery 只见画作（isDocPath）；图片走 watchFolderImages（picker），杂物两边都不见。
+      items: snap.items.filter((it) => isDocPath(it.path)).map(itemToG).sort((a, b) => b.name.localeCompare(a.name, undefined, { numeric: true })),
       folderNames: snap.folders.map((f) => f.slice(prefix.length)).filter(Boolean),   // 全路径 → immediate 段
     });
   });
 }
+
+// ---- 云盘图片列举（cloud-picker 数据面，spec 20260820 §3）。与 watchFolder 同一订阅面，反向 filter 只留图片。----
+//   身份 = **全名 path**（含扩展名，直接就是 store.file 的 key——图片没有裸名/全名的 ora 代数）。
+export interface CloudImageItem {
+  path: string;           // 全路径含扩展名（= store.file key / 缩略图缓存 key）
+  name: string;           // basename（显示用）
+  size?: number;
+  lastModified?: number;  // 缩略图新鲜度 token 的原料（退 size）
+  cached: boolean;        // 本地有副本（离线可用徽章）
+}
+export function watchFolderImages(
+  folder: string,
+  cb: (snap: { path: string; images: CloudImageItem[]; folderNames: string[] }) => void,
+): () => void {
+  const prefix = folder ? `${folder}/` : "";
+  return store.files.watchFolder(folder, (snap) => {
+    cb({
+      path: snap.path,
+      images: snap.items
+        .filter((it) => isImagePath(it.path))
+        .map((it) => ({
+          path: it.path,
+          name: imageBasename(it.path),
+          size: it.size,
+          lastModified: it.lastModified,
+          cached: isCached(it.syncState as never),
+        }))
+        // 素材收件箱语义：新的在前（lastModified 倒序，缺失退名字倒序）
+        .sort((a, b) => (b.lastModified ?? 0) - (a.lastModified ?? 0) || b.name.localeCompare(a.name, undefined, { numeric: true })),
+      folderNames: snap.folders.map((f) => f.slice(prefix.length)).filter(Boolean),
+    });
+  });
+}
+
+/** picker 选中后取整份图片字节（本地缓存优先、整份拉云、autoCacheOpenedFile 顺手落缓存）。拿不到 → null。 */
+export const openCloudImage = (path: string): Promise<Blob | null> =>
+  store.file(path, { isZip: false, mode: "existing" }).open();
 // ⛔ listGallery（全树列举）已删 2026-07-12——**库唯一列举面 = store.watchFolder（订阅当前夹）**，app 包成 watchFolder。
 //   app 原则上不知道别的 folder 内容（内存只放当前夹）；名字碰撞由 store rename/saveAs 目标护栏内化检测（撞名抛 CloudNameCollisionError），不靠先 list 目标夹。
 // 回收站视图：store.listTrash 返**两端聚合**的 TrashItem[]（side/localKey/cloudItemId/encrypted/conflictLive）→ 映射成 gallery 的 TrashGItem。
