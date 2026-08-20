@@ -32,11 +32,7 @@ import type { AppContext } from "./app-context.ts";
 // 错误信息提取（catch 子句 e 在 strict 下是 unknown）。
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
 
-// 导入时往 doc 活层写像素（doc.js 未类型化 → 只描述用到的字段）。
-interface ImportLayer {
-  name: string; bboxX: number; bboxY: number; bboxW: number; bboxH: number;
-  replaceFromBytes(data: Uint8ClampedArray, ox: number, oy: number, w: number, h: number): void;
-}
+// （ImportLayer 接口已删 v0.9.33：fillLayer0 裸写路径退役，像素走 newDoc layer0Pixels 正门。）
 // big-import sheet 的结果。
 interface BigImportChoice { w: number; h: number; mode: string; }
 interface TransientOpts { apply?: () => void; abort?: () => void; }
@@ -69,17 +65,16 @@ export async function importImageAsNewDoc(file: File) {
   const h = Math.min(8192, bitmap.height);
   const stem = file.name.replace(/\.[^.]+$/, "") || t("mi.defaultImportName");
   const name = await uniqueNameFor(stem);
-  // 共用 session.newDoc 骨架（消 survey rec #4 孪生）：照片绘制 = fillLayer0；doc 替换/全部重置/
-  // 落盘/checkpoint 归 session。照片导入因此与空白新建完全对齐（清 selection/参考窗 + color 归黑 +
-  // 加密归明文 + 关图库）——human 定：之前不重置这些反而是小 bug。
-  await session.newDoc({ name, w, h, layer0Name: file.name.replace(/\.[^.]+$/, "") || t("mi.defaultImageName"), fillLayer0: (layer: unknown) => {
-    const L = layer as ImportLayer;
-    // v0.6.46 字节管线：解码边界读出一次 → 面积平均缩小（缩小正解）/双三次放大 → 直落 tile
-    const px = imageSourceToBytes(bitmap as ImageBitmap);
-    const out = (w !== px.w || h !== px.h) ? resampleBytes(px.data, px.w, px.h, w, h, "auto") : px.data;
-    L.replaceFromBytes(out, 0, 0, w, h);
-    (bitmap as ImageBitmap).close?.();
-  } });
+  // v0.6.46 字节管线：解码边界读出一次 → 面积平均缩小（缩小正解）/双三次放大。
+  // v0.9.33：像素先算好、经 newDoc 的 layer0Pixels 走 wp2.load 正门（令牌+suspend，不入 undo）——
+  //   旧 fillLayer0 回调在 load 后裸写 = C7 硬化后的违章（LayerTiles tokenless throw，云盘导入首暴）。
+  const px = imageSourceToBytes(bitmap as ImageBitmap);
+  const out = (w !== px.w || h !== px.h) ? resampleBytes(px.data, px.w, px.h, w, h, "auto") : px.data;
+  (bitmap as ImageBitmap).close?.();
+  // 共用 session.newDoc 骨架（消 survey rec #4 孪生）：doc 替换/全部重置/落盘/checkpoint 归 session。
+  // 照片导入因此与空白新建完全对齐（清 selection/参考窗 + color 归黑 + 加密归明文 + 关图库）
+  // ——human 定：之前不重置这些反而是小 bug。
+  await session.newDoc({ name, w, h, layer0Name: file.name.replace(/\.[^.]+$/, "") || t("mi.defaultImageName"), layer0Pixels: out });
   setStatus(t("mi.newFromPhoto", { name, w, h }));
 }
 

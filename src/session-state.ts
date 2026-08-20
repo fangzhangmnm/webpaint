@@ -551,20 +551,21 @@ async function exitCanvasToGallery() {
 }
 
 // ---- 新建 doc ----
-async function newDoc({ name, w, h, layer0Name, fillLayer0 }: { name: string; w: number; h: number; layer0Name?: string; fillLayer0?: (layer: unknown) => void }) {
+// layer0Pixels（导入图片/剪贴板为新文档）：整幅 RGBA（w*h*4），经 wp2.load 的 pixels 正门灌入
+//   （令牌+suspend，不入 undo）。旧 fillLayer0 回调已废（v0.9.33）：它在 load **之后**裸写像素，
+//   C7 焊死「留给 load 灌入」的静默口后就是违章（真机 LayerTiles tokenless throw，云盘导入首暴）。
+async function newDoc({ name, w, h, layer0Name, layer0Pixels }: { name: string; w: number; h: number; layer0Name?: string; layer0Pixels?: Uint8ClampedArray }) {
   if (!(await leaveLocalFile())) return;   // 无地且脏 → 问；取消 = 不新建
   if (es.isDirty()) await saveNow();
   timelapseDetach();   // 新建=新身份：旧录像绝不跟过来（per-doc 串扰墙）
   input.clearHistory();
   wp2.load({
     width: w, height: h,
-    nodes: [{ name: layer0Name ?? `${tLatin("doc.layerName")} 1`, visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false, pixels: null }],
+    nodes: [{ name: layer0Name ?? `${tLatin("doc.layerName")} 1`, visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false,
+      pixels: layer0Pixels ? { rect: { x: 0, y: 0, w, h }, bytes: layer0Pixels } : null }],
   });
   doc.clearSelectionOnLoad();
   els.canvasSizeLabel.textContent = `${w}×${h}`;
-  // fillLayer0（导入图片为新文档等）：装载基线内容——写在 history 之前（无令牌 = 不入 undo，
-  //   与旧「fill 后 clearHistory」语义一致）；脏门由下方 es.adopted(create:true) 负责。
-  if (fillLayer0) fillLayer0(doc.layers[0]);
   _setActive(name); _recomputePhase();
   _enc.encrypted = false; board.invalidateAll(); board.fitToScreen(); renderLayersPanel();
   resetEditorState();

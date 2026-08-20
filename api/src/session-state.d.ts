@@ -33,12 +33,12 @@ declare function renameCurrentSession({ suggested, reason }?: {
     reason?: string;
 }): Promise<string | null | undefined>;
 declare function exitCanvasToGallery(): Promise<void>;
-declare function newDoc({ name, w, h, layer0Name, fillLayer0 }: {
+declare function newDoc({ name, w, h, layer0Name, layer0Pixels }: {
     name: string;
     w: number;
     h: number;
     layer0Name?: string;
-    fillLayer0?: (layer: unknown) => void;
+    layer0Pixels?: Uint8ClampedArray;
 }): Promise<void>;
 declare function openItem(item: GalleryItem): Promise<void>;
 declare function pushItem(item: GalleryItem): Promise<void>;
