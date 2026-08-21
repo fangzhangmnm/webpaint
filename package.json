@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@internal/store": "file:./vendor-pkgs/internal-store-0.1.0.tgz"
+    "@internal/store": "file:./vendor-pkgs/internal-store-0.2.1.tgz"
   },
   "devDependencies": {
     "playwright": "^1.61.1",

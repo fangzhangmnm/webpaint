@@ -1,6 +1,7 @@
 # Handoff: gallery 点开不查冲突（open 路径冲突 surface 是死代码）——红线区修复
 
 > as-of WeebPaint v0.10.4 / @internal/store baked 0.1.0, upstream 0.2.0 / 2026-08-20
+> **✅ A+B 已修（2026-08-20 同日）**：upstream v0.2.1（commit acb4f05，tag + gh release）；WeebPaint v0.10.10 已收货（0.1.0→0.2.1，跨 0.2.0 skew 一并对齐；WeebPaint 不走 0.2.0 新增的 ./sw 门牌，主门牌增量向后兼容，全量 1051 绿）。实现形状见 §3 各条回写。**C 未动**（badge 透传是产品判断，归人类拍板，单独开单）。真机验收（§4 复现脚本）待跑。
 > 风险分区：**store/同步引擎 = 红线区**。动手前必读 `20260601 MyPWAPatterns/docs/MASTER.md` §A，走 `pwa-cloud-store` skill，改引擎前 escalate human（user 已在 2026-08-20 口头开单修此 bug，但持久化结构若要新增字段仍需显式同意）。
 
 ## 0. 事故现场（2026-08-20，user 亲历）
@@ -48,9 +49,12 @@ user 原话定性：「是wp的红线区错误：你上传好之后gallery点开
 ## 3. 修复方向（建议，非钦定；实现形状变了要回写本节）
 
 1. **A**：`create-store.ts open()` 给 `fresh.open` 接上 `onNewer`（复用 `create-store.ts:472-475` push 侧 onConflict 同款取双方 blob → `ui.resolveConflict` 的形状）+ `adopt` + `localDirty`；不再丢弃 `FreshResult`。目标行为 = ADR-0016 后半：clean 静默快进（现状已对），dirty ∧ cloudMoved 弹同一张 sheet（keepMine / takeCloud，takeCloud 走 `safeResolve.safePull` 含 .backup）。
+   **【回写 v0.2.1 实际形状】**：`onNewer` = push 412 侧**同一个** `onConflict`（同一张 sheet，零新 UI）；`localDirty` 接 `sub.edits.localDirty`（与 safeResolve 同款；WeebPaint 现不驱动该游标 = 恒 false，durable `head.isDirty` 已覆盖事故场景）；**`adopt` 刻意不接**——open 的字节经 `readLocal()` 返回值流回 app（editor 随后 adopt），refresh 才需要 adopt 活替换已开 doc，open 侧接了会双重装载；`FreshResult` 不再丢弃：`error`/`invalid-cloud-bytes`/`cloud-vanished`/`backup-failed` → `ui.reportError(warning)`（用户选了 takeCloud 拉失败时本地照读但必 surface）。
 2. **B**：freshness 的 `!base` 分支与 `listing.ts:80` 对齐（无 baseline ∧ 云端有文件 → 按 moved 处理，而不是 in-sync）。注意 clean ∧ !base 的正确动作大概率 = safePull 快进（本地无 dirty 就该拿云端），dirty ∧ !base → surface。
+   **【回写 v0.2.1 实际形状】**：照此落地，`open` 与 `refresh` 两处同修（in-sync 条件收紧为 `base != null && meta.etag === base`；in-sync 分支的 markSeen 重捕保留，现无条件调——base 非空已由条件保证）。clean ∧ !base → safePull 快进、dirty ∧ !base → surface，与单测锁死。
 3. **C**（可后置/单独开单）：`app-store.ts` 缝合层把 `newer-on-cloud`/`conflict` 透传，`BadgeKind` 加槽位 + gallery tile 显示。**badge 视觉/文案是产品判断，归人类拍板**；引擎侧 A/B 修完后 C 才有意义。
 4. 修在 **upstream `20260813 internal-store`**（v0.2.0），加回归测试（`test/freshness.test.ts` 已有 onNewer 的 mock 测试形状可抄），发包后走 WeebPaint `pull-package.sh` 收货——**禁止直接 patch WeebPaint `node_modules/`**（baked 0.1.0 与 upstream 0.2.0 有版本 skew，收货时一并对齐，skew 本身也要留意 0.2.0 里其他未收货变更）。
+   **【回写】**：已照此走完。upstream 测试 +11（freshness 单测 6：!base 四象限 + cancel + 离线不回归；新 `test/store-open-conflict.test.ts` 5：真 createStore 复刻事故调用链，含 takeCloud 先落 .backup、clean 快进不弹、in-sync 不弹），库 338 绿；exports 无变化（dist/index.d.ts 逐字节同 0.2.0 → patch 例行）。WeebPaint 收货后 1051 绿。§2A 提的 `editor-session.ts:173`「open 内含冲突 surface」注释自此不再撒谎，未改注释。
 5. 库改动纪律：零内容格式知识、app 不许绕库自查 etag；缺口全在库侧补。
 
 ## 4. 验收（能 mock 测的先测完，人类真机按批交付）
