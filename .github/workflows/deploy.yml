@@ -65,7 +65,7 @@ jobs:
           #   这个列表、以及（若有）离线测试。
           for f in index.html manifest.webmanifest service-worker.js styles.css builtin-brushes.json \
                    color-words.json canvas-templates.json \
-                   icon.svg icon-192.png icon-512.png apple-touch-icon-180.png; do
+                   icon.svg icon-32.png icon-192.png icon-512.png apple-touch-icon-180.png; do
             cp -p prod-tree/$f site/     2>/dev/null || echo "::warning::prod 缺 $f —— / 上会 404"
             cp -p main-tree/$f site/dev/ 2>/dev/null || echo "::warning::main 缺 $f —— /dev/ 上会 404"
           done

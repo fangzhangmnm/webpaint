@@ -51,7 +51,9 @@
     <meta name="apple-mobile-web-app-title" content="WeebPaint" />
     <title>WeebPaint</title>
     <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <!-- 标签页图标走手绘像素档（32×32 逐像素画的，详 ai-docs/20260821-icon-tiers.md）。icon.svg 内嵌的是 192 栅格，
+         留给 manifest 的 sizes=any 用；若挂在这里浏览器会优先取它再缩到 16，糊成一团。 -->
+    <link rel="icon" href="./icon-32.png" type="image/png" sizes="32x32" />
     <link rel="icon" href="./icon-192.png" type="image/png" sizes="192x192" />
     <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon-180.png" />
     <link rel="stylesheet" href="./styles.css?v=7caf15b1e461" />

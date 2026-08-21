@@ -14,6 +14,7 @@ const STATIC_PRECACHE = [
   "./index.html",
   "./manifest.webmanifest",
   "./icon.svg",
+  "./icon-32.png",
   "./icon-192.png",
   "./icon-512.png",
   "./apple-touch-icon-180.png",
