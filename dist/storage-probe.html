@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>WeebPaint 存储驱逐探针</title>
+<!--
+  真机测试夹具 —— **不是产品的一部分**，不进 bundle、不进 i18n SSoT、不被 index.html 引用。
+  放在 dist/ 是因为 deploy.yml 里 dist/ 是整目录 cp 的（根目录走白名单，加文件要改 workflow）；
+  build.sh 只 delete `weebpaint-*.mjs`，不会碰本文件。
+  UI 用中文：唯一读者是人类测试者本人，不是产品用户 → 家规「用户可见文案全走 i18n」不适用于夹具。
+
+  ⚠ 必须和 app **同源**才有意义：persist() 是按 origin 的启发式、quota 是按 origin 的额度。
+     线上位置 = https://weebpaint.com/dev/dist/storage-probe.html
+     （prod 与 dev 同源 —— 所以这张页面测出来的额度/驱逐命运，prod 也是同一份。）
+
+  详见 ai-docs/20260821-storage-eviction-investigation.md
+-->
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 14px/1.55 system-ui, -apple-system, sans-serif; margin: 0; padding: 12px;
+         padding-bottom: max(env(safe-area-inset-bottom,0px), 24px); max-width: 760px; }
+  h1 { font-size: 17px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 0 0 8px; }
+  .sub { opacity: .7; font-size: 12px; margin: 0 0 16px; }
+  section { border: 1px solid rgba(128,128,128,.35); border-radius: 10px; padding: 12px; margin: 0 0 12px; }
+  button { font: inherit; padding: 7px 12px; border-radius: 8px; border: 1px solid rgba(128,128,128,.5);
+           background: rgba(128,128,128,.12); cursor: pointer; margin: 2px 4px 2px 0; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.danger { border-color: #c0392b; color: #c0392b; }
+  pre { white-space: pre-wrap; word-break: break-word; margin: 8px 0 0; font-size: 12px;
+        background: rgba(128,128,128,.1); padding: 8px; border-radius: 6px; }
+  textarea { width: 100%; box-sizing: border-box; height: 220px; font: 11px/1.4 ui-monospace, monospace; }
+  label { display: inline-block; margin: 4px 8px 4px 0; }
+  input[type=number] { font: inherit; width: 7em; padding: 4px; }
+  .warn { color: #c0392b; font-weight: 600; }
+  .ok { color: #2e7d32; }
+</style>
+</head>
+<body>
+<h1>WeebPaint 存储驱逐探针</h1>
+<p class="sub" id="hdr"></p>
+
+<section>
+  <h2>① 环境</h2>
+  <button id="bEnv">重新采集</button>
+  <pre id="oEnv">—</pre>
+</section>
+
+<section>
+  <h2>② persist() 三连</h2>
+  <p class="sub">测「申请前是不是已持久 → 申请 → 申请后是不是已持久」。多按几次可看它是否<b>每次开 app 都要重申请</b>（Safari 有此传闻）。</p>
+  <button id="bPersist">申请持久化</button>
+  <button id="bPersisted">只查询状态（不申请）</button>
+  <pre id="oPersist">—</pre>
+</section>
+
+<section>
+  <h2>③ estimate() 配额</h2>
+  <p class="sub">quota = 浏览器愿意给这个 origin 的上限；usage = 本 origin 已用（含 prod + dev 两个通道、SW 缓存、localStorage）。</p>
+  <button id="bEst">读取</button>
+  <pre id="oEst">—</pre>
+</section>
+
+<section>
+  <h2>④ 撞墙测试 <span class="warn">（危险 · 慢）</span></h2>
+  <p class="sub">
+    往一个<b>独立的</b>探针库 <code>wp-storage-probe</code> 里灌数据直到写失败，记录：撞墙在几 MiB、
+    错误的 <code>name</code>、以及<b>失败那一笔 IDB 事件的先后顺序</b>（req.success / req.error / tx.complete / tx.abort）——
+    最后这条是用来验 store 的 <code>put</code> 是否会「先 resolve 再 abort」（= 谎报保存成功）。
+  </p>
+  <p class="sub warn">
+    风险：这会真的占满磁盘配额。整机存储压力可能让浏览器<b>驱逐别的网站</b>的数据。
+    请在「本机 WeebPaint 里没有唯一副本的画」时跑（或先把画都推上云 / 导出）。测完会自动删探针库。
+  </p>
+  <label>每块 <input type="number" id="chunk" value="32" min="1" max="256"> MiB</label>
+  <label>最多写 <input type="number" id="cap" value="2048" min="16"> MiB 就停</label><br>
+  <label><input type="checkbox" id="ack"> 我明白上面的风险</label><br>
+  <button id="bFill" class="danger" disabled>开始撞墙</button>
+  <button id="bStop" disabled>停</button>
+  <button id="bClean">只清理探针库</button>
+  <pre id="oFill">—</pre>
+</section>
+
+<section>
+  <h2>⑤ 7 天存活标记（ITP 测试 · 需要日历时间）</h2>
+  <p class="sub">
+    在 <b>IndexedDB / localStorage / Cache API</b> 三处各种一个时间戳，并记下 SW 注册状态。
+    种完之后<b>≥8 天不要打开这个站</b>（浏览器要「使用过 Safari」才计天数，所以正常用手机即可），
+    然后回来按「检查存活」。三处是不是<b>一起</b>死，直接决定 store 里 <code>safe-resolve</code>
+    对「localStorage 被清而 IDB 幸存」的假设成不成立。
+  </p>
+  <p class="sub">分别在<b>浏览器里</b>和<b>装到主屏后</b>各种一次（两者是不同的存储环境，主屏版据信有独立的天数计数器）。</p>
+  <button id="bPlant">种下标记</button>
+  <button id="bCheck">检查存活</button>
+  <pre id="oMark">—</pre>
+</section>
+
+<section>
+  <h2>⑥ 导出</h2>
+  <p class="sub">把上面全部结果拷走贴回聊天。（不用系统弹窗——直接全选复制。）</p>
+  <button id="bDump">汇总</button>
+  <button id="bCopy">复制</button>
+  <textarea id="dump" readonly></textarea>
+</section>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const log = {};                                     // 每节最近一次结果（导出用）
+const now = () => new Date().toISOString();
+const put = (el, key, text) => { log[key] = text; $(el).textContent = text; };
+const MiB = 1024 * 1024;
+const fmt = (b) => b == null ? "—" : (b / MiB).toFixed(1) + " MiB (" + b.toLocaleString() + " B)";
+
+$("hdr").textContent = location.href + "  ·  " + now();
+
+// ── ① 环境 ──────────────────────────────────────────────────────────────
+async function env() {
+  const standalone = (matchMedia && matchMedia("(display-mode: standalone)").matches) ? "standalone(媒体查询)"
+    : (navigator.standalone === true) ? "standalone(navigator.standalone)"
+    : "浏览器标签页";
+  let swCount = "n/a";
+  try { swCount = String((await navigator.serviceWorker.getRegistrations()).length); } catch (e) { swCount = "查询失败 " + e; }
+  put("oEnv", "env", [
+    "时间          " + now(),
+    "origin        " + location.origin,
+    "路径          " + location.pathname,
+    "显示模式      " + standalone,
+    "UA            " + navigator.userAgent,
+    "语言          " + navigator.language,
+    "在线          " + navigator.onLine,
+    "SW 注册数     " + swCount,
+    "storage API   " + (navigator.storage ? "有" : "没有（这台机器整个测不了）"),
+    "persist()     " + (navigator.storage && navigator.storage.persist ? "有" : "没有"),
+    "estimate()    " + (navigator.storage && navigator.storage.estimate ? "有" : "没有"),
+    "设备内存(GB)  " + (navigator.deviceMemory ?? "未暴露"),
+  ].join("\n"));
+}
+$("bEnv").onclick = env;
+
+// ── ② persist ───────────────────────────────────────────────────────────
+async function persistTriple(request) {
+  const lines = ["时间 " + now()];
+  if (!navigator.storage || !navigator.storage.persisted) { put("oPersist", "persist", "本浏览器无 StorageManager"); return; }
+  try { lines.push("申请前 persisted() = " + await navigator.storage.persisted()); }
+  catch (e) { lines.push("申请前 persisted() 抛错: " + e); }
+  if (request) {
+    try {
+      const t0 = performance.now();
+      const r = await navigator.storage.persist();
+      lines.push("persist() = " + r + "   (耗时 " + (performance.now() - t0).toFixed(0) + " ms" +
+                 (performance.now() - t0 > 400 ? " ← 这么久多半弹过权限框" : "") + ")");
+    } catch (e) { lines.push("persist() 抛错: " + e); }
+    try { lines.push("申请后 persisted() = " + await navigator.storage.persisted()); }
+    catch (e) { lines.push("申请后 persisted() 抛错: " + e); }
+  }
+  put("oPersist", "persist", (log.persist ? log.persist + "\n---\n" : "") + lines.join("\n"));
+}
+$("bPersist").onclick = () => persistTriple(true);
+$("bPersisted").onclick = () => persistTriple(false);
+
+// ── ③ estimate ──────────────────────────────────────────────────────────
+async function estimate(silent) {
+  if (!navigator.storage || !navigator.storage.estimate) { if (!silent) put("oEst", "est", "无 estimate()"); return null; }
+  const e = await navigator.storage.estimate();
+  if (!silent) {
+    const lines = [
+      "时间     " + now(),
+      "usage    " + fmt(e.usage),
+      "quota    " + fmt(e.quota),
+      "已用比例 " + (e.quota ? (100 * (e.usage || 0) / e.quota).toFixed(2) + " %" : "—"),
+    ];
+    if (e.usageDetails) for (const k in e.usageDetails) lines.push("  · " + k + " = " + fmt(e.usageDetails[k]));
+    else lines.push("  （无 usageDetails —— 非 Chromium 一般不给分项）");
+    put("oEst", "est", lines.join("\n"));
+  }
+  return e;
+}
+$("bEst").onclick = () => estimate(false);
+
+// ── ④ 撞墙 ──────────────────────────────────────────────────────────────
+const PROBE_DB = "wp-storage-probe", PROBE_STORE = "chunks";
+let stopFlag = false;
+
+function openProbe() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(PROBE_DB, 1);
+    r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains(PROBE_STORE)) r.result.createObjectStore(PROBE_STORE); };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+    r.onblocked = () => rej(new Error("open blocked"));
+  });
+}
+function dropProbe() {
+  return new Promise((res) => { const r = indexedDB.deleteDatabase(PROBE_DB); r.onsuccess = r.onerror = r.onblocked = () => res(); });
+}
+// 独立核验：别信 usage 数字（统计滞后），直接问浏览器这个库还在不在。
+async function probeGone() {
+  try {
+    if (indexedDB.databases) {
+      const names = (await indexedDB.databases()).map((d) => d.name);
+      return names.includes(PROBE_DB) ? "**还在**（" + names.join(", ") + "）" : "已删干净 ✓";
+    }
+    // Safari 没有 databases()：开一下看是不是空库（open 会把它建回来，所以开完再删）
+    const db = await openProbe();
+    const empty = db.objectStoreNames.length === 0 || await new Promise((res) => {
+      const t = db.transaction(PROBE_STORE, "readonly"); const c = t.objectStore(PROBE_STORE).count();
+      t.oncomplete = () => res(c.result === 0); t.onabort = () => res(false);
+    });
+    db.close(); await new Promise((r) => { const q = indexedDB.deleteDatabase(PROBE_DB); q.onsuccess = q.onerror = q.onblocked = () => r(); });
+    return empty ? "已删干净 ✓（无 databases() API，按空库判定）" : "**还有残留**";
+  } catch (e) { return "核验失败 " + e; }
+}
+
+// 一笔 put，**同时**监听 request 和 transaction 的四个事件，按真实触发顺序记录。
+// 这就是验「resolve 早于 commit」的探针：如果 req.success 先于 tx.abort，
+// 那么「onsuccess 就 resolve」的写法会在配额爆掉时把失败报成成功。
+function timedPut(db, key, blob) {
+  return new Promise((resolve) => {
+    const order = [];
+    const t = db.transaction(PROBE_STORE, "readwrite");
+    let reqErr = null, txErr = null;
+    let req;
+    try { req = t.objectStore(PROBE_STORE).put(blob, key); }
+    catch (e) { resolve({ ok: false, order: ["put() 同步抛错"], err: e, sync: true }); return; }
+    req.onsuccess = () => order.push("req.success");
+    req.onerror = () => { order.push("req.error(" + (req.error && req.error.name) + ")"); reqErr = req.error; };
+    t.oncomplete = () => { order.push("tx.complete"); resolve({ ok: true, order, err: null }); };
+    t.onabort = () => { order.push("tx.abort(" + (t.error && t.error.name) + ")"); txErr = t.error; resolve({ ok: false, order, err: txErr || reqErr }); };
+    t.onerror = () => { order.push("tx.error(" + (t.error && t.error.name) + ")"); txErr = t.error; };
+  });
+}
+
+$("ack").onchange = () => { $("bFill").disabled = !$("ack").checked; };
+$("bStop").onclick = () => { stopFlag = true; };
+$("bClean").onclick = async () => { await dropProbe(); put("oFill", "fill", "已删除探针库 " + PROBE_DB + "  " + now()); };
+
+$("bFill").onclick = async () => {
+  stopFlag = false;
+  $("bFill").disabled = true; $("bStop").disabled = false;
+  const chunkMiB = Math.max(1, +$("chunk").value || 32);
+  const capMiB = Math.max(chunkMiB, +$("cap").value || 2048);
+  const lines = ["撞墙测试 " + now(), "块 " + chunkMiB + " MiB · 上限 " + capMiB + " MiB"];
+  const before = await estimate(true);
+  if (before) lines.push("起始 usage " + fmt(before.usage) + " / quota " + fmt(before.quota));
+  let db = null, written = 0, i = 0, verdict = "（未完成）";
+  try {
+    db = await openProbe();
+    // 一块可复用的字节（每块内容不重要，只要真占空间；用随机避免被压缩合并）
+    const buf = new Uint8Array(chunkMiB * MiB);
+    for (let o = 0; o < buf.length; o += 65536) crypto.getRandomValues(buf.subarray(o, Math.min(o + 65536, buf.length)));
+    while (!stopFlag && written < capMiB * MiB) {
+      const r = await timedPut(db, "c" + (i++), new Blob([buf]));
+      if (!r.ok) {
+        const name = (r.err && r.err.name) || "(无 name)";
+        lines.push("");
+        lines.push("★ 撞墙于已写 " + fmt(written) + "（第 " + i + " 块失败）");
+        lines.push("  错误 name    " + name);
+        lines.push("  错误 message " + (r.err && r.err.message || String(r.err)));
+        lines.push("  事件顺序     " + r.order.join(" → "));
+        const so = r.order.indexOf("req.success");
+        const ab = r.order.findIndex((s) => s.startsWith("tx.abort"));
+        lines.push("  ⇒ resolve-before-commit 隐患：" +
+          (so >= 0 && ab > so ? "**成立** —— req.success 先于 tx.abort，只等 onsuccess 的写法会谎报成功"
+           : so >= 0 && ab < 0 ? "本例 success 且未 abort（意外）"
+           : "不成立 —— 失败在 request 上就报出来了（只等 onsuccess 也能收到 reject）"));
+        verdict = "撞墙 @ " + fmt(written) + " · " + name;
+        break;
+      }
+      written += chunkMiB * MiB;
+      $("oFill").textContent = lines.join("\n") + "\n… 已写 " + fmt(written) + "（按「停」可中断）";
+      if (i % 4 === 0) {
+        const e = await estimate(true);
+        if (e && e.quota && (e.usage || 0) / e.quota > 0.985) { lines.push("接近 quota（>98.5%），主动收手"); verdict = "接近 quota 收手 @ " + fmt(written); break; }
+      }
+    }
+    if (verdict === "（未完成）") verdict = stopFlag ? "被手动中断 @ " + fmt(written) : "写满上限 " + capMiB + " MiB 仍未撞墙";
+  } catch (e) {
+    lines.push("测试自身出错: " + e);
+    verdict = "测试出错: " + e;
+  } finally {
+    try { db && db.close(); } catch (_) {}
+    const after = await estimate(true);
+    if (after) lines.push("清理前 usage " + fmt(after.usage) + " / quota " + fmt(after.quota));
+    await dropProbe();
+    const cleaned = await estimate(true);
+    if (cleaned) lines.push("清理后 usage " + fmt(cleaned.usage) + "  ← 浏览器的配额统计是滞后的，这个数不马上降属正常");
+    lines.push("探针库是否真的删掉了：" + await probeGone());
+    lines.push("结论 " + verdict);
+    put("oFill", "fill", lines.join("\n"));
+    $("bFill").disabled = !$("ack").checked; $("bStop").disabled = true;
+  }
+};
+
+// ── ⑤ 7 天标记 ──────────────────────────────────────────────────────────
+const MARK_DB = "wp-survival-mark", MARK_STORE = "mark", MARK_KEY = "planted";
+const MARK_LS = "wp.survival.mark";
+const MARK_CACHE = "wp-survival-mark";
+
+function openMark() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(MARK_DB, 1);
+    r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains(MARK_STORE)) r.result.createObjectStore(MARK_STORE); };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+function markTx(mode, run) {
+  return openMark().then((db) => new Promise((res, rej) => {
+    const t = db.transaction(MARK_STORE, mode);
+    const q = run(t.objectStore(MARK_STORE));
+    t.oncomplete = () => res(q && q.result);
+    t.onabort = t.onerror = () => rej(t.error);
+  }));
+}
+
+$("bPlant").onclick = async () => {
+  const stamp = { at: Date.now(), iso: now(), href: location.href,
+                  standalone: (matchMedia && matchMedia("(display-mode: standalone)").matches) || navigator.standalone === true };
+  const lines = ["种标记 " + stamp.iso, "显示模式 " + (stamp.standalone ? "standalone（主屏）" : "浏览器标签页")];
+  try { await markTx("readwrite", (s) => s.put(stamp, MARK_KEY)); lines.push("IndexedDB   ✓ 已种"); }
+  catch (e) { lines.push("IndexedDB   ✗ " + e); }
+  try { localStorage.setItem(MARK_LS, JSON.stringify(stamp)); lines.push("localStorage ✓ 已种"); }
+  catch (e) { lines.push("localStorage ✗ " + e); }
+  try { const c = await caches.open(MARK_CACHE); await c.put("/__mark", new Response(JSON.stringify(stamp))); lines.push("Cache API   ✓ 已种"); }
+  catch (e) { lines.push("Cache API   ✗ " + e); }
+  try { lines.push("SW 注册数   " + (await navigator.serviceWorker.getRegistrations()).length); } catch (e) { lines.push("SW 注册数   查询失败"); }
+  try { lines.push("persisted() " + await navigator.storage.persisted()); } catch (e) { lines.push("persisted() 查询失败"); }
+  lines.push("");
+  lines.push("现在起 ≥8 天不要打开本站（照常用手机/iPad 即可），然后回来按「检查存活」。");
+  put("oMark", "mark", lines.join("\n"));
+};
+
+$("bCheck").onclick = async () => {
+  const lines = ["检查存活 " + now()];
+  const age = (s) => { const d = (Date.now() - s.at) / 86400000; return d.toFixed(2) + " 天前种的（" + s.iso + "）"; };
+  let idb = null, ls = null, ca = null;
+  try { idb = await markTx("readonly", (s) => s.get(MARK_KEY)); } catch (e) { lines.push("IndexedDB   读失败 " + e); }
+  lines.push("IndexedDB    " + (idb ? "活着 · " + age(idb) : "**没了**"));
+  try { const raw = localStorage.getItem(MARK_LS); ls = raw ? JSON.parse(raw) : null; } catch (e) {}
+  lines.push("localStorage " + (ls ? "活着 · " + age(ls) : "**没了**"));
+  try { const c = await caches.open(MARK_CACHE); const r = await c.match("/__mark"); ca = r ? await r.json() : null; } catch (e) {}
+  lines.push("Cache API    " + (ca ? "活着 · " + age(ca) : "**没了**"));
+  try { lines.push("SW 注册数    " + (await navigator.serviceWorker.getRegistrations()).length); } catch (e) {}
+  try { lines.push("persisted()  " + await navigator.storage.persisted()); } catch (e) {}
+  const alive = [idb, ls, ca].filter(Boolean).length;
+  lines.push("");
+  lines.push(alive === 3 ? "⇒ 三处全活：本环境下没有被 7 天规则清掉。"
+           : alive === 0 ? "⇒ 三处全死：整源被清（ITP / 驱逐）。"
+           : "⇒ **分裂驱逐**：只有部分幸存 —— store 的 safe-resolve 对这种情况的假设需要按实测校准。");
+  const e = await estimate(true);
+  if (e) lines.push("当前 usage " + fmt(e.usage) + " / quota " + fmt(e.quota));
+  put("oMark", "mark", lines.join("\n"));
+};
+
+// ── ⑥ 导出 ──────────────────────────────────────────────────────────────
+$("bDump").onclick = () => {
+  const order = [["env", "① 环境"], ["persist", "② persist"], ["est", "③ estimate"], ["fill", "④ 撞墙"], ["mark", "⑤ 7天标记"]];
+  $("dump").value = "=== WeebPaint 存储探针 " + now() + " ===\n" + location.href + "\n\n" +
+    order.map(([k, title]) => "--- " + title + " ---\n" + (log[k] || "（未跑）")).join("\n\n");
+};
+$("bCopy").onclick = async () => {
+  if (!$("dump").value) $("bDump").onclick();
+  try { await navigator.clipboard.writeText($("dump").value); $("bCopy").textContent = "已复制 ✓"; }
+  catch (e) { $("dump").select(); $("bCopy").textContent = "自动复制被拒，已全选，手动复制"; }
+  setTimeout(() => { $("bCopy").textContent = "复制"; }, 2500);
+};
+
+// 开页就把不花钱的三项跑了
+env(); estimate(false); persistTriple(false);
+</script>
+</body>
+</html>

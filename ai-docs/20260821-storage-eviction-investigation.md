@@ -106,3 +106,377 @@ user 已授权"推迟宣发都是有可能的"。给出明确触发线，别让�
 **注意工期约束**：user 2026-08-21 明示「礼拜二之前没有 fable，**不做大手术**」。
 → 本调查的**发前**产出应偏向**低风险动作**（申请 persist、加错误 surface、引导装主屏、
 文案警告）；结构性改动（文件优先默认化等）排到 fable 回来之后。
+
+---
+
+# 第二部分 · 调查结果
+
+> as-of 2026-08-21 深夜（v0.10.21）· 执行 = opus · 上半部分（§0–§5）是 user 下的工单，原样保留不动。
+> **证据分级**：⟨实测⟩= 本轮跑出来的、⟨现查⟩= 2026-08-21 查的官方/一手文档、⟨代码⟩= 读源码得出、
+> ⟨待真机⟩= 我做不了、已烤成夹具交给人类。**我没有把任何一档冒充成另一档。**
+
+## 执行摘要
+
+**裁决：红。** 存在一条静默丢画路径，⟨实测⟩已在 Chromium 上带对照组复现，且**出货的
+`@internal/store` v0.3.0 构建产物里就是这段代码**。
+
+一句话：**IndexedDB 写入撞配额时，`put` 请求先触发 `onsuccess`、事务之后才 abort；
+store 的 `reqTx` 在 `onsuccess` 就 resolve，且完全没挂 `tx.onabort`
+——于是一次根本没落盘的保存，被逐层报成成功，`_dirty` 被清干净，重试机制全部解除武装，
+而那次 abort 连一个 unhandled rejection 都不产生。**
+
+好消息是这条路径**不吃掉整幅画**，只吃掉**本次编辑**（IDB 事务回滚，旧记录完好）；
+且**云开着的时候第二层是承重的**（push 用的是内存明文，不是本地副本 —— 见 §C.3）。
+坏消息是 C2 拍板让陌生人**默认关云**，正好把那唯一一层兜底关掉了。
+
+**但这条不必然推迟宣发** —— 修它是**低风险小手术**（store 侧约 5 行 + app 侧 2 行），
+符合「礼拜二前不做大手术」。真正可能推迟宣发的是**驱逐**那一半，而那一半我填不了，
+必须人类跑真机（§A）。
+
+---
+
+## 交付物 2（先讲，因为这是本轮主要战果）：配额撞墙的代码审计 + 复现记录
+
+### B.1 底账⟨代码⟩
+
+| 项 | 现状 |
+|---|---|
+| 全仓 `navigator.storage.persist()` 调用 | **0 处**（app + store 库都没有） |
+| 全仓 `QuotaExceededError` 处理 | **0 处**（app + store 库都没有） |
+| `navigator.storage.estimate()` | 2 处，均在 `src/gallery/gallery-shell.ts` |
+
+即：IndexedDB 全程 best-effort，且没有任何一行代码认得配额错误。
+
+### B.2 ★ 静默成功：`idb-store.ts` 的 `reqTx`⟨实测⟩
+
+出货产物 `node_modules/@internal/store/dist/idb-store.js:17-24`（与源码 `src/idb-store.ts:29-37` 一致）：
+
+```js
+function reqTx(mode, run) {
+  return openDb().then((db) => new Promise((resolve, reject) => {
+    const t = db.transaction(STORE, mode);
+    const req = run(t.objectStore(STORE));
+    req.onsuccess = () => resolve(req.result);   // ← 在 request 成功就 resolve，不等 commit
+    req.onerror = () => reject(req.error);
+    //                                            ← 没有 t.onabort，没有 t.oncomplete
+  }));
+}
+```
+
+**实测事件顺序**（Chromium 149 headless，CDP `Storage.overrideQuotaForOrigin` 压到 48 MiB）：
+
+```
+req.success → tx.abort(QuotaExceededError)
+```
+
+`req.onsuccess` **先**触发，事务**后**回滚。所以 `await idb.put(...)` 正常返回，
+之后的 abort 没有任何监听者。
+
+**判定性实验（逐字复刻出货版 `reqTx`，带对照组）**：
+
+| | 填充 | 目标 `put()` | 重开库读回 | unhandled rejection |
+|---|---|---|---|---|
+| 对照：不限配额 | 2/2 块 resolve | resolve | **在**（8388608 B） | 0 |
+| 实验：配额 48 MiB | **40/40 块全 resolve**（声称写了 320 MiB） | **resolve** | **不在** | **0** |
+
+同一份代码，唯一变量是配额。撞墙时它**照常宣布成功、字节根本没落盘、且静悄悄**。
+
+**复现脚本已落盘**：`tools/idb-quota-repro.mjs`（就是上表那两组实验，逐字复刻出货版 `reqTx`）。
+重跑：`node tools/idb-quota-repro.mjs`（需 `npm i` 装好的 playwright）。
+它同时是 **E1 的验收判据** —— 修好之后实验组那行应该从「resolve」变成
+「reject QuotaExceededError」。放 `tools/` 不放 `test/`：它要真浏览器 + CDP 压配额，
+不是 node 单元测试（`test/run.mjs` 是显式 import 发现，不会误收）。
+
+**波及面**：`put` 和 `del` 走 `reqTx`（都有此病）；`rename` 和 `usage` 自己等
+`t.oncomplete`，**没有此病** —— 所以 trash/restore/backup 的原子移动是干净的。
+病灶精确落在「写字节」和「删字节」两个动作上。
+
+### B.3 这条路径一路向上会走到哪⟨代码⟩
+
+```
+local-cache.save()            → 静默成功
+create-store file.save()      → resolve（tryPush:false 时返回 {pushed:false, reason:"not-attempted"}，属正常）
+editor-session.persist()      → 走 try 的成功分支：_dirty = false
+                                （v417 那套「失败要还原 dirty」的护栏是对的，但它挂在 catch 上，
+                                  而这里根本不抛 —— 护栏在正确的位置，只是这颗子弹不走那扇门）
+session-state.saveNow()       → setStatus("已保存 X")
+```
+
+连锁后果（这是为什么它是红而不是黄）：
+1. badge 画干净 → 用户以为存上了；
+2. autosave 看 `need=false` → **永不重试**；
+3. 退出时那个专为保存失败设计的「重试/丢弃」循环（`session-state` 的 `while (es.isDirty())`）
+   **被一并解除武装**；
+4. 那次 abort 不产生 unhandled rejection → **连 console 里都没有痕迹**。
+
+对照家规判据（§4 红）：「用户什么都没做错、UI 没报错、画没了」—— 四条全中。
+
+### B.4 撞墙时旧字节还在不在：**在**⟨代码⟩
+
+`local-cache.save()` 是**单笔 `put` 覆盖写**，没有「先删旧再写新」。IDB 事务 abort = 全回滚
+→ **旧记录完好无损**。
+
+所以工单 §1.B 问的三个问题，逐条回答：
+- **留下半个文件？** 不会。IDB 记录级原子。
+- **旧文件已删新文件没写成？** 不会。没有 delete-then-write 这个形状。
+- **UI 报成功还是报错？** **报成功。** ← 唯一坏的那个，就是上面那条。
+
+**⇒ 精确的伤害范围 = 丢「本次编辑」，不是丢「整幅画」。** 丢整幅画的路径是**驱逐**，不是撞墙。
+（这个区分很重要，别在文案里混成一句。）
+
+### B.5 保存失败时唯一那条提示，1.8 秒后自己变回「就绪」⟨代码⟩
+
+`src/session-state.ts:455`：
+
+```ts
+} catch (e) { reportError(new Error("[session] save failed: " + String(e)), "log");
+              setStatus(t("ss.saveFailed", { error: errMsg(e) })); }
+```
+
+- `setStatus(text, persist = false)`（`src/app.ts:375`）→ **1800 ms 后自动改回「就绪」**。
+- `reportError(..., "log")`（`src/error-badge.ts:76`）→ **只 console，不弹 banner**。
+
+对照同一批代码里的正确写法：`checkQuotaAndWarn` 用 `setStatus(..., true)`、
+`pushItem` 用 `setStatus(..., !res.pushed)`。**这一处是漏传参数，不是设计决定。**
+
+这条独立于 B.2：就算把 B.2 修好、错误真的抛上来了，用户看到的也只是一条 1.8 秒的瞬态文字。
+**两个都要修，否则修了 B.2 等于把丢画从「静默」升级成「几乎静默」。**
+
+### B.6 「几张画撞墙」：先修口径，数字待真机⟨代码⟩
+
+工单要「几张画撞墙」的实测数字。我给不了真机数字（§A），但先纠正一个**会误导判断的口径问题**：
+
+图库页脚那个「作品占用」**系统性低报**。`gallery-shell.ts:120-124` 自己写明了它只统计
+store 的 `files` 分区，**不含**：
+
+| 吃配额的东西 | 大小量级 | 用户看得见吗 | 用户清得掉吗 |
+|---|---|---|---|
+| `files/` 作品本体 | 1× | ✅ 页脚 | ✅ 删除/卸载 |
+| `checkpoints`（app 库，每幅画一份**完整 .ora** 快照） | **1×** | ❌ | ⚠ 见下 |
+| `trash/` 分区（删除=移进来，§A 红线，不硬删） | 1× | ✅ 回收站视图 | ✅ 清空 |
+| `backup/` 分区（dirty 覆盖前留底） | 1× | ❌ | ❌ **没有任何 UI** |
+| `gallery-thumbs` / `image-thumbs` | 小 | ❌ | ❌ |
+
+两条具体缺陷：
+
+1. **`checkpoints` 在「卸载本地副本」时不清。** `_dropCheckpoint` 只有两个调用者
+   —— 改名（`session-state.ts:553`）和删除（`gallery.ts:649`）。`unloadItem`（= 用户为了
+   **腾空间**而按的那个按钮，`session-state.ts:698`）**不清**。
+   ⇒ 用户卸载 10 幅画，以为清空了，实际origin 里还躺着 10 份完整 .ora，页脚显示 0 B。
+   **用户的自救动作只生效一半，而 UI 告诉他全生效了。**
+2. **`backup/` 分区没有任何 UI。** `listBackup` 在 app 侧只有 `store-absent.ts:120` 的空桩，
+   `app-store.ts:206` 只映射了 `listTrash`。（与记忆里「备份箱 UI 已记账待做」一致。）
+   ⇒ 备份只进不出，用户看不见也清不掉。
+
+**⇒ 真实系数：一幅活跃使用的画在 origin 里约占 2× 其 .ora 体积**（本体 + checkpoint），
+删了不清回收站就是 3×。工单说「iPad 上几张画就可能顶到上限」——按 ⟨现查⟩ 的 60% 磁盘额度，
+顶到上限其实很难（见 §A.1），但**「用户按了腾空间却没腾干净」是真的，且是发前就能修的**。
+
+---
+
+## 交付物 1：平台行为矩阵
+
+### A.1 ⟨现查⟩ 2026-08-21 查到的（MDN + WebKit 官方博客）—— **仍需真机核对**
+
+| 平台 | 配额上限 | `persist()` 怎么给 | 驱逐 |
+|---|---|---|---|
+| Safari / WebKit（iOS 17+/macOS 14+） | 单 origin **~60% 磁盘**；全部 origin 合计 ≤80%（嵌入式 WebView 是 15%/20%） | **无弹窗**，按启发式静默给或拒 | LRU + ITP 7 天无互动清 |
+| **iOS 主屏 Web App** | **和浏览器里一样是 ~60%**（WebKit 官方明确写了） | 同上，但**「是否作为主屏 Web App 打开」是官方点名的启发式因子** | 见下 |
+| Chrome / Chromium | 单 origin **~60% 磁盘**（persistent 与 best-effort **同额**） | **无弹窗**，按站点参与度启发式 | 存储压力下 LRU 整源驱逐；**已授予 persistent 的 origin 跳过** |
+| Firefox | best-effort：min(10% 磁盘, 10 GiB)；persistent：50% 磁盘、上限 8 TiB、不受 group limit | **会弹权限框** | 同上，persistent 跳过 |
+| 旧版 Safari（iOS 17 之前） | 初始 1 GiB，到顶后**问用户**要不要提额 | — | — |
+
+三条关键引文（一手）：
+- WebKit 官方：**「WebKit currently grants a request based on heuristics like whether the
+  website is opened as a Home Screen Web App.」** ⇒ 工单 §2 的假设「引导装主屏 = 数据安全措施」
+  **在官方文档层面得到支持**（但它说的是「更容易拿到 persist」，不是「7 天规则豁免」，别混）。
+- MDN：驱逐「**skips over origins that have been granted data persistence**」——**所有浏览器**都跳过已持久化的源。
+- MDN/WebKit：ITP「若最近七天的 Safari 使用中该 origin 没有用户互动（点/触），其脚本写入的存储会被删除」。
+
+### A.2 我查不到、**必须真机**的三格（这是全案剩下的风险）
+
+1. **`persist()` 授予了之后，还会不会被 ITP 的 7 天规则清掉？**
+   —— Apple **没有文档**。开发者报告互相矛盾（有人说能挡、有人说不能，还有人说
+   **「每次打开 app 都得重新申请一次」**）。⟨现查⟩ 只能确认「无官方答案」。
+   **这一格的答案直接决定裁决是黄还是红。**
+2. **iOS 主屏 Web App 到底豁不豁免 7 天规则？** 2020 年 Apple 的说法是主屏 App
+   「不属于 Safari、有自己的天数计数器」；WebKit 现行文档没有重申。**六年前的说法不能当 2026 的事实。**
+3. **iPad 上 `estimate().quota` 的真实数字。** 60% 是文档值，实测可能因设备存储紧张而低很多。
+
+### A.3 ⟨待真机⟩ 已交付的夹具
+
+`dist/storage-probe.html`（356 行，自包含、零依赖、零 CDN、不进 bundle、不被 `index.html` 引用）。
+
+**上线地址（推 dev 后即可用）：`https://weebpaint.com/dev/dist/storage-probe.html`**
+
+> 放 `dist/` 是因为 `deploy.yml` 里 `dist/` 是整目录 `cp -r` 的（根目录走白名单，加文件要改 workflow）；
+> `build.sh` 只 `find -delete` `weebpaint-*.mjs`，不会碰它。**必须同源**才有意义 —— persist 的启发式
+> 和配额都是按 origin 算的。
+
+六节：① 环境（含 standalone 检测）② persist 三连（可反复按，验「是不是每次开都要重申请」）
+③ estimate ④ **撞墙测试**（记录撞墙点 + 错误 name + **IDB 事件先后顺序** → 直接在真机上复验 B.2）
+⑤ **7 天存活标记**（IDB / localStorage / Cache API 三处同时种，验是否**分裂驱逐**）⑥ 一键汇总复制。
+
+已在 headless Chromium 端到端跑通（六节全出数据；撞墙节在压配额下成功复现 B.2 的事件顺序）。
+
+**给人类的操作单（一次跑完，别分批）**：
+
+- ⚠ **④ 撞墙测试有风险**：它会真的占满配额，整机存储压力可能让浏览器**驱逐别的网站**的数据。
+  跑之前把本机 WeebPaint 里的画推上云或导出。夹具里已有二次确认勾选框，测完自动删探针库并独立核验。
+- **⑤ 是有时效的，今晚就要种**：种完 **≥8 天不要打开本站**（照常用手机即可），到期回来按「检查存活」。
+  这是 7 天规则唯一的实测法，**今晚不种，八天后就还是没有答案**。
+- 每台设备**跑两遍**：先在**浏览器标签页**里，再**装到主屏**后打开同一地址跑一遍
+  —— 这两者是不同的存储环境，正是 §A.2 第 2 问要分辨的。
+- 覆盖：iPad Safari（主要战场）、iPhone Safari、桌面 Chrome（对照）。
+
+---
+
+## 交付物 3：store 库 escalation 清单
+
+按家规「缺接口/库没实现的需求 escalate to human 改库 API，绝不在 app 端绕」；改库走 `pwa-cloud-store` skill。
+**以下我一行都没改，等拍板。**
+
+### E1【必修 · 红线】`idb-store.ts` 的 `reqTx` 要等事务 commit⟨实测⟩
+
+- **红线归属**：§A「冲突必 surface」的存储侧等价物 = **存储失败必 surface**；以及
+  「dirty 永不被驱逐」—— 现在 dirty 是被**假的成功**清掉的。
+- **形状**（约 5 行）：`put`/`del` 改成等 `t.oncomplete` 才 resolve、挂 `t.onabort` → reject
+  （`rename`/`usage` 已经是这个形状，**库内就有正确样板，不必新发明**）。
+- **风险**：低。语义只会变严（原本假成功的现在会真失败），不改任何持久化结构，不改 API 形状。
+- **必须配一个回归测试**：node 测不到 IDB —— 建议把 `tools/idb-quota-repro.mjs` 那套
+  （playwright + CDP 压配额）收编进库的测试。这是本轮唯一能在 CI 里钉住这条红线的办法。
+- ⚠ **修完要重打 tgz 并让 WeebPaint 收货**（`pull-package.sh`），否则改的是源码、出货的还是病灶。
+
+### E2【建议】`persist()` 该由库申请还是 app 申请 —— **需要拍板，我不擅自定**
+
+`persist()` 保护的是**整个 origin 的 IDB**，而 origin 里同时有 store 的库和 app 自己的
+`weebpaint` 库（缩略图/checkpoints）。两种接法：
+
+- **(a) 库在 `createStore()` 里申请** —— 所有 sibling 一次对齐（符合「让 AI 一次对齐、不必每个项目重盯红线」的库存在意义）；但库因此获得一个**副作用型**行为，且 Firefox 会**弹权限框**，弹框时机属于产品决策。
+- **(b) app 在 boot 里申请** —— 时机可控（可以挑「用户第一次保存成功后」这种有说服力的时刻再弹），但每个 sibling 各写一遍，容易漏。
+
+**我的建议：(b)，但把「有没有 persist」写进库的契约文档，并让库在未持久化时上报一次 `"warning"`。**
+理由：弹框时机是产品判断，按家规「判断类字段归人类拍板」不该由库替所有 app 决定；
+而库有义务**说出**「你现在跑在 best-effort 存储上」这个事实。
+
+### E3【契约缺口 · 必须显式写下来】§A「dirty 永不被驱逐」被浏览器旁路
+
+`CONTEXT.md` / §A 红线的「dirty 永不被驱逐」守的是**库自己的 offload 逻辑**
+（`offload` 有 `isDirtyAnywhere` 守卫，这部分是对的、也真的在守）。
+但**浏览器的整源驱逐绕过 app 的一切逻辑** —— 库对此**无法防御**。
+
+按家规「瑞士奶酪 = 每层承重，做不到要显式写契约」：**这条要写进 `DATA SAFETY GUIDELINE.md`**，
+措辞类似「本红线的作用域是 store 自身的驱逐决策；浏览器发起的整源驱逐在本库能力之外，
+唯一缓解是 `persist()` + 云端副本 + 用户导出」。
+**现在文档里没有这句，读者会以为这条红线覆盖了浏览器驱逐 —— 那正是煤气灯。**
+
+### E4【已核实无事，记录备查】分裂驱逐的假设
+
+`safe-resolve.ts:65` 已经预想过「localStorage 被清而 IDB 幸存 → dirty 标志同批丢」，
+并在 `seenBase == null` 时强制 move-aside。**这段是对的，不用改。**
+夹具 ⑤ 会实测三处存储是否真会分裂死亡，用来校准这个假设（若实测总是整源同死，这段就是纯保险，无害）。
+
+---
+
+## 交付物 4：红/黄/绿裁决 + 动作清单
+
+### 裁决
+
+| 项 | 判定 | 依据 |
+|---|---|---|
+| **配额撞墙 → 静默丢本次编辑** | 🔴 **红** | ⟨实测⟩带对照组复现；§4「用户什么都没做错、UI 没报错」四条全中 |
+| **保存失败提示 1.8 秒消失 + 不弹 banner** | 🔴 **红**（同一条伤口的第二层） | ⟨代码⟩漏传参数 |
+| **「卸载本地副本」不清 checkpoint** | 🟡 黄 | ⟨代码⟩；用户自救动作只生效一半而 UI 说全生效 |
+| **`backup/` 无 UI、无法清理** | 🟡 黄 | ⟨代码⟩；只进不出 |
+| **驱逐（ITP 7 天 / LRU 整源）** | ⬜ **未裁决** | ⟨待真机⟩；**这一格才是可能推迟宣发的那个** |
+| **零 `persist()`** | 🟡 黄（修起来很便宜） | ⟨代码⟩ |
+
+**总裁决：红 —— 但红在一处低风险小手术上，不在结构上。**
+我**不建议因为 B.2 推迟宣发**；建议**修完 B.2 + B.5 再发**（两处加起来是小时级，不是天级）。
+真正的 go/no-go 悬在 §A.2 那三格真机数据上 —— 夹具已备好，**今晚种下 ⑤ 才有八天后的答案**。
+
+### 发前必做（全部低风险，不碰结构，符合「礼拜二前不做大手术」）
+
+| # | 动作 | 位置 | 风险 |
+|---|---|---|---|
+| 1 | **E1：`reqTx` 等 commit** | store 库（需 escalate + 重打 tgz + 收货） | 低，库内有正确样板 |
+| 2 | **B.5：保存失败要留得住** `setStatus(..., true)` + `reportError(..., "error")`（弹 banner） | `session-state.ts:455` | 极低，两行 |
+| 3 | **申请 persist()**（每次 boot 都申请一次 —— 有开发者报告 Safari 每次开都要重申请） | app boot | 低 |
+| 4 | **B.6.1：`unloadItem` 补 `_dropCheckpoint`** | `session-state.ts:698` | 低 |
+| 5 | **首屏可见的数据安全告知 + 引导装主屏**（文案见交付物 5；⟨现查⟩装主屏是官方点名的 persist 启发式因子，所以这不只是 UX 建议） | 待文案 agent | — |
+| 6 | **今晚种下夹具 ⑤ 的 7 天标记**（错过今晚 = 八天后仍无答案） | 人类，2 分钟 | 无 |
+
+### 发后 / 等 fable 回来
+
+- 结构性答案：**无云用户走文件优先**（见 Blockbench 一节）—— 不是新建工程，是把
+  v0.10.16 已有的「存为本地 .ora / Ctrl+S 存回原文件」**抬成默认路**。
+- `backup/` 分区的 UI（备份箱，记忆里已记账）。
+- 把 `tools/idb-quota-repro.mjs` 那套 playwright+CDP 压配额测试收编进 store 库 CI（E1 的回归钉）。
+- 图库页脚口径修正（把 checkpoints/backup 算进去，或明说「不含」）。
+
+---
+
+## 交付物 5：给文案 agent 的「能承诺什么」三档
+
+前提：**未跑真机前，这三档是草案。** §A.2 的答案会改写第一档。
+
+### ① 承诺得起的
+- 画**不**上传到任何服务器（云同步默认关；开了才走用户自己的 OneDrive）。
+- 「存为本地 .ora」/「导出」拿到的文件是**用户自己的**，存在用户自己的磁盘/文件 App 里，
+  浏览器再怎么清也不动它。
+- 修改是逐笔落在本机的，飞机模式完全可用。
+
+### ② 承诺不起的（**不许暗示**）
+- ❌「你的画会一直在这里」—— 浏览器有权在存储压力下**整源清空**，绕过我们所有逻辑
+  （§E3：这不是我们能防御的层）。
+- ❌「关掉标签页也不会丢」——⟨现查⟩ Safari 在 origin 七天无互动时会删除脚本写入的存储。
+- ❌ 任何形式的「自动备份」「云端保险」——默认关云的用户**没有第二份**。
+
+### ③ 必须主动警告的（**要出现在用户看得到的地方，不是 README 脚注**）
+- **「浏览器里的画不是备份。重要的作品请导出保存。」** —— 首屏/首次保存后可见。
+- **iOS 用户：把本站装到主屏**。⟨现查⟩ WebKit 官方点名「是否作为主屏 Web App 打开」是它
+  决定给不给持久化存储的启发式因子之一 —— **这是数据安全措施，不是 UX 建议**，文案要这么说。
+- 本地存储接近上限时的告警（`checkQuotaAndWarn` 已有 80%/95% 两档，**这块现状是好的**，
+  只是口径低报，见 B.6）。
+
+**语气纪律**：按家规「不许煤气灯」，别把「我们尽力了」写成「很安全」。
+⟨现查⟩ 的东西写成「据浏览器厂商文档」，⟨待真机⟩ 的东西在真机跑完前**一个字都别写进产品**。
+
+---
+
+## Grounding：Blockbench 怎么解这道题⟨现查⟩
+
+user 点名的前辈。结论：**它根本不把身家交给浏览器存储。**
+
+- Blockbench 网页版是 **file-first / download-based**：每次保存 = 生成一个下载（浏览器版
+  无法原地覆盖原文件），**权威副本是用户下载目录里那个文件**。
+- 浏览器存储只用来放**设置 / 界面布局 / 主题**这些丢了不心疼的东西。
+- ⚠ **两个来源不完全一致，我如实标注**：官方 how-to 文章提到网页版崩溃后有「Recover Unsaved
+  Model」的本地缓存恢复；而代码层面的第三方 wiki 说网页版没有项目自动保存/恢复。
+  **两者一致的部分（也是唯一重要的部分）是：权威副本是文件，不是浏览器存储。**
+
+**⇒ 对我们的意义**：这印证了工单 §3 的猜想 —— 结构性答案是「无云用户走文件优先」，
+而**我们已经有一半**（v0.10.16 的「存为本地 .ora」+ Ctrl+S 存回原文件，
+Safari 无 `showSaveFilePicker` 时走 blob 下载兜底，`export-import-menu.ts:218-238`）。
+差的是**把它抬成默认路**，而不是当作导出 hub 里的一个选项。这是 fable 回来之后的活。
+
+---
+
+## 附：本轮顺带查实的两件事
+
+1. **prod 与 dev 同源。** WeebPaint 有独立域名 `weebpaint.com`，prod=`/`、dev=`/dev/`。
+   README:14 写「两个通道的本地数据互相独立」—— 在**库名**层面对（appId 命名空间隔离），
+   但**驱逐和配额是按 origin 的**：一次整源驱逐会**同时带走两个通道**，两个通道也**共用同一份配额**。
+   README 那句话不算错，但会让人以为 dev 是个安全的沙盒。建议文案里别再强化这个印象。
+2. **独立域名是好消息**：不像 `*.github.io` 那样和全家族兄弟共享 origin 配额与驱逐命运。
+   （其它还在 github.io 上的兄弟，共享 origin 这件事值得单独记一笔 —— 一次驱逐会一锅端。）
+
+## 我没做到的（诚实清单）
+
+- **A 段矩阵的真机格子一个都没填。** 我填不了，已烤成夹具 + 操作单（§A.3）。
+- **B.2 只在 Chromium 上实测。** Safari 的 IDB 事件顺序**可能不同**（也可能更糟：有历史 bug
+  记录说 Safari 的 IDB 会整库丢）。夹具 ④ 会在真机上报出同一份事件顺序 —— **跑之前，
+  「Safari 也这样」是推测不是事实，我没有把它写成事实。**
+- **没改一行代码。** E1 要改库、按家规必须先 escalate；app 侧那几处（B.5 / B.6.1 / persist）
+  等 E1 的拍板一起做更省事，且现在动等于在宣发前夜无授权改 `session-state.ts`。
+  **发前必做清单已按风险从低到高排好，你说动就动。**
