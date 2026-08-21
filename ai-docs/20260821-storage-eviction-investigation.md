@@ -480,3 +480,71 @@ Safari 无 `showSaveFilePicker` 时走 blob 下载兜底，`export-import-menu.t
 - **没改一行代码。** E1 要改库、按家规必须先 escalate；app 侧那几处（B.5 / B.6.1 / persist）
   等 E1 的拍板一起做更省事，且现在动等于在宣发前夜无授权改 `session-state.ts`。
   **发前必做清单已按风险从低到高排好，你说动就动。**
+
+---
+
+# 第三部分 · 落地记录（2026-08-21 当夜）
+
+> as-of 2026-08-21 · WeebPaint v0.10.22 / @internal/store v0.3.1 · 已推 dev，**真机未验**。
+> 本节只记「做了什么、验到什么程度」。所有 commit 均标 `[待审计]`（家规 2026-08-21：
+> opus 写的 commit 一律标注待审计）。
+
+## user 当夜的拍板
+
+| # | 拍板原话 | 落地 |
+|---|---|---|
+| 1 | 「persist 现在就应该 patch」 | ✅ `src/storage-persist.ts` |
+| 2 | 「E1 E2 E3 批准」 | ✅ 全部落地（E2 = persist 归 app 侧） |
+| 3 | 「所有 opus 写的 commit 都必须标注待审计」 | ✅ 本批全部标注；已推的 `9f048b3` 经「同意重写」amend 成 `693a0fc` |
+| 4 | 「禁用云的时候应该所有用户路线都走 blockbench 模式」 | ✅ 见下 |
+| 5 | 7 天存活测试「没法做，weebpaint 我还在高频用」 | ⚠ 见「悬着的事」 |
+
+## 做了什么
+
+**E1（store v0.3.1）** —— `idb-store.reqTx` 改为等 `t.oncomplete` 才 resolve、`t.onabort` 则 reject。
+回归护栏 `tools/idb-tx-commit-check.mjs` 加载**真实构建产物** `dist/idb-store.js`，用 CDP 压配额撞墙。
+**已验证它抓得住旧 bug**：把 dist 临时回退到旧写法跑，退出码 1、精确报「没落盘却报成功」。
+
+**E3** —— `DATA SAFETY GUIDELINE.md` 新增一条红线行（写入成功 = 事务 commit）+ 新增
+**§A.1「本模型防不住什么」**：浏览器整源驱逐 / ITP 7 天清除绕过本库一切代码路径，
+§A 的「dirty 永不被驱逐」只约束 store 自己的 offload 决策。按瑞士奶酪纪律显式写下边界。
+
+**E2 / persist** —— boot 时申请一次（`ensureStoragePersistence()`）。已 persistent 不重复申请
+（Firefox 会弹框）。**实测 weebpaint.com / Edge 151 桌面：`persist() = true`，2ms，无弹窗** ——
+所以 §A 矩阵的 Chromium 那格可以填了：静默授予，授予后跳过 LRU 驱逐。
+
+**B.5** —— 保存失败不再 1.8 秒消失：sticky 状态行 + i18n banner + 保留英文 dev 诊断。
+
+**云关 = Blockbench 模式** —— 审计先查实了一个洞：云关时图库被封死，但汉堡菜单
+「新建作品/从图片/从剪切板」**没有云闸** → `newDoc` → `saveNow` 写库 + checkpoint 写完整 .ora 副本
+⇒ **用户把作品存进了库，却看不见、管不了、删不掉**。比「全存库」和「全不存库」两个极端都差。
+修法与关键设计见 v0.10.22 的 commit message；一句话：把「未命名的本地文档」表示成
+`_localFile.handle === null`，**复用**已有的全部无地墙，不新造平行状态。
+
+## 验到什么程度（别把这几档混起来）
+
+- ⟨实测·自动⟩ `npm test` 1098 passed / 0 failed；store 341 passed / 0 failed；两仓 tsc 干净。
+- ⟨实测·真浏览器⟩ `tools/cloudoff-blockbench-check.mjs` **7/7 过**：云关新建作品后
+  store `files/` 零键、`checkpoints` 零键、文档有脏轨、按保存后库里仍零键、不弹错误 banner；
+  IDB 里只剩 settings 类 collection。
+- ⟨实测·真浏览器⟩ 保存按钮在云关时**确实走到了本地文件保存框**（headless 无 user-gesture 活化
+  → 被当成「已取消」，状态序列实测为 `Save cancelled → Ready`）。
+- ⚠ **夹具限制（已写进文件头，别当端到端）**：headless 里合成的 pointer 事件走不通真实输入栈
+  （实测 `histchange=false`），所以「脏轨」验的是**契约层**（直接派 `wp:histchange` 再看 beforeunload
+  挽留是否生效）。**真描边 → 标脏属真机批。**
+- ❌ **iPad / Safari 一格都没验。** Blockbench 模式在 Safari 上走的是「下载兜底 + 保持未命名」那条路，
+  与桌面的「认领句柄 + Ctrl+S 写回」是**两条不同的代码路径**，真机批必须两条都跑。
+
+## 悬着的事
+
+1. **7 天 ITP 测试测不了**（user：weebpaint 高频在用 ⇒ 该 origin 永远有互动，ITP 不会触发）。
+   而要紧的本来就不是高频用户，是「试一次、两周后回来」的陌生人 —— 正是宣发受众。
+   **建议：停止试图证明它，直接按「会被清」设计和写文案**（Apple 无文档、开发者报告互相矛盾）。
+   这样 go/no-go 就不卡在这一格。若想实测，需要一台**不用 WeebPaint** 的设备/浏览器 profile。
+2. **一处产品判断待确认**：云开着时打开的库内文档，中途关云 → 现在仍存回它**原本的库身份**，
+   不切 Blockbench。理由：否则那幅画当场分叉成「库里旧的 + 文件新的」，且违反 cloud-capability
+   自己的自愈红线「关→开必须原样回来、零数据变更」。**要「一律切」的话说一声，改起来是小的。**
+3. **发前必做剩下两条**（都没做，等你发话）：
+   - `unloadItem` 补 `_dropCheckpoint`（用户为腾空间按的按钮，现在只生效一半）；
+   - 首屏可见的数据安全告知 + 引导装主屏（文案，交付物 5 已给三档草案）。
+4. `backup/` 分区 UI（备份箱）仍是只进不出 —— 发后。
