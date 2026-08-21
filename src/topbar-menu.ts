@@ -231,7 +231,10 @@ export function initTopbarMenu(ctx: AppContext) {
     setMenuOpen(false);
     els.addNewFolder.hidden = true;
     els.galleryAddPopup.classList.remove("hidden");
-    anchorPopupToBtn(els.galleryAddPopup, els.menuBtn);
+    // align:"left"（2026-08-21 v0.10.20）：汉堡钮在工具栏左段，默认右对齐会让 popup 从按钮**向左悬出**
+    //   （headless 截图实锤 popup 落 248..448 而按钮在 416..448），与菜单板（按钮正下）脱节。
+    //   左对齐 = 与 menuPanel 同一落点，读作「菜单的下一级」。
+    anchorPopupToBtn(els.galleryAddPopup, els.menuBtn, { align: "left" });
   });
   // 菜单「登录 OneDrive」行（v0.6.22 menuSignIn）已删（2026-08-21 拍板）：编辑器内登录入口
   //   统一走 smart save 的「现在登录同步？」sheet（见 smartSaveAndPush）；图库云账号 popup 的
