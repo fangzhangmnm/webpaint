@@ -10,6 +10,7 @@ import { reportError } from "./error-badge.ts";
 import { session } from "./session-state.ts";
 import { getCurrentSessionName } from "./session.ts";
 import { restoreLastSession } from "./boot-restore.ts";
+import { appState, flushAppState } from "./app-state.ts";
 import type { AppContext } from "./app-context.ts";
 
 // 笔架 boot：collection.init（本地缓存 hydrate → 后台 reconcile 云端 + 新库 seed）→
@@ -48,5 +49,10 @@ export async function bootRestoreSession(ctx: AppContext) {
     updateSaveStatus,
     onOpened: (name) => setStatus(t("ss.opened", { name })),
     onNotFound: (name) => setStatus(t("mi.lastNotFound", { name })),
+    // 崩溃环断路器（纪律③，v0.10.9）：标记走 appState（库内 KV，device-local），落盘走 flushAppState。
+    getRestoreAttempt: () => appState.restoreAttempt,
+    setRestoreAttempt: (name) => { appState.restoreAttempt = name; },
+    flushMarker: () => flushAppState(),
+    onCrashLoopSkipped: (name) => setStatus(t("mi.restoreCrashLoop", { name }), true),
   });
 }

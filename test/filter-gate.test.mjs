@@ -133,6 +133,8 @@ describe("filter-gate · 选区 mask", () => {
     eq(be.filterCommit(fid), true);
     assert(bytesEq(bboxBytes(be), expected), "mask 内变 / mask 外 passthrough，逐位 = 参考 bake");
     assert(!bytesEq(expected, src), "参考值确实动了（测试自证非空转）");
+    be.view.selection.dispose();   // 直接赋在 view 上的选区绕过了组件所有权——测试是持有者，自己收
+    be.view.selection = null;
     be.dispose();
   });
 });

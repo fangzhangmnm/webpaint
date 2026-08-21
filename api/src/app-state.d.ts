@@ -9,6 +9,7 @@ export declare const APP_STATE_DEFAULTS: {
         iv: string;
         ct: string;
     } | null;
+    readonly "restore-attempt": string | null;
 };
 export type AppStateKey = keyof typeof APP_STATE_DEFAULTS;
 export declare function wireAppState(synced: Collection, local: Collection): void;
@@ -30,6 +31,7 @@ export declare const appState: {
         iv: string;
         ct: string;
     } | null);
+    restoreAttempt: string | null;
     pushHotToPersistent(): void;
     pullFromPersistent(): Promise<void>;
 };

@@ -4,8 +4,8 @@
   "type": "module",
   "comment": "依赖全 vendor：@internal/store 走 file:vendor-pkgs/*.tgz（tgz 物理在仓，断网可装；升级=换 tgz + npm install）；esbuild 把它打进 dist bundle，部署零 node_modules。devDependencies 仅供开发期（tsc --noEmit 类型检查 + playwright GL smoke `npm run smoke`），不进运行时 bundle、不影响部署。",
   "scripts": {
-    "test": "node test/run.mjs",
-    "test:full": "node test/run.mjs && node test/run-full.mjs && npm run smoke",
+    "test": "node --expose-gc test/run.mjs",
+    "test:full": "node --expose-gc test/run.mjs && node test/run-full.mjs && npm run smoke",
     "mcp": "node scripts/mcp-server.mjs",
     "smoke": "node test/gl-smoke/run.mjs",
     "preview:build": "tools/esbuild/esbuild test/gl-smoke/preview.ts --bundle --format=iife --outfile=test/gl-smoke/preview.js",

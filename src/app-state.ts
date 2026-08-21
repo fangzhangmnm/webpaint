@@ -28,11 +28,15 @@ export const APP_STATE_DEFAULTS = {
   // 图库密码验证器 sentinel（v0.4.11，真机 2.3）：{v,salt,iv,ct} | null。**跟账号走**（synced）——
   //   重装/换设备后仍知道「图库已有密码」，创建流程变输入校验。语义见 password-verifier.ts。
   "gallery-password-verifier": null as { v: 1; salt: string; iv: string; ct: string } | null,
-  // 设备本地（local-app-state）：**当前为空**。
-  //   v407 曾放过 "last-session-signed-in"（"控静默重认证"），但它零 consumer——只写不读，
-  //   而真正的判定走 `!isSignedIn()`（app.ts 的 retrySilentSignIn）。v409 删：登录态的 SSoT 是
-  //   auth provider（MSAL 自己的 localStorage cache），不该在这再存一份会漂移的影子。
-  //   要加设备级字段时才往这写，别为"以后可能用得上"占位。
+  // 设备本地（local-app-state）：
+  //   （v407 曾放过零 consumer 的 "last-session-signed-in"，v409 删——只加真有读者的字段。）
+  // boot 崩溃环断路器标记（v0.10.9，user 2026-08-20 批准新增）：boot 自动开画前写入目标名并
+  //   flush 落盘；优雅收场（成功 / restore 返 false）清回 null。冷启动读到「标记 == 想开的画」
+  //   = 上次 boot 死在开它的半路（小内存设备开超大文件 OOM 被杀等）→ 跳过自动开、停图库，
+  //   否则每次冷启动都重开同一张必死的画 = 锁死环，用户连图库都进不去。断路逻辑在
+  //   boot-restore.ts；成功持久化活动身份时也清（session.ts setCurrentSessionName）——
+  //   手动重开成功后 boot 自动开重新武装。**device-local**：崩的是这台设备，别跨设备传染。
+  "restore-attempt": null as string | null,
 } as const;
 export type AppStateKey = keyof typeof APP_STATE_DEFAULTS;
 
@@ -82,7 +86,10 @@ export const appState = {
   set blenderPanelUrl(v: string) { setC(_synced, "blender-panel-url", v); },
   get galleryPasswordVerifier(): { v: 1; salt: string; iv: string; ct: string } | null { return getC(_synced, "gallery-password-verifier"); },
   set galleryPasswordVerifier(v: { v: 1; salt: string; iv: string; ct: string } | null) { setC(_synced, "gallery-password-verifier", v); },
-  // ── 设备本地（local-app-state）冷字段：当前无（见 APP_STATE_DEFAULTS 注）──
+  // ── 设备本地（local-app-state）冷字段 ──
+  // boot 崩溃环断路器标记（语义见 APP_STATE_DEFAULTS 注）
+  get restoreAttempt(): string | null { return getC<string | null>(_local, "restore-attempt"); },
+  set restoreAttempt(v: string | null) { setC(_local, "restore-attempt", v); },
 
   // ── 序列化持久化相关（除字段外仅此二法，无应用逻辑）──
   // 热变量写 collection。本轮无热字段：冷字段 setter 已直写 collection → no-op。

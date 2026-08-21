@@ -47,6 +47,14 @@ describe("polygon · LassoEngine 会话（abortStroke ≠ abortSession）", () =
     eng.setSubTool("polygon");
     return eng;
   };
+  // 收尾释放（Selection 所有权纪律 selection.ts:12-15）：entry.before 随 entry 走、after 归
+  // doc.selection 槽——本测试的假 doc/entry 没有下游持有者，测试自己就是终点，必须 dispose
+  // （曾漏：run.mjs 泄漏门=exit 噪音年久失聪，v0.10.9 升级成红灯后此处补账）。
+  const flushSel = (eng, ...entries) => {
+    for (const e of entries) if (e?.before && !e.before.disposed) e.before.dispose();
+    const s = eng.doc?.selection;
+    if (s && !s.disposed) { s.dispose(); eng.doc.selection = null; }
+  };
   it("逐点落顶点 → 闭合 → 选区 mask 正确 + history entry", () => {
     const eng = mkEng();
     eng.polygonAddVertex(10.4, 10.2);   // round 锁格点 → (10,10)
@@ -61,6 +69,7 @@ describe("polygon · LassoEngine 会话（abortStroke ≠ abortSession）", () =
     eq(sel.bboxW, 10); eq(sel.bboxH, 10);
     eq(eng.polygonSessionActive(), false, "会话已收摊");
     eq(eng.getDrawingPath(), null, "预览线已消");
+    flushSel(eng, entry);
   });
   it("cancelDrawing（双指/掌触路径）只丢段预览，顶点保留", () => {
     const eng = mkEng();
@@ -111,5 +120,6 @@ describe("polygon · LassoEngine 会话（abortStroke ≠ abortSession）", () =
     assert(sel, "还有剩余选区");
     eq(sel.sampleAt(15, 15), 0, "洞挖掉了");
     assert(sel.sampleAt(5, 5) > 0, "外围还在");
+    flushSel(eng, entry0, entry);
   });
 });

@@ -128,3 +128,22 @@ import "./color-name.test.ts";       // v0.7.10 颜色命名：xkcd top-120 表�
 
 console.log("\n  WeebPaint —— vendored OneDriveProvider 适配验收（lib 契约在 sync-store/test/）\n");
 await run();
+
+// ── tile 句柄泄漏门（v0.10.9）：CpuTilePool 的泄漏 assert（FinalizationRegistry）曾只在进程
+// 退出时打 console——「不红测试的告警」在套件里躺了很久没人认领（broken windows）。这里在全绿
+// 之后强制 GC + 排水 finalizer，把泄漏升级成 exit 1。需要 --expose-gc（npm test 已带）；
+// 裸跑 node test/run.mjs 时门静默跳过（别让本地随手跑变红）。
+if (globalThis.gc) {
+  const { setTilePoolLeakReporter } = await import("../src/backend/tiles/app-tile-pool.ts");
+  let leaks = 0;
+  setTilePoolLeakReporter((info) => { leaks++; console.error("  [leak-gate] " + info); });
+  for (let i = 0; i < 3; i++) {   // 多轮：句柄→registry 回调可能链式解除可达
+    globalThis.gc();
+    await new Promise((r) => setTimeout(r, 30));
+  }
+  if (leaks) {
+    console.error(`\n  [leak-gate] ${leaks} 个 TileHandle 泄漏（GC 时仍未 release）——去修拿了句柄没放的测试/代码`);
+    process.exit(1);
+  }
+  console.log("  [leak-gate] 0 leaks");
+}

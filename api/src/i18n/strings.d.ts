@@ -5778,6 +5778,12 @@ export declare const S: {
         readonly ja: "前回の作品「{name}」が見つかりません。選ぶか新規作成してください";
         readonly tok: "sitelen pini \"{name}\" li lon ala. o wile e sitelen ante (anu: o pali e sin).";
     };
+    readonly "mi.restoreCrashLoop": {
+        readonly zh: "上次打开 \"{name}\" 时应用意外退出（可能内存不足），已暂停自动打开；可从图库手动打开它";
+        readonly en: "The app crashed last time while opening \"{name}\" (possibly out of memory); auto-open is paused — you can still open it from the gallery";
+        readonly ja: "前回「{name}」を開く途中でアプリが落ちました（メモリ不足の可能性）。自動で開くのを一時停止しました。ギャラリーから手動で開けます";
+        readonly tok: "open pini la ilo li moli lon open pi sitelen \"{name}\" (ken la sona awen li lili). open kama li pini. sina ken open e ona lon lipu sitelen.";
+    };
     readonly "mi.enterPassword": {
         readonly zh: "输入密码";
         readonly en: "Enter password";

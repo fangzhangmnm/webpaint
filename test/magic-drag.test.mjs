@@ -54,6 +54,7 @@ describe("magic-drag · 沿路径连续选", () => {
     eq(entry.before, null, "before = 起笔时无选区");
     eq(entry.after, eng.doc.selection, "after = 最终选区");
     eq(eng.state(), "idle", "会话收摊");
+    eng.doc.selection.dispose();   // 测试收尾：假 doc 无下游持有者（同下面 subtract 测试的收法）
   });
 
   it("subtract 模式拖：从全选里挖掉扫过的区", () => {

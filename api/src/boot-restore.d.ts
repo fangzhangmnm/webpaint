@@ -9,6 +9,12 @@ export interface RestorePorts {
     updateSaveStatus(): void;
     onOpened(name: string): void;
     onNotFound(name: string): void;
+    /** 上次 boot 留下的 attempt 标记（优雅收场会清 null；非 null = 上次死在开它的半路）。 */
+    getRestoreAttempt(): string | null;
+    setRestoreAttempt(name: string | null): void;
+    /** 标记必须在 restore 之前**落盘**——collection 冷写是 400ms 防抖，OOM 崩溃可比它快。 */
+    flushMarker(): Promise<void>;
+    onCrashLoopSkipped(name: string): void;
 }
-export type RestoreOutcome = "restored" | "gallery-no-name" | "gallery-failed";
+export type RestoreOutcome = "restored" | "gallery-no-name" | "gallery-failed" | "gallery-crash-loop";
 export declare function restoreLastSession(p: RestorePorts): Promise<RestoreOutcome>;

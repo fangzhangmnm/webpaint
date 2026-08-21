@@ -1045,7 +1045,8 @@ export const S = {
   "mi.referenceLive": { zh: "参考小窗：实时镜像主画布", en: "Reference window: live-mirroring the main canvas", ja: "参考ウィンドウ：メインキャンバスをリアルタイムミラー", tok: "lupa lukin: sama supa sitelen lon tenpo ale" }, 
   "mi.referenceLiveExit": { zh: "参考小窗：已退出实时模式", en: "Reference window: exited live mode", ja: "参考ウィンドウ：リアルタイムモードを終了", tok: "lupa lukin: nasin pi tenpo ale li pini" }, 
   "mi.rackPersistFailed": { zh: "笔架持久化失败（可能私密浏览）：本次 session 可用，重启会重置", en: "Brush rack persistence failed (private browsing?): usable this session, resets on restart", ja: "ブラシラックの保存に失敗（プライベートブラウズの可能性）：今回のセッションは使えますが、再起動でリセットされます", tok: "poki pi ilo sitelen li ken ala awen (ken la ilo lukin li lon nasin len). tenpo ni la ona li pali. taso open sin la ona li kama sama open." }, 
-  "mi.lastNotFound": { zh: "找不到上次画作 \"{name}\"，先选一个或新建", en: "Last artwork \"{name}\" not found; pick one or create a new one", ja: "前回の作品「{name}」が見つかりません。選ぶか新規作成してください", tok: "sitelen pini \"{name}\" li lon ala. o wile e sitelen ante (anu: o pali e sin)." }, 
+  "mi.lastNotFound": { zh: "找不到上次画作 \"{name}\"，先选一个或新建", en: "Last artwork \"{name}\" not found; pick one or create a new one", ja: "前回の作品「{name}」が見つかりません。選ぶか新規作成してください", tok: "sitelen pini \"{name}\" li lon ala. o wile e sitelen ante (anu: o pali e sin)." },
+  "mi.restoreCrashLoop": { zh: "上次打开 \"{name}\" 时应用意外退出（可能内存不足），已暂停自动打开；可从图库手动打开它", en: "The app crashed last time while opening \"{name}\" (possibly out of memory); auto-open is paused — you can still open it from the gallery", ja: "前回「{name}」を開く途中でアプリが落ちました（メモリ不足の可能性）。自動で開くのを一時停止しました。ギャラリーから手動で開けます", tok: "open pini la ilo li moli lon open pi sitelen \"{name}\" (ken la sona awen li lili). open kama li pini. sina ken open e ona lon lipu sitelen." }, 
   "mi.enterPassword": { zh: "输入密码", en: "Enter password", ja: "パスワードを入力", tok: "o pana e nimi len" },
   "mi.galleryPassword": { zh: "图库密码", en: "Gallery password", ja: "ギャラリーのパスワード", tok: "nimi len pi tomo sitelen" },
 

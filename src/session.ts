@@ -44,7 +44,12 @@ export function getCurrentSessionName() {
   catch { return ""; }
 }
 export function setCurrentSessionName(name: string) {
-  try { appState.currentFile = name || null; } catch {}
+  try {
+    appState.currentFile = name || null;
+    // 成功持久化非空活动身份 = app 活着且真拿住了一张画（本函数只在 es.open() 成功后/健康操作里被调）
+    // → 崩溃环断路标记解除（boot-restore.ts）：手动重开成功后，boot 自动开重新武装。
+    if (name) appState.restoreAttempt = null;
+  } catch {}
 }
 
 // （v409 删 saveSession / putSessionPkg / saveAsSession / saveCurrentSession —— 四个**零 importer** 的死符号。
