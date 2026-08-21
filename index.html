@@ -545,6 +545,11 @@
       <button class="menu-item menu-item-with-icon" id="addImportClipboard" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#clipboard"/></svg>
         <span class="menu-item-label" data-i18n="gal.menu.newFromClipboard">从剪切板新建</span>
       </button>
+      <!-- 2026-08-21「新建/打开」并行：打开本地文件挪进本 popup（编辑器与图库两个语境都可用；
+           FS Access 在场才由 topbar-menu 取消 hidden，打开逻辑=v0.9.24 spec §7 原样） -->
+      <button class="menu-item menu-item-with-icon" id="addOpenLocalFile" type="button" role="menuitem" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#folder-open"/></svg>
+        <span class="menu-item-label" data-i18n="menu.openLocalFile">打开本地文件…</span>
+      </button>
       <button class="menu-item menu-item-with-icon" id="addNewFolder" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#create-folder"/></svg>
         <span class="menu-item-label" data-i18n="gal.menu.newFolder">新建文件夹…</span>
       </button>
@@ -1276,13 +1281,11 @@
       </button>
         <!-- v0.9.25 编辑器内新建（user 2026-08-20）：弹图库加号同款三选 popup（新建/从图片/从剪切板），
              不用回图库。无地模式照常可用——三入口都汇到 session.newDoc 的 leaveLocalFile 门 -->
+        <!-- 2026-08-21 甲方拍板「新建/打开」并一条：本行开三选 popup（新建/从图片/从剪切板），
+             「打开本地文件」并入该 popup 当第四项（addOpenLocalFile，FS Access 在场才显示）——
+             原独立 menuOpenLocalFile 行已删，打开逻辑原样（v0.9.24 spec §7 不变）。 -->
         <button class="menu-item menu-item-with-icon" id="menuNewArtwork" type="button" role="menuitem" aria-haspopup="true"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#new"/></svg>
-        <span class="menu-item-label" data-i18n="menu.newArtwork">新建…</span>
-      </button>
-        <!-- v0.9.24 无地本地文件（spec 20260819 §7）：FS Access 在场才由 topbar-menu 取消 hidden。
-             明文+有 WeebPaint 痕迹的 .ora = 原位编辑（不入库不上传）；加密/外来 ora 自动转导入 -->
-        <button class="menu-item menu-item-with-icon" id="menuOpenLocalFile" type="button" role="menuitem" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#folder-open"/></svg>
-        <span class="menu-item-label" data-i18n="menu.openLocalFile">打开本地文件…</span>
+        <span class="menu-item-label" data-i18n="menu.newArtwork">新建 / 打开…</span>
       </button>
         <!-- 菜单「登录 OneDrive」行（v0.6.22 menuSignIn）已删 2026-08-21：编辑器内登录统一走
              smart save 的「现在登录同步？」sheet（topbar-menu.smartSaveAndPush）；图库云账号 popup 保留=第二入口 -->

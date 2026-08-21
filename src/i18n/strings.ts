@@ -29,7 +29,7 @@ export const S = {
   "nav.gallery":    { zh: "图库",              en: "Gallery",         ja: "ギャラリー", tok: "tomo sitelen" },
   // v0.6.14 workbench ☰ 文件页首项专用（user：「图库」两字看不出会关闭当前画；「退出」又太怪 → 回到图库）
   "menu.backToGallery": { zh: "回到图库",      en: "Back to gallery", ja: "ギャラリーに戻る", tok: "o tawa tomo sitelen" },
-  "menu.newArtwork":    { zh: "新建…",         en: "New…",            ja: "新規…",         tok: "sitelen sin…" },
+  "menu.newArtwork":    { zh: "新建 / 打开…",  en: "New / Open…",     ja: "新規 / 開く…",  tok: "sitelen sin / open…" },   // 2026-08-21 与打开本地文件并行（popup 第四项）
   "menu.openLocalFile": { zh: "打开本地文件…", en: "Open local file…", ja: "ローカルファイルを開く…", tok: "o open e lipu lon ilo ni…" },
   "menu.installApp": { zh: "安装 WeebPaint 到桌面", en: "Install WeebPaint", ja: "WeebPaint をインストール", tok: "o pana e WeebPaint tawa supa ilo" },
   "nav.trash":      { zh: "回收站",            en: "Trash",           ja: "ゴミ箱", tok: "poki jaki" },
@@ -163,7 +163,7 @@ export const S = {
   "menu.tab.plugins":  { zh: "插件", en: "Plugins", ja: "プラグイン", tok: "ilo namako" }, 
   "menu.tab.dev":      { zh: "dev", en: "dev", ja: "dev", tok: "\"dev\"" }, 
   // 2026-08-21 导出与另存 hub：原 menu.exportImage（导出）+ menu.saveAs（另存为）两行并成一个入口
-  "menu.exportHub":      { zh: "导出与另存…", en: "Export & save a copy…", ja: "書き出しと別名保存…", tok: "pana en awen…" },
+  "menu.exportHub":      { zh: "导出与另存…", en: "Export & save…", ja: "書き出しと別名保存…", tok: "pana en awen…" },
   "menu.rename":         { zh: "重命名当前画作…", en: "Rename artwork…", ja: "作品名を変更…", tok: "ante nimi…" },
   "menu.revert":         { zh: "回到打开时的版本…", en: "Back to opened version…", ja: "開いた時点のバージョンに戻す…", tok: "kama sin tawa tenpo open…" },
   "menu.encrypt":        { zh: "加密保护…",   en: "Encrypt…",        ja: "暗号化…", tok: "len…" }, 

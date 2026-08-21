@@ -809,6 +809,8 @@ input[type=range] {
   /* v123 菜单按钮从右挪到左 (Procreate 顺序)，panel 也跟着挪 */
   left: 12px;
   min-width: 200px;
+  /* 2026-08-21：面板宽度封顶——长 label+sub+扳手的行（导出与另存等）靠行内省略号收，不许把面板撑出屏 */
+  max-width: min(320px, calc(100vw - 24px));
   /* 长菜单 + iPad mini 竖屏：限高 + 滚动 */
   max-height: calc(100vh - 80px);
   overflow-y: auto;
@@ -905,12 +907,14 @@ div.version-slim { transform-origin: left center; }   /* 图库菜单的 info �
   gap: 2px;
   position: relative;
 }
-.menu-item-row .menu-item-main { flex: 1 1 auto; }
+.menu-item-row .menu-item-main { flex: 1 1 auto; min-width: 0; }   /* min-width:0：行内 label/sub 允许收缩（2026-08-21 user：导出行宽超了） */
+.menu-item-row .menu-item-main .menu-item-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .menu-item-sub {
   color: var(--ink-soft);
   font-size: 11px;
   margin-left: 8px;
   white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto;   /* 空间不够时 sub 先缩（带省略号），不许把行撑爆 */
 }
 /* v124 wrench → ⋯（user：「导入导出用 ⋯ 更合适，扳手 SVG 留备用」）
    .menu-item-wrench class 名留着——只是字符换了，将来想换回扳手只改 HTML 里那个字符即可 */

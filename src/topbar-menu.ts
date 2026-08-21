@@ -245,11 +245,14 @@ export function initTopbarMenu(ctx: AppContext) {
   // v0.9.24 无地本地文件（spec ai-docs/20260819-clipboard-and-local-file-spec.md §7）：
   //   FS Access 在场才显示（Chromium 桌面；标签页即全功能，不依赖 PWA）。打开 = 明文+有痕迹 ora
   //   原位编辑；加密/外来 ora 交还导入路径（wp:importOraFile 由 import-image 接，走既有解锁/新身份逻辑）。
-  const openLocalBtn = document.getElementById("menuOpenLocalFile") as HTMLButtonElement | null;
+  //   2026-08-21 入口并进「新建/打开」三选 popup（addOpenLocalFile，编辑器/图库两语境共用）——
+  //   独立菜单行已删，逻辑原样只挪入口。
+  const openLocalBtn = document.getElementById("addOpenLocalFile") as HTMLButtonElement | null;
   if (openLocalBtn && supportsFileSystemAccess()) {
     openLocalBtn.hidden = false;
     openLocalBtn.addEventListener("click", async () => {
       setMenuOpen(false);
+      els.galleryAddPopup.classList.add("hidden");   // popup 语境：点了即收
       try {
         const h = await pickLocalOraFile();
         if (!h) return;   // 用户取消 picker
