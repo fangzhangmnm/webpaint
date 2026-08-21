@@ -23,6 +23,9 @@ function ports(over: Partial<RestorePorts> = {}) {
     // 双实例互认（纪律④）：默认无别的窗口持锁（= 无 Web Locks 环境的降级值，行为同旧）
     isDocLockedElsewhere: async () => false,
     onLockedElsewhere: (n) => log.push(`lockedElsewhere(${n})`),
+    // 云端功能开关（2026-08-21）：默认开（= 现状行为）
+    isCloudEnabled: () => true,
+    openBlankCanvas: async () => { log.push("openBlankCanvas"); },
     ...over,
   };
   let marker: string | null = over.getRestoreAttempt ? over.getRestoreAttempt() : null;
@@ -70,6 +73,8 @@ test("★ 打开失败 → 持久的 currentFile 必须还在（纪律②：失�
     onCrashLoopSkipped: () => {},
     isDocLockedElsewhere: async () => false,
     onLockedElsewhere: () => {},
+    isCloudEnabled: () => true,
+    openBlankCanvas: async () => {},
   };
   eq(await restoreLastSession(p), "gallery-failed");
   eq(persisted, "X", "★ 持久名还在");
@@ -170,4 +175,39 @@ test("无锁 + 崩溃标记在场 → 原崩溃断路行为一字不变（真崩
   eq(restoreCalled, false, "断路：不再碰那张必死的画");
   assert(log.includes("crashLoopSkipped(X)"), "照常报 crashLoop");
   eq(marker(), "X", "标记保留语义不变");
+});
+
+// ── 云端功能开关（2026-08-21，cloud-capability 接缝）：关 = 不自动恢复、不落图库、零状态变更 ──
+
+test("★ 云关 → blank-cloud-off：restore/图库都不碰，落空白画布，内存名 safe default", async () => {
+  let restoreCalled = false;
+  const { p, log, mem } = ports({
+    isCloudEnabled: () => false,
+    restore: async () => { restoreCalled = true; return true; },
+  });
+  eq(await restoreLastSession(p), "blank-cloud-off");
+  eq(restoreCalled, false, "★ 关闭态压根不去开 store 画");
+  assert(!log.includes("openGallery"), "不落图库（gating ①把图库藏了，落过去=死路）");
+  assert(log.includes("openBlankCanvas"), "落空白画布路径");
+  eq(mem(), null, "内存名降回 safe default（幽灵路径纪律①同款）");
+});
+
+test("★ 云关的自愈红线：持久 currentFile 与断路标记一个都不动（关→开下次冷启动照常恢复）", async () => {
+  let persisted: string | null = "X";
+  const { p, log, marker } = ports({
+    isCloudEnabled: () => false,
+    getWantedName: () => persisted,
+    getRestoreAttempt: () => "STALE-MARKER",   // 陈旧标记也原样保留——本门不消费断路器语义
+  });
+  eq(await restoreLastSession(p), "blank-cloud-off");
+  eq(persisted, "X", "★ 持久名原样");
+  eq(marker(), "STALE-MARKER", "★ 断路标记原样（不写不清）");
+  assert(!log.some((l) => l.startsWith("marker=")), "标记 setter 没被碰过");
+  assert(!log.includes("flushMarker"), "flush 也不发生（没有任何持久写）");
+});
+
+test("云开 → 行为与旧约完全一致（默认端口即开，全套旧用例已覆盖；这里钉正常路一条）", async () => {
+  const { p, log } = ports();
+  eq(await restoreLastSession(p), "restored");
+  assert(!log.includes("openBlankCanvas"), "开=不走空白画布门");
 });

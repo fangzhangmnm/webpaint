@@ -28,7 +28,7 @@ import { FilterBrushEngine } from "./filter-brush.ts";
 import { ShapeBrushEngine } from "./shape-brush.ts";
 import { isPixelStroke, pixelStrokeSpec } from "./engine-registry.ts";
 import { computePinchViewport, snapRotation, isTap, isDoubleTap, gestureTapAction } from "./common/pointer-gesture.ts";
-import { assignRole, effectiveTool, toolToRole } from "./pointer-route.ts";
+import { assignRole, effectiveTool, toolToRole, strokeMode, eraserTapOnRelease } from "./pointer-route.ts";
 import { isBusyActive } from "./fullscreen-busy.ts";
 import { inputSmooth } from "./stroke-input-smooth.ts";
 import { t } from "./i18n/index.ts";
@@ -293,8 +293,13 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
     when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("brush") },
   { combo: "S",                desc: "sc.shapeBrush", category: "sc.cat.tools",
     when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("shapeBrush") },
+  // spring-loaded E（2026-08-21 拍板）：dispatch 硬编码在 _keydown/_keyup（tap 要 keyup
+  //   时机 + hold 状态，registry 的 keydown-run 语义装不下；同 Space hold 先例）。两条 display-only
+  //   供快捷键面板渲染（同 Ctrl+V / Ctrl+C ×2 先例）：tap=切橡皮、hold=临时橡皮（松开回原工具）。
   { combo: "E",                desc: "sc.eraser",     category: "sc.cat.tools",
-    when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("eraser") },
+    when: () => false, run: () => {} },
+  { combo: "E",                desc: "sc.eraserHold", category: "sc.cat.tools",
+    when: () => false, run: () => {} },
   { combo: "I",                desc: "sc.picker",     category: "sc.cat.tools",
     when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("picker") },
   // v0.6.24：fill/lasso 分家 per-tool 持久化——G = 填色（默认魔棒+并）；L = 套索（默认矩形+新建）。
@@ -379,6 +384,11 @@ export class InputController {
   penEverSeen: boolean;
   spaceDown: boolean;
   altDown: boolean;
+  // 按住 E = 临时橡皮（spring-loaded；判定纯函数在 pointer-route.ts）。_keydown 置位 / _keyup 清位 /
+  //   失焦 clearKeyHolds() 清位（platform-guards 接线）。
+  eraserHold: boolean;
+  _eHoldStart = 0;      // eraserHold 置位时刻（performance.now；keyup 的 tap 判窗用）
+  _eHoldUsed = false;   // 按住期间落过笔 → 该次 keyup 不再 tap 切换工具
   gestureStart: { dist: number; midX: number; midY: number; angle: number; vp: GestureViewport; lastDist: number; lastAngle: number; velEma: number; lastMoveT: number } | null;
   _gestureTap: GestureTap | null;
   _lastTap: TapRef | null;
@@ -430,6 +440,7 @@ export class InputController {
     this.penEverSeen = false;
     this.spaceDown = false;
     this.altDown = false;
+    this.eraserHold = false;
     this.gestureStart = null;
     // 多指 tap snapshot（gesture 阶段累的状态，松手时判定 undo/redo）
     this._gestureTap = null;
@@ -616,6 +627,8 @@ export class InputController {
     }
 
     if (isPixelStroke(role as string)) {
+      // 按住 E 期间落笔 = hold 被消费成临时橡皮 → 该次 keyup 不再触发 tap 工具切换
+      if (this.eraserHold) this._eHoldUsed = true;
       // 画 / 液化 / filter brush 的时候不画 cursor（板子 dirty-rect 用，避免 cursor 撑全屏 dirty）
       this.board.setCursor(null);
       // 锚 smoothing / raw / 压感 状态到 down 点。
@@ -630,8 +643,12 @@ export class InputController {
       rec.stabX = x; rec.stabY = y;
       if (role === "filterBrush") this._beginFilterBrush(rec);
       else {
-        // mode 推断：erase / brush
-        const mode = role === "erase" ? "erase" : "brush";
+        // mode 推断：erase / brush（纯函数 pointer-route.strokeMode）。按住 E = 临时橡皮：
+        //   draw/shapeBrush 都吃（形状笔 erase 链经 _inner.beginStroke 透传 → brush.ts comp="erase"，
+        //   与普通橡皮同一条管线，2026-08-21 核实）。
+        // mode 在**落笔一刻锁定**（引擎 st.mode 只在 beginStroke 收一次）——描边进行中按/松 E
+        //   不影响当前笔。这正是取 hold 而非 mid-stroke 切换语义的原因。
+        const mode = strokeMode(role as string, this.eraserHold);
         this._beginStroke(e, rec, mode);
       }
     } else if (role === "lasso") {
@@ -1438,6 +1455,20 @@ export class InputController {
       e.preventDefault();
       return;
     }
+    // E hold = 临时橡皮（spring-loaded，PS 惯例；同 Space hold：需 keyup 解除，不走 registry——
+    //   tap 判定要 keyup 时机 + hold 状态，registry 的 keydown-run 语义装不下）。表里 E 条目
+    //   改 display-only 供快捷键面板渲染。守卫沿用原 E 表项（_editMode + !_floating）。
+    // **行为变化**（2026-08-21 拍板；不满意一句话回滚）：长按 E 不再切换工具（= spring-loaded
+    //   本义）；tap 切橡皮从 keydown 延迟到 keyup（<350ms，无感）。
+    if (_matchCombo(e, "E") && _editMode(this) && !_floating(this)) {
+      if (!this.eraserHold) {   // 长按 auto-repeat 的后续 keydown 不重置计时/落笔标记
+        this.eraserHold = true;
+        this._eHoldStart = performance.now();
+        this._eHoldUsed = false;
+      }
+      e.preventDefault();
+      return;
+    }
     if (e.key === "Alt" || e.code === "AltLeft" || e.code === "AltRight") {
       this.altDown = true;
     }
@@ -1460,6 +1491,18 @@ export class InputController {
       this.altDown = false;
     }
     if (e.key === "Shift") this.shapeBrush.setConstrainInvert(false);
+    // E 松开：清 hold（不看修饰键——按住 E 期间又按了 Ctrl 也必须能清位）。
+    //   tap = 短按且没落过笔 → 执行原「切到橡皮」（判定纯函数 eraserTapOnRelease）。
+    //   busy 期间不切工具（同 _keydown 的 busy 闸语义；清位本身永远落地，见 _keyup 不拦的注释）。
+    if (e.code === "KeyE" || e.key.toUpperCase() === "E") {
+      if (this.eraserHold) {
+        this.eraserHold = false;
+        if (eraserTapOnRelease(performance.now() - this._eHoldStart, this._eHoldUsed)
+            && !isBusyActive() && _editMode(this) && !_floating(this)) {
+          this._emitTool("eraser");   // 工具已是 eraser 时 = settool 幂等 no-op（维持现状）
+        }
+      }
+    }
   }
   _emitTool(tool: string) { window.dispatchEvent(new CustomEvent("wp:settool", { detail: tool })); }
   _adjustSize(delta: number) { window.dispatchEvent(new CustomEvent("wp:adjsize", { detail: delta })); }
@@ -1554,6 +1597,17 @@ export class InputController {
     const all = [...this.pointers.keys()];
     for (const pid of all) this._discardPointer(pid);
     this._maybeEndGesture();
+  }
+
+  // 失焦/切后台自愈：keyup 永远收不到的场景（Cmd+Tab、系统手势抢焦点）会把键 hold 状态卡死。
+  //   platform-guards 在 window blur / visibilitychange:hidden 接线（**不**接 pointercancel——那是
+  //   pointer 级事件，Alt/E 可能仍被真实按着）。
+  // eraserHold 落地时顺手补 altDown（2026-08-21 拍板「一并补两者并注明」）：此前 altDown 同样
+  //   没有任何失焦清理（只有 _keyup），卡死表现 = 切回来后画笔粘在吸色。
+  // spaceDown / Shift 约束反转不动：各有 dataset / 引擎副作用，超出本次拍板范围，维持现状。
+  clearKeyHolds() {
+    this.eraserHold = false;
+    this.altDown = false;
   }
 }
 

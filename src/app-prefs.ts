@@ -16,6 +16,9 @@ export const PREF_DEFAULTS = {
   // 设备本地（local-user-preference）：跟设备环境/硬件走
   "color-theme": "auto" as string,          // auto / day / night（主题 = 跟设备的日夜/环境）
   "menu-tab": "file" as string,             // ☰ 停留页（v0.5.27；设备本地——同主题，视觉习惯不跨设备）
+  // 云端功能开关（2026-08-21 拍板，接缝=cloud-capability.ts）。**必须设备本地**：若进 synced
+  //   collection，别的设备一关就把这台也关了（还得靠云同步传播「关云」本身，自相矛盾）。
+  "cloud-enabled": true as boolean,
   // 跨设备（synced-user-preference）：跟人/identity 走
   "lang": null as string | null,            // 界面语言（null=跟系统）
   "long-press-pick": true as boolean,       // 长按吸色手势（spec 表默认 true）

@@ -1,7 +1,7 @@
 // v0.5.12 fill-mode（第一类工具版）：active 谓词真值表 + 切出=commit 钩子（transient 括号不算切出）。
 // 像素正确性不在这里——gl-smoke fillParity（golden/commit≡live/lockAlpha/导出不漏）。
 import { test, eq } from "./runner.mjs";
-import { initFillMode, fillPreviewActive, commitFillNow, sendSelectionToFill } from "../src/fill-mode.ts";
+import { initFillMode, fillPreviewActive, commitFillNow, sendSelectionToFill, gateFillOnDocSwitch } from "../src/fill-mode.ts";
 import { currentPanelColor, setColor, setBrushColor } from "../src/color-panel.ts";
 
 // 最小 fake ctx：fill-mode 只碰这些面。editMode 状态机用字段模拟 + 手动派 wp:modechange。
@@ -262,4 +262,46 @@ test("[fill-mode] v0.9.11 不可填层的静默失败补反馈：tap 报状态�
   setMode(ctx, "brush");                     // 切出：没得 commit，选区被清——要说一声
   eq(ctx.doc.selection, null, "选区已清（不互通语义不变）");
   eq(msgs.length > before, true, "清选区有提示（fm.exitNoFill）");
+});
+
+// ── 显式换文档挽留门（user 2026-08-21：「换文档如果走丢弃，文案里要有提示，而且要弹窗挽留」）──
+// session-state 的 openItem/newDoc/openLocalFile + import-image 的 .ora 导入共用这一个分支函数；
+// UI sheet 由调用方注入（ask），这里 mock ask 测三分支 + 免问放行。
+
+test("[fill-mode] 换文档挽留门：预览没挂着 → 不问直接放行", async () => {
+  const { ctx } = makeCtx();
+  initFillMode(ctx);
+  setMode(ctx, "brush");                     // 非 fill 工具：预览不可能挂着
+  let asked = 0;
+  eq(await gateFillOnDocSwitch(async () => { asked++; return "discard"; }), true, "放行");
+  eq(asked, 0, "没弹 sheet（不许骚扰无 pending 的换文档）");
+});
+
+test("[fill-mode] 换文档挽留门：应用并继续 = commitFillNow 后放行", async () => {
+  const { ctx, calls } = makeCtx();
+  initFillMode(ctx);
+  setMode(ctx, "fill");
+  ctx.doc.selection = {};                    // 预览挂着
+  eq(await gateFillOnDocSwitch(async () => "apply"), true, "放行");
+  eq(calls.commitFill, 1, "填色已 commit（不蒸发）");
+  eq(ctx.doc.selection, null, "commit 清选区（✓ 同款语义）");
+});
+
+test("[fill-mode] 换文档挽留门：丢弃并继续 = 不 commit、放行（原「切换=丢弃」行为，但问过了）", async () => {
+  const { ctx, calls } = makeCtx();
+  initFillMode(ctx);
+  setMode(ctx, "fill");
+  ctx.doc.selection = {};
+  eq(await gateFillOnDocSwitch(async () => "discard"), true, "放行");
+  eq(calls.commitFill, 0, "没 commit（丢弃 = 预览随换文档蒸发）");
+});
+
+test("[fill-mode] 换文档挽留门：取消（Esc/点背板 → null）= 拦下切换，预览原样留着", async () => {
+  const { ctx, calls } = makeCtx();
+  initFillMode(ctx);
+  setMode(ctx, "fill");
+  ctx.doc.selection = {};
+  eq(await gateFillOnDocSwitch(async () => null), false, "拦下（调用方中止换文档）");
+  eq(calls.commitFill, 0, "没 commit");
+  eq(fillPreviewActive(), true, "预览还挂着（留在当前画继续调）");
 });

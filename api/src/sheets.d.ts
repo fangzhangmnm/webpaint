@@ -8,6 +8,7 @@ export declare function openChoiceSheet<T>(title: string, message: string, choic
     label: string;
     value: T;
     primary?: boolean;
+    onPick?: () => void;
 }[]): Promise<T | null>;
 interface SyncGateAction<T = string> {
     label: string;

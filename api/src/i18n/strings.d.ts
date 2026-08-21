@@ -2454,6 +2454,12 @@ export declare const S: {
         readonly ja: "消しゴム";
         readonly tok: "ilo weka";
     };
+    readonly "sc.eraserHold": {
+        readonly zh: "按住＝临时橡皮（松开回原工具）";
+        readonly en: "Hold = temporary eraser (release to restore tool)";
+        readonly ja: "長押し＝一時的な消しゴム（離すと元のツールに戻る）";
+        readonly tok: "luka awen la ilo weka (luka weka la ilo pini li kama sin)";
+    };
     readonly "sc.picker": {
         readonly zh: "吸色";
         readonly en: "Eyedropper";
@@ -4092,6 +4098,30 @@ export declare const S: {
         readonly ja: "開くのに失敗しました：{error}";
         readonly tok: "open li pakala: {error}";
     };
+    readonly "ss.fillPendingTitle": {
+        readonly zh: "有未应用的填色";
+        readonly en: "Unapplied fill";
+        readonly ja: "未適用の塗りつぶしがあります";
+        readonly tok: "kule sin li awen ala";
+    };
+    readonly "ss.fillPendingMsg": {
+        readonly zh: "填色还只是预览，换文档会丢掉它。";
+        readonly en: "The fill is still a preview — switching documents will discard it.";
+        readonly ja: "塗りつぶしはまだプレビューです。ドキュメントを切り替えると失われます。";
+        readonly tok: "kule sin li lukin taso. sina ante e lipu la ona li weka.";
+    };
+    readonly "ss.fillPendingApply": {
+        readonly zh: "应用并继续";
+        readonly en: "Apply and continue";
+        readonly ja: "適用して続行";
+        readonly tok: "o kule. o tawa.";
+    };
+    readonly "ss.fillPendingDiscard": {
+        readonly zh: "丢弃并继续";
+        readonly en: "Discard and continue";
+        readonly ja: "破棄して続行";
+        readonly tok: "o weka e kule. o tawa.";
+    };
     readonly "ss.docLockedElsewhereTitle": {
         readonly zh: "这幅画已在其他窗口打开";
         readonly en: "Already open in another window";
@@ -5267,6 +5297,90 @@ export declare const S: {
         readonly en: "OneDrive client not configured yet";
         readonly ja: "OneDrive クライアントが未設定です";
         readonly tok: "nasin pi ilo \"OneDrive\" li lon ala";
+    };
+    readonly "st.syncPushing": {
+        readonly zh: "正在同步…";
+        readonly en: "Syncing…";
+        readonly ja: "同期中…";
+        readonly tok: "mi pana tawa poki sewi…";
+    };
+    readonly "st.fileRenaming": {
+        readonly zh: "重命名…";
+        readonly en: "Renaming…";
+        readonly ja: "名前変更中…";
+        readonly tok: "mi ante e nimi…";
+    };
+    readonly "st.filePulling": {
+        readonly zh: "拉取中…";
+        readonly en: "Pulling…";
+        readonly ja: "クラウドから取得中…";
+        readonly tok: "mi kama jo tan poki sewi…";
+    };
+    readonly "st.cloudChecking": {
+        readonly zh: "检查云端…";
+        readonly en: "Checking cloud…";
+        readonly ja: "クラウドを確認中…";
+        readonly tok: "mi lukin e poki sewi…";
+    };
+    readonly "st.fileDeleting": {
+        readonly zh: "删除中…";
+        readonly en: "Deleting…";
+        readonly ja: "削除中…";
+        readonly tok: "mi weka…";
+    };
+    readonly "st.trashRestoring": {
+        readonly zh: "恢复中…";
+        readonly en: "Restoring…";
+        readonly ja: "復元中…";
+        readonly tok: "mi kama sin…";
+    };
+    readonly "st.trashPurging": {
+        readonly zh: "彻底删除…";
+        readonly en: "Deleting permanently…";
+        readonly ja: "完全に削除中…";
+        readonly tok: "mi moli…";
+    };
+    readonly "st.trashEmptyTrash": {
+        readonly zh: "清空回收站…";
+        readonly en: "Emptying trash…";
+        readonly ja: "ゴミ箱を空にしています…";
+        readonly tok: "mi weka e ale pi poki jaki…";
+    };
+    readonly "st.trashEmptyBackups": {
+        readonly zh: "清空备份箱…";
+        readonly en: "Emptying backup box…";
+        readonly ja: "バックアップボックスを空にしています…";
+        readonly tok: "mi weka e ale pi poki awen…";
+    };
+    readonly "st.fileEncrypting": {
+        readonly zh: "正在加密 {name}…";
+        readonly en: "Encrypting {name}…";
+        readonly ja: "暗号化中 {name}…";
+        readonly tok: "mi len e {name}…";
+    };
+    readonly "st.fileDecrypting": {
+        readonly zh: "正在解除加密 {name}…";
+        readonly en: "Decrypting {name}…";
+        readonly ja: "暗号化解除中 {name}…";
+        readonly tok: "mi weka e len pi {name}…";
+    };
+    readonly "st.fileReuploading": {
+        readonly zh: "重新上传…";
+        readonly en: "Re-uploading…";
+        readonly ja: "再アップロード中…";
+        readonly tok: "mi pana sin…";
+    };
+    readonly "st.folderCreating": {
+        readonly zh: "新建文件夹…";
+        readonly en: "Creating folder…";
+        readonly ja: "フォルダ作成中…";
+        readonly tok: "mi pali e poki sin…";
+    };
+    readonly "st.folderDeleting": {
+        readonly zh: "删除文件夹…";
+        readonly en: "Deleting folder…";
+        readonly ja: "フォルダ削除中…";
+        readonly tok: "mi weka e poki…";
     };
     readonly "br.toolBrush": {
         readonly zh: "笔刷";
@@ -6519,5 +6633,71 @@ export declare const S: {
         readonly zh: "高px";
         readonly en: "H px";
         readonly ja: "高px";
+    };
+    readonly "save.signInPromptTitle": {
+        readonly zh: "已保存到本机";
+        readonly en: "Saved on this device";
+        readonly ja: "この端末に保存しました";
+        readonly tok: "sitelen li awen lon ilo ni";
+    };
+    readonly "save.signInPromptMsg": {
+        readonly zh: "云端未登录，现在登录同步？";
+        readonly en: "Not signed in to the cloud. Sign in now to sync?";
+        readonly ja: "クラウドに未ログインです。今すぐログインして同期しますか？";
+        readonly tok: "sina lon ala poki sewi. sina wile kama lon poki sewi lon tenpo ni anu seme?";
+    };
+    readonly "save.signInNow": {
+        readonly zh: "登录";
+        readonly en: "Sign in";
+        readonly ja: "ログイン";
+        readonly tok: "o kama lon poki sewi";
+    };
+    readonly "save.signInLater": {
+        readonly zh: "暂不";
+        readonly en: "Not now";
+        readonly ja: "今はしない";
+        readonly tok: "tenpo ni la mi wile ala";
+    };
+    readonly "save.savedLocalNotSignedIn": {
+        readonly zh: "已存本地 · 未登录";
+        readonly en: "Saved locally · not signed in";
+        readonly ja: "ローカル保存済み · 未ログイン";
+        readonly tok: "awen lon ilo ni · sina lon ala poki sewi";
+    };
+    readonly "save.cloudOff": {
+        readonly zh: "已存本地（云端功能已关闭） · {name}";
+        readonly en: "Saved locally (cloud features are off) · {name}";
+        readonly ja: "ローカル保存済み（クラウド機能オフ） · {name}";
+        readonly tok: "awen lon ilo ni (poki sewi li pini) · {name}";
+    };
+    readonly "menu.cloudEnabled": {
+        readonly zh: "启用云端功能";
+        readonly en: "Enable cloud features";
+        readonly ja: "クラウド機能を有効化";
+        readonly tok: "o ken e poki sewi";
+    };
+    readonly "menu.cloudUnavailableTitle": {
+        readonly zh: "此环境未配置云端，无法启用";
+        readonly en: "Cloud is not configured in this build";
+        readonly ja: "この環境ではクラウドが設定されていません";
+        readonly tok: "ilo ni li ken ala e poki sewi";
+    };
+    readonly "status.cloudEnabled": {
+        readonly zh: "云端功能：{s}";
+        readonly en: "Cloud features: {s}";
+        readonly ja: "クラウド機能：{s}";
+        readonly tok: "poki sewi: {s}";
+    };
+    readonly "status.cloudOffFlushFailed": {
+        readonly zh: "当前画作尚未保存/推送成功，云端功能未关闭";
+        readonly en: "Current artwork not fully saved/pushed — cloud features stay on";
+        readonly ja: "現在の作品の保存/アップロードが未完了のため、クラウド機能はオフになっていません";
+        readonly tok: "sitelen ni li awen ala lon poki sewi. tan ni la poki sewi li pini ala";
+    };
+    readonly "mi.bootCloudOff": {
+        readonly zh: "云端功能已关闭：未自动打开上次画作";
+        readonly en: "Cloud features are off — last artwork was not reopened";
+        readonly ja: "クラウド機能オフのため、前回の作品は自動で開きません";
+        readonly tok: "poki sewi li pini. tan ni la sitelen pini li open ala";
     };
 };

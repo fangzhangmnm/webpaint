@@ -22,6 +22,7 @@ declare function _readSessionCheckpoint(name: string): Promise<{
 } | null>;
 /** 作品被删/改名 → 丢掉它的快照（按 key 精确清，**不做全库扫描**）。 */
 declare function _dropCheckpoint(name: string): Promise<void>;
+declare function _gateFillOnSwitch(): Promise<boolean>;
 declare function saveNow(opts?: {
     implicit?: boolean;
     commitPending?: boolean;
@@ -72,6 +73,7 @@ export declare const session: {
     setName: typeof setName;
     restore: typeof restoreSession;
     saveAs: typeof saveAs;
+    gateFillOnSwitch: typeof _gateFillOnSwitch;
     save: typeof saveNow;
     saveAndPush: typeof saveAndPush;
     adoptAsNew: typeof adoptAsNew;

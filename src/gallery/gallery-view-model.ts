@@ -37,6 +37,7 @@ export interface GItem extends Omit<GalleryItem, "local" | "cloud"> {
   dirty?: boolean;
   ghost?: boolean;
   pendingGone?: boolean;   // clean cloud-gone 孤儿、防抖 grace 内（云端刚没了，本地干净副本待处理）
+  cloudNewer?: boolean;    // 云端字节比本地新（newer-on-cloud / conflict）→ ThumbCell 取图走 source:"cloud"（见 app-store.itemToG）
 }
 
 // 文件 tile 的同步徽章（图标 SVG 在组件 template 里按 kind 渲）。ghost = cloud-gone dirty 孤儿；pendingGone = cloud-gone clean（grace 内）。

@@ -107,6 +107,9 @@ export declare class InputController {
     penEverSeen: boolean;
     spaceDown: boolean;
     altDown: boolean;
+    eraserHold: boolean;
+    _eHoldStart: number;
+    _eHoldUsed: boolean;
     gestureStart: {
         dist: number;
         midX: number;
@@ -177,6 +180,7 @@ export declare class InputController {
     _discardPointer(pid: number): void;
     _maybeEndGesture(): void;
     cancelAllPointers(): void;
+    clearKeyHolds(): void;
 }
 export declare function bindPressureDisabled(fn: () => boolean): void;
 export {};

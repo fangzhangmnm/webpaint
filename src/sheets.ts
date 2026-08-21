@@ -106,7 +106,11 @@ export function openConfirmSheet(title: string, message: string): Promise<boolea
 
 // 多选项对话框 → Promise<T|null>（取消/点背板 = null）。#19 首用（拖入图片：新图层/设为参考）。
 //   确认按钮隐藏，取消保留；选项按钮动态生成进 #genericSheetChoices。
-export function openChoiceSheet<T>(title: string, message: string, choices: { label: string; value: T; primary?: boolean }[]): Promise<T | null> {
+//   onPick（2026-08-21 smart save）：**在按钮 click listener 内同步调**（resolve 之前）——
+//   iOS 红线：loginRedirect 这类需要 user-gesture 的动作不能放在 `await openChoiceSheet` 之后
+//   （Promise resolve 的微任务续体可能丢 transient activation → Safari 静默拦）。要保手势的
+//   副作用走 onPick，别走返回值。
+export function openChoiceSheet<T>(title: string, message: string, choices: { label: string; value: T; primary?: boolean; onPick?: () => void }[]): Promise<T | null> {
   _assertNotBusy("choice sheet");
   return new Promise((resolve) => {
     g.title().textContent = title;
@@ -130,7 +134,7 @@ export function openChoiceSheet<T>(title: string, message: string, choices: { la
       btn.type = "button";
       btn.className = "sheet-action" + (c.primary ? "" : " ghost");
       btn.textContent = c.label;
-      btn.addEventListener("click", () => resolveAndClose(resolve, c.value as T | null, cleanup));
+      btn.addEventListener("click", () => { c.onPick?.(); resolveAndClose(resolve, c.value as T | null, cleanup); });   // onPick 同步先跑（保 user-gesture）
       box.appendChild(btn);
     }
     openSheet(g.sheet(), g.backdrop());

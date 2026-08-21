@@ -12,7 +12,9 @@
 //       切去任何工具（**含回 lasso**）= **commit + 清选区**（对称，无特例）；
 //       ✓  = commit + 清选区（留在 fill 连续填下一块）；去选 = 丢弃。
 //     mental model = 两个不能互通的工具（实现共用一条 lasso 管线）。
-//     文档关闭/切换 = 丢弃（interrupt=cancel 家规；commit 只对显式的工具切换）。
+//     文档关闭（autosave/崩溃 flush/beforeunload）= 丢弃（interrupt=cancel 家规不变）；
+//     **显式**换文档（open/new/导入）= 弹窗挽留（gateFillOnDocSwitch；user 2026-08-21「换文档
+//     如果走丢弃，文案里要有提示，而且要弹窗挽留」——supersede 旧「切换=丢弃」的静默半句）。
 //   · 填色**尊重 lockAlpha**（预览=commit 同 shader 同参）；吸管吸预览色（拍板#8 同款）。
 //
 // 切出=commit 的钩子：听 wp:modechange，跟踪「上一个持久模式」——transient（adjust/transform/crop）
@@ -80,6 +82,19 @@ export function fillPreviewActive(): boolean {
 export function commitFillNow(): void {
   if (!fillPreviewActive()) return;
   _doCommit(true);
+}
+
+// 显式换文档挽留门（user 2026-08-21 拍板：「换文档如果走丢弃，文案里要有提示，而且要弹窗挽留」）。
+// fill 预览是第一类工具态、不在 transient 轴上、不进落盘字节——open/new/导入此前是静默蒸发。
+// ask 注入（UI sheet 归调用方 session-state），本模块零 DOM → node 三分支可测。
+// 返回 true = 放行（"apply" 分支已 commitFillNow；预览没挂着时不问直接放行）；
+// 返回 false = 用户取消/Esc/点背板（调用方中止切换，留在当前画）。
+// implicit 路径（autosave/崩溃 flush/beforeunload）**不许**走这门（interrupt=cancel 家规不变）。
+export async function gateFillOnDocSwitch(ask: () => Promise<"apply" | "discard" | null | undefined>): Promise<boolean> {
+  if (!fillPreviewActive()) return true;
+  const c = await ask();
+  if (c === "apply") { commitFillNow(); return true; }
+  return c === "discard";
 }
 
 // 像素 commit（+可选清选区）一个 compound 整点（= 一个令牌一步，ADR-0004 出入口语义不动）。

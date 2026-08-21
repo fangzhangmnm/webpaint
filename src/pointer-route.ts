@@ -52,3 +52,26 @@ export function assignRole({ tool, pointerType, button, buttons, spaceDown, altD
   if (pointerType === "touch") return (!penEverSeen && singleFingerDraw) ? toolToRole(et) : "hold";
   return null;
 }
+
+// ── 按住 E = 临时橡皮（spring-loaded，PS 惯例；2026-08-21 拍板取 hold 语义，Krita 的 E toggle 不取）──
+// tap/hold 分辨：_keydown 只置位 eraserHold（不再立即切工具）；_keyup 时「短按且期间没落过笔」
+//   才执行原「切到橡皮」（工具切换从 keydown 延迟到 keyup，<350ms 无感）。长按 = 临时橡皮，松开回原工具。
+// 决策抽纯函数（同 assignRole 的理由：可单测、改一处）；置位/清位的 live 事件流在 input.ts。
+
+export const ERASER_HOLD_TAP_MS = 350;   // keyup 距 keydown < 此值且未落笔 → 判 tap（= 切到橡皮工具）
+
+// pointerdown 落笔一刻的 stroke mode 判定。mode 进引擎（beginStroke）即锁定在 st.mode，
+//   mid-stroke 按/松 E 不影响当前笔——这正是取 hold 而非 mid-stroke 切换语义的原因。
+// 只对 draw/shapeBrush 生效：erase 恒橡皮（工具已是橡皮时 hold 自然无操作）；
+//   filterBrush/lasso/fill/pick 等不吃 E（滤镜笔/选区没有「橡皮化」语义）。
+export function strokeMode(role: string, eraserHold: boolean): "erase" | "brush" {
+  if (role === "erase") return "erase";
+  if (eraserHold && (role === "draw" || role === "shapeBrush")) return "erase";
+  return "brush";
+}
+
+// keyup 一刻的 tap 判定：按住时长 < ERASER_HOLD_TAP_MS 且按住期间没落过笔。
+//   落过笔 = hold 已被消费成临时橡皮，keyup 不再切工具（不然一笔擦完工具莫名变橡皮）。
+export function eraserTapOnRelease(heldMs: number, holdUsed: boolean): boolean {
+  return heldMs < ERASER_HOLD_TAP_MS && !holdUsed;
+}

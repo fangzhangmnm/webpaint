@@ -32,11 +32,27 @@ export interface RestorePorts {
   /** 无 Web Locks 支持时恒 false（整套降级为现状，行为不变）。 */
   isDocLockedElsewhere(name: string): Promise<boolean>;
   onLockedElsewhere(name: string): void;
+  // ── 云端功能开关（2026-08-21，cloud-capability 接缝）：关 = boot 不自动恢复 store 画 ──
+  /** 关闭态恒 false（含容器未配置 auth）。 */
+  isCloudEnabled(): boolean;
+  /** 关闭态的落点：**不开图库**（图库入口整体隐藏），停在 boot 的空白画布（app.ts 出生即
+   *  backend.blank 2048²、无 session 绑定；gallery overlay 本就默认 hidden，所以多半是 no-op+提示）。
+   *  ⚠ 纯 UI 落点，零数据变更：currentFile/标记一个都不碰（开关打回来下次冷启动照常自动恢复）。 */
+  openBlankCanvas(): Promise<void>;
 }
 
-export type RestoreOutcome = "restored" | "gallery-no-name" | "gallery-failed" | "gallery-crash-loop" | "gallery-locked-elsewhere";
+export type RestoreOutcome = "restored" | "gallery-no-name" | "gallery-failed" | "gallery-crash-loop" | "gallery-locked-elsewhere" | "blank-cloud-off";
 
 export async function restoreLastSession(p: RestorePorts): Promise<RestoreOutcome> {
+  // ★ 云端功能关（2026-08-21）：不自动恢复、也不落图库（gating ①把图库藏了）→ 空白画布。
+  //   排在最前：断路器/双实例检查都是「要去开 wanted」的前置，关闭态压根不开，标记与
+  //   持久 currentFile 全都**原样不动**（纪律②的语义不被本门毒化；关→开自愈）。
+  if (!p.isCloudEnabled()) {
+    p.setNameMemoryOnly(null);          // 幽灵路径纪律①同款：内存名必须是 safe default
+    p.updateSaveStatus();
+    await p.openBlankCanvas();
+    return "blank-cloud-off";
+  }
   const wanted = p.getWantedName();
   if (!wanted) {
     p.setNameMemoryOnly(null);          // 没有上次的画 → 内存名也得是 safe default

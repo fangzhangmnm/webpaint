@@ -121,7 +121,16 @@ const ThumbCell = defineComponent({
     // 未加密时：有本地或云端字节都可经 store.getPeek 取缩略图（本地→切片、纯云端→byte-range，zip 解析在库内部）。
     fetchable: { type: Boolean, default: false }, // 有字节可取（本地∨云端）→ 走 peekTail 缩略图
     isCloud: { type: Boolean, default: false },   // 纯云端（决定是否显云 loading 态；本地不显）
-    thumbToken: { type: String, default: "" },    // 新鲜度戳（云 lastModified / 本地 updatedAt / size）
+    // 云端字节比本地新（newer-on-cloud/conflict，app-store.itemToG 从 syncState 派生）→ 取图走 getPeek
+    //   source:"cloud"（只看云端；离线取不到 = 不写缓存、退旧图/占位）。false → source:"local"（本地优先）。
+    //   QA 2026-08-21 根修：cloudNewer 时 token 是云戳，本地字节配它入缓存 = 假新鲜陈图，永不自愈。
+    cloudNewer: { type: Boolean, default: false },
+    // 新鲜度戳。拼法（模板处）= local ? local.updatedAt : (cloud.lastModifiedDateTime || size)。与 source 的自洽性：
+    //   · cloudNewer=true：itemToG 的 local.updatedAt 来自 Item.lastModified = **云端**戳（listing cf 优先）
+    //     → token=云戳，字节走 source:"cloud" 同源，缓存诚实。
+    //   · cloudNewer=false：synced（云本一致，两个戳等价、用哪个都行）/ 纯本地（本地戳）/ unpushed·ghost
+    //     （token 是旧戳不动，本地保存靠 invalidateCachedThumb 失效广播重取，见 _thumbRev 注）→ 与 source:"local" 自洽。
+    thumbToken: { type: String, default: "" },
     fallback: { type: String, default: "?" },
     alt: { type: String, default: "" },
   },
@@ -132,6 +141,7 @@ const ThumbCell = defineComponent({
     cloud: CloudFileMeta | null;
     fetchable: boolean;
     isCloud: boolean;
+    cloudNewer: boolean;
     thumbToken: string;
     fallback: string;
     alt: string;
@@ -159,7 +169,9 @@ const ThumbCell = defineComponent({
       const seq = ++fetchSeq;
       // 库无 itemId/downloadUrl（内容盲）：按**裸 name**（props.alt = item.name）走 store.getPeek，
       //   新鲜度戳 = 云 lastModified / 本地 updatedAt / size（token 变 = 重拉）。
-      getOrFetchCloudThumb(props.alt, props.thumbToken)
+      //   source 决策：cloudNewer → "cloud"（token 是云戳，只有云字节配得上它；取不到→不写缓存，退旧图/占位）；
+      //   否则 → "local"（本地优先；token 与本地态自洽，见 thumbToken prop 注）。
+      getOrFetchCloudThumb(props.alt, props.thumbToken, props.cloudNewer ? "cloud" : "local")
         .then(({ blob }: { blob: Blob }) => {
           if (seq !== fetchSeq) return;
           showCloud.value = false;
@@ -187,8 +199,10 @@ const ThumbCell = defineComponent({
       }
     });
     watch(() => _lockState.unlocked, () => { if (locked.value || props.encName) tryDecrypt(); });
-    // 失效 rev / token 变 → **原地重取**：复用的 tile 没有第二次 onMounted（见 _thumbRev 注）。
-    watch(() => [props.thumbToken, _thumbRev.get(sessionFileName(props.alt)) ?? 0], () => {
+    // 失效 rev / token / cloudNewer 变 → **原地重取**：复用的 tile 没有第二次 onMounted（见 _thumbRev 注）。
+    //   cloudNewer 入 deps：翻转常伴随 token 变，但 pull 落地后 cloudNewer→false 而 token 不动（云戳没再动）——
+    //   此时若之前离线退过占位，换 source 重取一次本地字节即自愈。
+    watch(() => [props.thumbToken, props.cloudNewer, _thumbRev.get(sessionFileName(props.alt)) ?? 0], () => {
       if (props.localThumb) return;                      // 静态 blob 分支不走缓存
       if (props.encName) { void tryDecrypt(); return; }  // 本地加密件：readPeek 直读 store（无缓存层），重解即最新
       if (!props.fetchable || obs) return;               // 还没进过视口 → observer 触发时自会用当时的新 token
@@ -744,7 +758,7 @@ function makeGallery(host: GalleryHost) {
           </div>
 
           <div v-for="row in fileTiles" :key="row.t.name" class="gallery-tile" :class="{ active: row.t.isActive }" @click="openTile(row.item)">
-            <ThumbCell :local-thumb="row.t.hasLocalThumb ? row.item.local.thumb : null" :enc-name="row.t.encrypted ? row.t.name : null" :fetchable="!row.t.encrypted && (!!row.t.cloud || !!row.item.local)" :is-cloud="!row.item.local && !!row.t.cloud" :thumb-token="String(row.item.local ? (row.item.local.updatedAt||0) : (row.t.cloud && row.t.cloud.lastModifiedDateTime || row.t.size || 0))" :fallback="row.t.displayName.slice(0,1) || '?'" :alt="row.t.name" @unlock="onUnlock" />
+            <ThumbCell :local-thumb="row.t.hasLocalThumb ? row.item.local.thumb : null" :enc-name="row.t.encrypted ? row.t.name : null" :fetchable="!row.t.encrypted && (!!row.t.cloud || !!row.item.local)" :is-cloud="!row.item.local && !!row.t.cloud" :cloud-newer="!!row.item.cloudNewer" :thumb-token="String(row.item.local ? (row.item.local.updatedAt||0) : (row.t.cloud && row.t.cloud.lastModifiedDateTime || row.t.size || 0))" :fallback="row.t.displayName.slice(0,1) || '?'" :alt="row.t.name" @unlock="onUnlock" />
             <div class="gallery-tile-name-row">
               <div class="gallery-tile-name" :title="row.t.fullPath">{{ row.t.displayName }}</div>
               <div class="gallery-tile-meta">

@@ -59,7 +59,7 @@ export function initDevConsole() {
     //   POC 需显式给该 name（从 gallery tile 取 item.name）；不再是 OneDrive itemId / fileSize。
     if (!name) throw new Error("pocFetchThumb needs an explicit bare session name (item.name)");
     const t0 = performance.now();
-    const blob = await fetchOraThumbnail(name);
+    const blob = await fetchOraThumbnail(name, "local");   // POC 诊断：本地优先（旧行为）；要看云端字节自己改 "cloud"
     console.log(`POC done in ${(performance.now() - t0) | 0}ms, blob size ${blob.size}`);
     // 显示到 console（可见 thumbnail）
     const url = URL.createObjectURL(blob);

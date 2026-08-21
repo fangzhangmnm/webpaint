@@ -40,7 +40,7 @@ import { t } from "./i18n/index.ts";
 import { createEditorSession, type EditorSession, type StoreLike } from "./editor-session/index.ts";
 import { timelapseDetach, timelapseAdopt, timelapseForSave } from "./timelapse-session.ts";
 import { holdDocLock, releaseDocLock, isDocLockedElsewhere } from "./instance-locks.ts";
-import { commitFillNow } from "./fill-mode.ts";
+import { commitFillNow, gateFillOnDocSwitch } from "./fill-mode.ts";
 
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
 
@@ -131,6 +131,7 @@ async function openLocalFile(handle: LocalFileHandle): Promise<File | null> {
   if (await _store.encryption.isEncryptedBlob(file)) return file;
   const loaded = await decodeOraToPainting(file) as LoadedDoc;
   if (!hasWeebPaintTraces(loaded)) return file;   // 外来 ora（Krita 等）→ 导入为新 doc，绝不原位覆写别人的文件
+  if (!(await _gateFillOnSwitch())) return null; // 挽留门：fill 预览挂着 → 应用/丢弃/取消（user 2026-08-21）
   if (!(await leaveLocalFile())) return null;    // 已在无地且脏 → 先问（保存/丢弃/取消）
   if (es.isDirty()) await saveNow();             // 旧 store doc 先落盘（openItem 同款；无地时已被上一行清场）
   _esMuted = true;   // 墙②先立再换内容：adoptModel 之后 canvas 就不再是 es._name 的像素了
@@ -400,11 +401,34 @@ async function _dropCheckpoint(name: string) {
 //   transient 轴上——此前**任何**保存路径都不 commit 它，「填色→保存」= 填色蒸发；且 Ctrl+S 一路
 //   （saveAndPush）连 transient 都不 apply——浮层变换挂着时会把挖了洞的源层存出去。
 //   只挂**显式**保存/退出：implicit（autosave / pagehide / beforeunload 偷存）保持 interrupt=cancel
-//   语义，不背着用户 commit；换文档（openItem）保持「切换=丢弃」的既有拍板（fill-mode.ts 文件头），
-//   不在本批夹带。commitFillNow 预览没挂着时是 no-op。
+//   语义，不背着用户 commit。换文档（open/new/导入）不走这里——走 _gateFillOnSwitch 挽留门
+//   （user 2026-08-21，supersede 旧「切换=丢弃」拍板）。commitFillNow 预览没挂着时是 no-op。
 function _applyPendingForExplicitSave() {
   if (editMode.hasPendingTransient()) editMode.applyPendingTransient();
   commitFillNow();
+}
+
+// ---- 显式换文档挽留门（user 2026-08-21：「换文档如果走丢弃，文案里要有提示，而且要弹窗挽留」）----
+// 三选 sheet：应用并继续（commitFillNow 后走原流程）/ 丢弃并继续（原行为）/ 取消（中止切换，留在当前画）。
+// 分支逻辑在 fill-mode.gateFillOnDocSwitch（node 可测），这里只组装 UI sheet。必须在 withBusy 外调
+// （sheets 的 busy 内弹窗守卫会 throw）；且排在「保存旧 doc」之前——apply 分支 commit 的像素要搭原有
+// `if (es.isDirty()) await saveNow()` 的车落盘。
+//
+// 浮层变换（hasFloating）**核实后不进这门**（2026-08-21 核实，别凭直觉补）：
+//   ① float 只存在于 enterTransient("transform", { apply: _commitTransform }) 括号内——全部 4 个 lift
+//      调用点（toolbar 变换按钮 / selection-ops Ctrl+D / import-image 导入为图层 / 粘贴越界直取）都成对进 transient；
+//   ② lift 本身是令牌整点 → wp:histchange → es 必脏，且 autosave 被 isMidOperation（app.ts:321，含
+//      hasFloating）挡着不会中途洗净；
+//   ③ 于是 openItem/newDoc/openLocalFile 的 `if (es.isDirty()) await saveNow()`（显式、非 implicit）必然
+//      走进 saveNow 的 applyPendingTransient（v0.10.15 起）→ 浮层被**自动应用**落盘，不丢、无需挽留。
+//   已知例外：blur/pagehide 的崩溃 flush（es.start 的 persist(false)）会在浮层挂着时洗净 dirty——那是
+//   crash-safety 语义（interrupt=cancel），不归此门管；fill 无此豁免正因为它连 saveNow 都不收口。
+async function _gateFillOnSwitch(): Promise<boolean> {
+  return gateFillOnDocSwitch(() =>
+    openChoiceSheet<"apply" | "discard">(t("ss.fillPendingTitle"), t("ss.fillPendingMsg"), [
+      { label: t("ss.fillPendingApply"), value: "apply", primary: true },
+      { label: t("ss.fillPendingDiscard"), value: "discard" },
+    ]));
 }
 
 // ---- 保存（本地）----
@@ -582,6 +606,7 @@ async function exitCanvasToGallery() {
 // 返 boolean（v0.9.35，QA 2）：false = 没建（无地脏离开确认被取消）——调用方**必须看**，别在
 //   取消路径照报「已新建」（谎报）。
 async function newDoc({ name, w, h, layer0Name, layer0Pixels }: { name: string; w: number; h: number; layer0Name?: string; layer0Pixels?: Uint8ClampedArray }): Promise<boolean> {
+  if (!(await _gateFillOnSwitch())) return false;   // 挽留门：fill 预览挂着 → 应用/丢弃/取消（user 2026-08-21）
   if (!(await leaveLocalFile())) return false;   // 无地且脏 → 问；取消 = 不新建
   if (es.isDirty()) await saveNow();
   // 新 doc = 本版现写：清掉**旧 doc** 残留的「新版本写的」旗标（adoptModel 才复位它，newDoc 路径
@@ -627,6 +652,7 @@ async function openItem(item: GalleryItem) {
   if (await isDocLockedElsewhere(sessionBareName(item.name))) {
     if (!(await openConfirmSheet(t("ss.docLockedElsewhereTitle"), t("ss.docLockedElsewhereMsg", { name: item.name })))) return;
   }
+  if (!(await _gateFillOnSwitch())) return;   // 挽留门：fill 预览挂着 → 应用/丢弃/取消（user 2026-08-21）
   if (!(await leaveLocalFile())) return;   // 无地且脏 → 问；取消 = 不开
   if (es.isDirty()) await saveNow();
   // 开画顺带把 4 个 settings/state collection 拉云对齐（v409，user 2026-07-14：「开画作的时候可以顺便
@@ -782,6 +808,9 @@ export const session = {
   // 无地走本地轨；残影墙期间（_esMuted）es 绝不标脏（防跨写，见无地节注释）。
   markEdited() { if (_localFile) { _markLocalDirty(); return; } if (es && !_esMuted) es.markDirty(); },
   setName, restore: restoreSession, saveAs,
+  // 显式换文档挽留门（fill 预览三选；user 2026-08-21）——给 session 外的换内容入口复用
+  //   （import-image 的 .ora 导入为新身份）。session 内的 openItem/newDoc/openLocalFile 已内联。
+  gateFillOnSwitch: _gateFillOnSwitch,
   save: saveNow, saveAndPush,
   // adopt 的两个意图显式分开（别再合成一个带 flag 的）：import=新身份 / revert=既有身份。
   adoptAsNew, adoptAsExisting,

@@ -16,7 +16,6 @@ export declare const els: {
     layerAddBtn: HTMLButtonElement;
     menuBtn: HTMLElement;
     menuGallery: HTMLElement;
-    menuSignIn: HTMLElement;
     menuPanel: HTMLElement;
     menuLongPressPick: HTMLElement;
     menuSingleFingerDraw: HTMLElement;

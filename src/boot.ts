@@ -11,6 +11,7 @@ import { session } from "./session-state.ts";
 import { getCurrentSessionName } from "./session.ts";
 import { restoreLastSession } from "./boot-restore.ts";
 import { isDocLockedElsewhere } from "./instance-locks.ts";
+import { isCloudEnabled } from "./cloud-capability.ts";
 import { appState, flushAppState } from "./app-state.ts";
 import type { AppContext } from "./app-context.ts";
 
@@ -58,5 +59,10 @@ export async function bootRestoreSession(ctx: AppContext) {
     // 双实例互认（2026-08-21）：boot 期少打扰——status 提示，不弹 sheet（openItem 入口才弹确认）。
     isDocLockedElsewhere: (name) => isDocLockedElsewhere(name),
     onLockedElsewhere: (name) => setStatus(t("mi.restoreLockedElsewhere", { name }), true),
+    // 云端功能开关（2026-08-21，cloud-capability 接缝）：关 = 不自动恢复 + 不开图库，
+    //   停在 boot 的空白画布（app.ts 出生即 backend.blank 2048²；gallery overlay 默认 hidden，
+    //   这里只补一句 status 说明为什么没开上次的画）。currentFile/标记零变更（关→开自愈）。
+    isCloudEnabled: () => isCloudEnabled(),
+    openBlankCanvas: async () => { setStatus(t("mi.bootCloudOff")); },
   });
 }

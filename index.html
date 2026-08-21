@@ -1284,11 +1284,8 @@
         <button class="menu-item menu-item-with-icon" id="menuOpenLocalFile" type="button" role="menuitem" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#folder-open"/></svg>
         <span class="menu-item-label" data-i18n="menu.openLocalFile">打开本地文件…</span>
       </button>
-        <!-- v0.6.22（user, high）：未登录导致离线时不用退回图库才能登录——editor 内直接给登录入口。
-             未登录+已配置+在线才显示（cloud-auth-ui 派生）；文案复用 gal.menu.signIn -->
-        <button class="menu-item menu-item-with-icon hidden" id="menuSignIn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#cloud"/></svg>
-        <span class="menu-item-label" data-i18n="gal.menu.signIn">登录 OneDrive</span>
-      </button>
+        <!-- 菜单「登录 OneDrive」行（v0.6.22 menuSignIn）已删 2026-08-21：编辑器内登录统一走
+             smart save 的「现在登录同步？」sheet（topbar-menu.smartSaveAndPush）；图库云账号 popup 保留=第二入口 -->
         <!-- 2026-08-21 导出与另存 hub（user 拍板）：原「导出」+「另存为」合并成一个 in-app sheet
              （①导出图片=既有 sticky-config 管线 ②存为本地 .ora ③复制一份到图库=原另存为语义）。
              扳手配置原样留在本行（sub-label 仍显示当前导出配置）。 -->
@@ -1383,6 +1380,12 @@
         <button class="menu-item menu-item-with-icon" id="menuGenAI" type="button" role="menuitemcheckbox" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ai-slop"/></svg>
           <span class="menu-item-label" data-i18n="menu.genAI">启用生成式 AI 功能</span>
           <span class="menu-item-state" data-state-for="genAI">关</span>
+        </button>
+        <!-- 2026-08-21 云端功能开关 v1（接缝=cloud-capability.ts；纯 UI gating 零数据变更）：
+             设备本地 pref，默认开；未配置 auth 时灰显强制关（settings-menu 派生 aria-disabled+title） -->
+        <button class="menu-item menu-item-with-icon" id="menuCloudEnabled" type="button" role="menuitemcheckbox" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#cloud"/></svg>
+          <span class="menu-item-label" data-i18n="menu.cloudEnabled">启用云端功能</span>
+          <span class="menu-item-state" data-state-for="cloudEnabled">开</span>
         </button>
         <button class="menu-item menu-item-with-icon" id="menuShortcuts" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#shortcut"/></svg>
         <span class="menu-item-label" data-i18n="menu.shortcuts">快捷键</span>

@@ -630,6 +630,44 @@ describe("shape-brush · 正方/正圆 respect 透视（UI v2.4 接线烟测）"
   });
 });
 
+describe("shape-brush · erase mode 透传链（按住 E 临时橡皮，2026-08-21）", () => {
+  it("buffered：beginStroke mode='erase' → collectStamps().mode 全程 'erase'（mode 锁定在 begin，extend 不变）", () => {
+    const s = resolveBrush({ size: 10, color: "#000", spacing: 0.2 });
+    const doc = mkDoc();
+    const eng = mkEngine("line");
+    eng.beginStroke(doc.layers[0], s, 50, 50, 0.5, "erase");
+    eq(eng.collectStamps().mode, "erase", "begin 后即 erase");
+    eng.extendStroke(200, 60, 0.5);
+    eq(eng.collectStamps().mode, "erase", "extend 后仍 erase（mid-stroke 不可变）");
+    const cs = eng.endStroke();
+    eq(cs.mode, "erase", "endStroke 收口 StampCollect 仍 erase");
+  });
+  it("pixelMode：erase 真出橡皮效果（同轨迹先画后擦 → alpha 显著下降）", () => {
+    const s = resolveBrush({ size: 3, color: "#000000", preset: { pixelMode: true } });
+    const doc = mkDoc();
+    const alphaSum = () => {
+      const snap = doc.layers[0].snapshotImageData();
+      if (!snap.imageData) return 0;
+      const d = snap.imageData.data;
+      let n = 0;
+      for (let i = 3; i < d.length; i += 4) n += d[i];
+      return n;
+    };
+    const e1 = mkEngine("line");
+    e1.beginStroke(doc.layers[0], s, 50, 50, 0.5, "brush");
+    e1.extendStroke(200, 50, 0.5);
+    e1.endStroke();
+    const before = alphaSum();
+    assert(before > 0, "铺底线落了像素");
+    const e2 = mkEngine("line");
+    e2.beginStroke(doc.layers[0], s, 50, 50, 0.5, "erase");
+    e2.extendStroke(200, 50, 0.5);
+    e2.endStroke();
+    const after = alphaSum();
+    assert(after < before * 0.9, `erase 应显著削 alpha（${before} → ${after}）`);
+  });
+});
+
 // 收尾（v0.6.14 测试卫生）：统一释放本文件建的所有工件的 tile 句柄。
 //   泄漏 assert 是池的正当兜底（所有权纪律在 src 是完整的），别删 assert，别 clearAll。
 describe("shape-brush 收尾", () => {

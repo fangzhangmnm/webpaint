@@ -19,6 +19,9 @@ import { wireInlineSelect } from "./inline-select.ts";
 import { openInputSheet } from "./sheets.ts";
 import { reportError } from "./error-badge.ts";   // 全 app 唯一错误汇拢点（CLAUDE.md）
 import { initInstallCapture, bindInstallButton } from "./install-prompt.ts";
+import { isCloudEnabled, setCloudEnabled } from "./cloud-capability.ts";
+import { isAuthConfigured, isSignedIn } from "./app-store.ts";   // auth 公共面（cloud-auth-ui 同款直连）
+import { session } from "./session-state.ts";   // 云开关关闭前 flush（saveAndPush）用；只调不改
 import type { AppContext } from "./app-context.ts";
 
 // KEYBOARD_SHORTCUTS 元素（input.js 未类型化 → 描述渲染用到的字段）。
@@ -114,6 +117,26 @@ function applyGenAI(on: boolean) {
   syncedUserPreference.setItem("gen-ai", !!on);
 }
 
+// ============ 云端功能开关 v1（2026-08-21 user 拍板；接缝 = cloud-capability.ts）============
+// 编排（toggle 姿势照 menuGenAI）：render = 只贴 DOM（boot/fixup 安全）；点击 handler 才 setCloudEnabled。
+// gating（v1 = 全部显隐/短路，零数据变更）：①菜单「图库」项隐藏（其余入口守卫在 topbar-menu）
+//   ②boot 不自动恢复（boot-restore 端口门）③save 徽章无云态（save-status）④图库藏了云 popup 即不可达。
+// !isAuthConfigured()（容器不支持云）→ toggle 灰显强制关（aria-disabled + title 说明），**不写盘**：
+//   配置恢复后自愈回用户存值（cloudPrefEnabled 原样）。
+function renderCloudEnabled() {
+  const btn = document.getElementById("menuCloudEnabled");
+  if (!btn) return;
+  const configured = isAuthConfigured();
+  const on = isCloudEnabled();   // = configured && 用户存值
+  btn.setAttribute("aria-pressed", on ? "true" : "false");
+  btn.setAttribute("aria-disabled", configured ? "false" : "true");
+  btn.title = configured ? "" : t("menu.cloudUnavailableTitle");
+  const st = btn.querySelector('[data-state-for="cloudEnabled"]');
+  if (st) st.textContent = configured ? (on ? t("common.on") : t("common.off")) : t("common.off");
+  // gating ①：菜单「图库」项显隐（图库藏了 → 云账号 popup 等云 UI 一并不可达）
+  els.menuGallery?.classList.toggle("hidden", !on);
+}
+
 // v124 快捷键 sheet：从 KEYBOARD_SHORTCUTS 自动渲染（input.js 注册的唯一真理源）
 const _shortcutsSheet = document.getElementById("shortcutsSheet");
 const _shortcutsBackdrop = document.getElementById("shortcutsBackdrop");
@@ -147,6 +170,7 @@ export function renderSettingsFromPrefs(): void {
   renderPixelGrid(syncedUserPreference.getItem<boolean>("pixel-grid", PREF_DEFAULTS["pixel-grid"]));
   renderFps(syncedUserPreference.getItem<boolean>("show-fps", PREF_DEFAULTS["show-fps"]));
   renderGenAI(genAiEnabled());
+  renderCloudEnabled();   // 云端功能开关真值回灌（设备本地 pref；只 render 不写盘）
   renderLongPressPick(syncedUserPreference.getItem<boolean>("long-press-pick", PREF_DEFAULTS["long-press-pick"]));
   renderSingleFingerDraw(syncedUserPreference.getItem<boolean>("single-finger-draw", PREF_DEFAULTS["single-finger-draw"]));
 }
@@ -253,6 +277,25 @@ export function initSettingsMenu(ctx: AppContext) {
     const next = !genAiEnabled();
     applyGenAI(next);
     setStatus(t("status.genAI", { s: next ? t("common.on") : t("common.off") }));
+  });
+  // 云端功能开关（2026-08-21；纪律/gating 见 renderCloudEnabled 头注释）
+  document.getElementById("menuCloudEnabled")?.addEventListener("click", async () => {
+    if (!isAuthConfigured()) return;   // 灰显强制关：容器不支持云，点了也不动用户存值
+    const next = !isCloudEnabled();
+    if (!next && session.name) {
+      // 关闭前 flush：有活动 store 画 → 先存+推；没推成（内存脏残留 / 云腿仍 pending）→ 提示并**不切换**。
+      //   未登录时 pushPending 恒不成立（computeSaveState 同判据）——本地落盘成功即可关。
+      try { await session.saveAndPush(); } catch { /* saveAndPush 内部已 surface；下面判据兜底 */ }
+      if (session.dirty || (isSignedIn() && session.pushPending)) {
+        setStatus(t("status.cloudOffFlushFailed"), true);
+        renderCloudEnabled();
+        return;
+      }
+    }
+    setCloudEnabled(next);   // 只写设备本地 pref + 广播 wp:cloud-capability-changed；零数据变更（红线）
+    renderCloudEnabled();
+    updateSaveStatus();      // ③save 徽章无云态立即生效
+    setStatus(t("status.cloudEnabled", { s: next ? t("common.on") : t("common.off") }));
   });
   // v0.5.37（user）：主题/语言换 in-app 下拉——原生 select 打开态是 chrome 域（iPad 弹层系统字体，
   //   UCSUR 必豆腐；夜间白底、装不了 SVG 同根性坑）。弹层复用紧凑菜单 list 形态 + 锚定。

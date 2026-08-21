@@ -24,10 +24,12 @@ export function initPlatformGuards(ctx: AppContext) {
   input = ctx.input;
 
   // pointer 自愈兜底：window 级 cancel / app 隐藏 / 窗口失焦 都 cancelAllPointers。
+  // 键 hold 自愈（2026-08-21）：失焦/切后台 keyup 收不到 → eraserHold/altDown 卡死，一并清
+  //   （clearKeyHolds 注释有账）。只挂 blur/hidden，不挂 pointercancel——键可能仍被真实按着。
   window.addEventListener("pointercancel", () => input.cancelAllPointers(), true);
-  window.addEventListener("blur", () => input.cancelAllPointers());
+  window.addEventListener("blur", () => { input.cancelAllPointers(); input.clearKeyHolds(); });
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") input.cancelAllPointers();
+    if (document.visibilityState === "hidden") { input.cancelAllPointers(); input.clearKeyHolds(); }
   });
 
   // capture-phase 拦 dblclick（防 iPad 系统级"双击文本选中 / 双击拖窗"劫持）

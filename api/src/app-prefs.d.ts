@@ -2,6 +2,7 @@ import type { Collection } from "./app-store.ts";
 export declare const PREF_DEFAULTS: {
     readonly "color-theme": string;
     readonly "menu-tab": string;
+    readonly "cloud-enabled": boolean;
     readonly lang: string | null;
     readonly "long-press-pick": boolean;
     readonly "single-finger-draw": boolean;

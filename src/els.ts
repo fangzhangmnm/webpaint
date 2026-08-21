@@ -27,7 +27,7 @@ export const els = {
   // v123：del/up/down 挪进 per-row "⋯" 菜单；footer 只剩 layerAddBtn
   menuBtn: byId("menuButton"),
   menuGallery: byId("menuGallery"),
-  menuSignIn: byId("menuSignIn"),
+  // menuSignIn 已删 2026-08-21：编辑器内登录统一走 smart save sheet（topbar-menu.smartSaveAndPush）
   menuPanel: byId("menuPanel"),
   menuLongPressPick: byId("menuLongPressPick"),
   menuSingleFingerDraw: byId("menuSingleFingerDraw"),

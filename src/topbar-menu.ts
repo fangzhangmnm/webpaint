@@ -23,9 +23,10 @@ import { session } from "./session-state.ts";
 import { isUnlocked } from "./crypto-state.ts";
 import { checkpointAgeMinutes } from "./checkpoint-policy.ts";
 import { els } from "./els.ts";
-import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
+import { openInputSheet, openConfirmSheet, openChoiceSheet, lockSyncGate } from "./sheets.ts";
 import { setMenuOpen } from "./settings-menu.ts";
-import { signIn, isAuthConfigured } from "./app-store.ts";   // auth 是公共面（cloud-auth-ui 同款直连；v415 红线针对的是 sync store，不含 auth）
+import { signIn, isSignedIn } from "./app-store.ts";   // auth 是公共面（cloud-auth-ui 同款直连；v415 红线针对的是 sync store，不含 auth）
+import { isCloudEnabled } from "./cloud-capability.ts";
 import { sessionNameConflict } from "./session-name.ts";
 import { supportsFileSystemAccess, pickLocalOraFile } from "./local-file-session.ts";
 import { anchorPopupToBtn } from "./anchored-popup.ts";
@@ -48,6 +49,56 @@ let rack: AppContext["rack"];
 function closeSheet(sheet: HTMLElement, backdrop: HTMLElement) {
   backdrop.classList.add("hidden");
   sheet.classList.add("hidden");
+}
+
+// ============ smart save（2026-08-21 user 拍板）：save 按钮 / Ctrl+S 共用的唯一入口 ============
+// 分支（smart 逻辑全在 handler 层，session-state 不动）：
+//   · 无地本地文件      → saveAndPush（内部即「写回文件」，无云腿，照旧）
+//   · 云功能关（cloud-capability，含容器未配置 auth）→ 只本地 save（短路云腿；commitPending 保
+//     「显式保存收口 fill 预览」的 QA 2026-08-21 语义，与 Ctrl+Shift+S 同款）
+//   · 已登录            → saveAndPush（行为不变）
+//   · 已配置未登录（含 credential 过期掉线）→ 本地 save 照做 + 弹「现在登录同步？」确认 sheet
+// 防烦：同一 session 点过「暂不」→ 之后只状态行提示，不再弹（module 级布尔，可调点——
+//   若想改成「每 N 次再提醒」或跨刷新记忆，改这一个旗子的读写即可；点背板/Esc 取消**不**记防烦）。
+let _cloudSignInPromptDeclined = false;
+function smartSaveAndPush() {
+  if (session.localFile) { void session.saveAndPush(); return; }
+  // 无活动文档（gallery-first 未绑 session / 云关 boot 空白画布）：走旧路 → 「无文档不能保存」的
+  //   诚实提示（saveAndPush 首行分支）。没有文档就没有「登录同步」可谈，不弹。
+  if (!session.name) { void session.saveAndPush(); return; }
+  if (!isCloudEnabled()) { void session.save({ commitPending: true }); return; }
+  if (isSignedIn()) { void session.saveAndPush(); return; }
+  // —— 已配置未登录：本地保存照做（不 await——sheet 弹出与 IDB 事务并行，beforeunload 偷存同款姿态）——
+  void session.save({ commitPending: true }).catch(() => {});
+  // 离线时登录无意义（与旧 menuSignIn「未登录+已配置+在线才显示」同判据）→ 不弹，只提示。
+  if (_cloudSignInPromptDeclined || navigator.onLine === false) {
+    setStatus(t("save.savedLocalNotSignedIn"), true);
+    updateSaveStatus();
+    return;
+  }
+  // ⚠ iOS 红线（本功能最关键的技术点）：loginRedirect 必须从按钮 click listener **同步**发起——
+  //   `await openChoiceSheet(...)` 之后再 signIn 走的是 Promise resolve 的微任务续体，Safari 可能
+  //   已丢 transient activation → 静默拦。故登录动作走 onPick（sheets.ts 在 click listener 内、
+  //   resolve 之前同步调它）；返回值只用于「暂不/取消」的收尾。姿势照抄旧 menuSignIn
+  //   （_signInNav 旗、save 不 await——上面已发、signIn().catch 报错）。
+  void openChoiceSheet<"signin" | "later">(t("save.signInPromptTitle"), t("save.signInPromptMsg"), [
+    {
+      label: t("save.signInNow"), value: "signin", primary: true,
+      onPick: () => {
+        _signInNav = true;
+        signIn().catch((e) => {
+          _signInNav = false;
+          setStatus(t("cf.signInFailed", { err: String((e as Error)?.message || e) }), true);
+        });
+      },
+    },
+    { label: t("save.signInLater"), value: "later" },
+  ]).then((choice) => {
+    if (choice === "signin") return;   // 登录已在 onPick 同步发起（redirect 导航中）
+    if (choice === "later") _cloudSignInPromptDeclined = true;   // 显式「暂不」才记防烦；背板取消不记
+    setStatus(t("save.savedLocalNotSignedIn"), true);
+    updateSaveStatus();
+  });
 }
 
 export function initTopbarMenu(ctx: AppContext) {
@@ -105,7 +156,8 @@ export function initTopbarMenu(ctx: AppContext) {
       e.preventDefault();               // busy 期也吞掉，否则漏给浏览器的「保存网页」
       if (isBusyActive()) return;       // busy 遮罩挡不住 window keydown（QA 2026-08-21）
       // commitPending：Ctrl+Shift+S 也是显式保存 → fill 预览一并收口（saveAndPush 在 session 内自收）
-      if (e.shiftKey) session.save({ commitPending: true }); else session.saveAndPush();   // Ctrl+Shift+S=只本地；Ctrl+S=存+推
+      // Ctrl+Shift+S=只本地（不弹不变）；Ctrl+S=smart save（与 save 按钮同一个函数，2026-08-21）
+      if (e.shiftKey) session.save({ commitPending: true }); else smartSaveAndPush();
     }
   });
   // autosave configure/start + visibility/pagehide flush 已切到 session-state.ts initSession。
@@ -128,12 +180,13 @@ export function initTopbarMenu(ctx: AppContext) {
   });
 
   // ---- topbar：save/upload + gallery ----
-  // 点 save 按钮 = saveAndPush 一把梭（同 Ctrl+S），**无条件**——不脏也 encode+推。
+  // 点 save 按钮 = smart save（同 Ctrl+S；2026-08-21 拍板，分支见 smartSaveAndPush 头注释）。
+  //   已登录路径仍是 saveAndPush 一把梭，**无条件**——不脏也 encode+推。
   //   v409（user 2026-07-14）：「smart save 在不 dirty 的时候也走 save，推云。至少可以改时间戳，
   //   不然用户点了 save 看到时间戳没动会觉得坏了」。
   //   故删掉旧的「synced → 只查云快进」分支（ADR-0017 的 no-op fast path）：那条路不动时间戳，
   //   且 forceSaveAndPush 内部的 save 本就走 store 的 freshness/冲突 surface，查云的效果被它包含。
-  els.topSaveBtn.addEventListener("click", () => { session.saveAndPush(); });
+  els.topSaveBtn.addEventListener("click", () => { smartSaveAndPush(); });
 
   // adjust panel head 拖动
   (function bindAdjustPanelDrag() {
@@ -164,9 +217,11 @@ export function initTopbarMenu(ctx: AppContext) {
   // v267 (user) 图库挪回三条杠菜单（menuGallery）。topGalleryBtn 已从顶栏删除，
   //   留 getElementById?. 兜底防旧缓存 DOM（有就接上，无则 no-op）。
   // gallery-first：进图库 = 关闭当前画作（active = null）+ refresh 后停 gallery
-  document.getElementById("topGalleryBtn")?.addEventListener("click", () => session.exit());
+  // 云功能关（2026-08-21 gating ①）：图库入口短路（menuGallery 本体已由 settings-menu 隐藏，
+  //   这里是 UI 触发点的兜底守卫——旧缓存 DOM / 竞态点击）。
+  document.getElementById("topGalleryBtn")?.addEventListener("click", () => { if (isCloudEnabled()) void session.exit(); });
   // v0.5.21：图库回三条杠菜单（独立 pill 一日游——user：visually distracting）
-  els.menuGallery?.addEventListener("click", () => { setMenuOpen(false); session.exit(); });
+  els.menuGallery?.addEventListener("click", () => { if (!isCloudEnabled()) return; setMenuOpen(false); void session.exit(); });
   // v0.9.25 编辑器内新建（user 2026-08-20）：复用图库加号的三选 popup（新建/从图片/从剪切板），
   //   三个条目的 handler 全在 gallery-shell（init 时已接好，与图库开合无关）——这里只开 popup，
   //   零逻辑重复。「新建文件夹」是图库视图操作，编辑器语境隐藏（图库加号打开时恢复）。
@@ -178,18 +233,9 @@ export function initTopbarMenu(ctx: AppContext) {
     els.galleryAddPopup.classList.remove("hidden");
     anchorPopupToBtn(els.galleryAddPopup, els.menuBtn);
   });
-  // v0.6.22（user, high）：editor 内登录。iOS 红线：loginRedirect 前不能有 await（丢 user-gesture
-  //   → Safari 静默拦截），所以 save 不 await（IDB 事务已排队，beforeunload 偷存同款姿态）。
-  els.menuSignIn?.addEventListener("click", () => {
-    setMenuOpen(false);
-    if (!isAuthConfigured()) return;   // 按钮本就只在已配置时显示，兜底
-    _signInNav = true;
-    session.save().catch(() => {});
-    signIn().catch((e) => {
-      _signInNav = false;
-      setStatus(t("cf.signInFailed", { err: String((e as Error)?.message || e) }), true);
-    });
-  });
+  // 菜单「登录 OneDrive」行（v0.6.22 menuSignIn）已删（2026-08-21 拍板）：编辑器内登录入口
+  //   统一走 smart save 的「现在登录同步？」sheet（见 smartSaveAndPush）；图库云账号 popup 的
+  //   登录入口保留 = 第二入口（cloud-auth-ui）。iOS 手势姿势原样搬进 onPick。
 
   // ---- 菜单：导入 / 导出 / 剪贴板 / 适应 ----
   els.menuRename.addEventListener("click", () => {

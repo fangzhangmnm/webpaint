@@ -11,3 +11,6 @@ export interface PointerDownInput {
     singleFingerDraw: boolean;
 }
 export declare function assignRole({ tool, pointerType, button, buttons, spaceDown, altDown, penEverSeen, singleFingerDraw }: PointerDownInput): string | null;
+export declare const ERASER_HOLD_TAP_MS = 350;
+export declare function strokeMode(role: string, eraserHold: boolean): "erase" | "brush";
+export declare function eraserTapOnRelease(heldMs: number, holdUsed: boolean): boolean;

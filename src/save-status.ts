@@ -6,6 +6,7 @@
 // 依赖全是单例/leaf，直接 import：isSignedIn ← app-store.ts，session ← session-state.ts，els ← els.ts。
 import { els } from "./els.ts";
 import { isSignedIn } from "./app-store.ts";
+import { isCloudEnabled } from "./cloud-capability.ts";
 import { session } from "./session-state.ts";
 import { t, tLatin } from "./i18n/index.ts";
 import { iconHtml } from "./ui/icon.ts";
@@ -40,11 +41,18 @@ export const ICON_CLOUD_PENDING = iconHtml("cloud-pending");   // 已落本地�
 //   没有它，保存瞬间会闪「问号虚云」（pushPending 终态），语义不对。双件叠放同 blender-sync 的连接中。
 export const ICON_CLOUD_SAVING =
   `<span class="icon-stack">` + iconHtml("cloud-busy-base") + iconHtml("cloud-busy-spinner", { cls: "spin-arc" }) + `</span>`;
+// 2026-08-21 拍板：云功能开 + 已配置 + 未登录 → 斜杠云（提示「云不可用，登录可修」）；
+//   云功能关（cloud-capability，含容器未配置 auth）→ 纯 disk，无任何云徽标（cloud-off 态）。
+export const ICON_CLOUD_UNAVAILABLE = iconHtml("cloud-unavailable");
 
 function computeSaveState() {
   // cutover：busy/cloud 状态不再暴露（sync 脏进 listAllItems，非徽章热路径）。内存脏=session.dirty，其余按登录态。
   if (session.saving) return "saving";                     // v0.5.9：保存/推送在飞（app 层过程态）
   if (session.dirty) return "dirty";                       // 内存脏（未落盘）
+  // 云功能关（2026-08-21）：云腿被短路（smart save 只走本地），云态徽章一律不呈现——
+  //   排在 unpushed/synced 之前：关闭态谈「已同步/未推」都是谎（根本不会推）。saving/dirty 不受影响
+  //   （saving=_pushInFlight 只由 saveAndPush 置，关闭态本就走不到）。
+  if (!isCloudEnabled()) return "cloud-off";
   // ⚠ unpushed **不是**被 cutover 删掉的那批状态之一（saving/cloud-dirty/cloud-busy 是「在飞中」的过程态，
   //   删得对，别加回来）。这条是**终态**：已经存完了、而且云端那条腿确定没成——离线 / 冲突面选了取消 /
   //   deferred 落地未确认。v432 之前它没有任何渲染面，于是 push 失败后徽章照画云朵对勾、状态栏照报「已同步」，
@@ -84,5 +92,8 @@ export function updateSaveStatus() {
     els.topSaveBtn.innerHTML = ICON_CLOUD_CHECK;
     els.topSaveBtn.title = tLatin("save.synced", { name });
   }
-  else                          { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = tLatin("save.localOnly", { name }); }
+  // cloud-off：纯 disk（无云徽标；styles.css 无此态选择器 = 默认按钮色，即想要的中性灰）。
+  else if (state === "cloud-off") { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = tLatin("save.cloudOff", { name }); }
+  // local-only（云功能开 + 已配置 + 未登录，2026-08-21 拍板）：斜杠云——「云不可用，点保存会提示登录」。
+  else                          { els.topSaveBtn.innerHTML = ICON_CLOUD_UNAVAILABLE; els.topSaveBtn.title = tLatin("save.localOnly", { name }); }
 }

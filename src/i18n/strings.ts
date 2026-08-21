@@ -470,7 +470,9 @@ export const S = {
   "sc.transformSelPwa": { zh: "变换选区（仅 PWA；浏览器标签页内 Ctrl+T 被占用）", en: "Transform selection (PWA only; Ctrl+T is taken in a browser tab)", ja: "選択範囲を変形（PWAのみ；ブラウザタブでは Ctrl+T が使用中）", tok: "ante selo pi ma wile (PWA taso)" }, 
   "sc.floatCopy":       { zh: "复制选区为浮层", en: "Copy selection to float", ja: "選択を浮遊レイヤーに複製", tok: "pali sama tawa lipu sewi" }, 
   "sc.brush":           { zh: "笔刷", en: "Brush", ja: "ブラシ", tok: "ilo sitelen" }, 
-  "sc.eraser":          { zh: "橡皮", en: "Eraser", ja: "消しゴム", tok: "ilo weka" }, 
+  "sc.eraser":          { zh: "橡皮", en: "Eraser", ja: "消しゴム", tok: "ilo weka" },
+  // spring-loaded E（2026-08-21）：面板 display-only 条目，说明 hold 语义（input.ts KEYBOARD_SHORTCUTS）
+  "sc.eraserHold":      { zh: "按住＝临时橡皮（松开回原工具）", en: "Hold = temporary eraser (release to restore tool)", ja: "長押し＝一時的な消しゴム（離すと元のツールに戻る）", tok: "luka awen la ilo weka (luka weka la ilo pini li kama sin)" },
   "sc.picker":          { zh: "吸色", en: "Eyedropper", ja: "スポイト", tok: "ilo pi kama kule" }, 
   "sc.lasso":           { zh: "套索", en: "Lasso", ja: "投げ縄", tok: "ilo pi ma wile" }, 
   "sc.fillMode":        { zh: "油漆桶（填充工具）", en: "Paint bucket (fill tool)", ja: "塗りつぶしツール", tok: "ilo pi kule ma" }, 
@@ -767,6 +769,11 @@ export const S = {
   "ss.notOpenedNeedPasswordCancelled": { zh: "未打开：需要密码解锁（已取消）", en: "Not opened: password required to unlock (cancelled)", ja: "開いていません：ロック解除にパスワードが必要です（キャンセルしました）", tok: "open ala: nimi len li wile (pali li weka)" }, 
   "ss.opened": { zh: "已打开：{name}", en: "Opened: {name}", ja: "開きました：{name}", tok: "open li pini: {name}" }, 
   "ss.openFailed": { zh: "打开失败：{error}", en: "Open failed: {error}", ja: "開くのに失敗しました：{error}", tok: "open li pakala: {error}" },
+  // 显式换文档挽留门（user 2026-08-21：换文档若走丢弃要有提示 + 弹窗挽留）：fill 预览挂着 → 三选
+  "ss.fillPendingTitle": { zh: "有未应用的填色", en: "Unapplied fill", ja: "未適用の塗りつぶしがあります", tok: "kule sin li awen ala" },
+  "ss.fillPendingMsg": { zh: "填色还只是预览，换文档会丢掉它。", en: "The fill is still a preview — switching documents will discard it.", ja: "塗りつぶしはまだプレビューです。ドキュメントを切り替えると失われます。", tok: "kule sin li lukin taso. sina ante e lipu la ona li weka." },
+  "ss.fillPendingApply": { zh: "应用并继续", en: "Apply and continue", ja: "適用して続行", tok: "o kule. o tawa." },
+  "ss.fillPendingDiscard": { zh: "丢弃并继续", en: "Discard and continue", ja: "破棄して続行", tok: "o weka e kule. o tawa." },
   // 双实例互认（Web Locks，2026-08-21）：同画双开会本地字节互覆 → 图库入口警告（默认取消）
   "ss.docLockedElsewhereTitle": { zh: "这幅画已在其他窗口打开", en: "Already open in another window", ja: "別のウィンドウで開いています", tok: "sitelen ni li open lon lupa ante" },
   "ss.docLockedElsewhereMsg": { zh: "「{name}」正在另一个窗口中编辑，同时编辑会相互覆盖。仍要打开？", en: "\"{name}\" is being edited in another window; editing in both will overwrite each other. Open anyway?", ja: "「{name}」は別のウィンドウで編集中です。同時に編集するとお互いの変更を上書きしてしまいます。それでも開きますか？", tok: "sitelen \"{name}\" li open lon lupa ante. lupa tu li ante e ona la ante li moli e ante. sina wile open ala open?" },
@@ -965,7 +972,24 @@ export const S = {
   "cf.cloudNotSignedInTitle": { zh: "云端：未登录（点开登录）", en: "Cloud: not signed in (tap to sign in)", ja: "クラウド：未ログイン（タップしてログイン）", tok: "poki sewi li sona ala e sina (o luka)" }, 
   "cf.cloudNotSignedIn": { zh: "云端：未登录", en: "Cloud: not signed in", ja: "クラウド：未ログイン", tok: "poki sewi li sona ala e sina" }, 
   "cf.cloudNotConfigured": { zh: "云端：未配置", en: "Cloud: not configured", ja: "クラウド：未設定", tok: "poki sewi: nasin li lon ala" }, 
-  "cf.notConfiguredClient": { zh: "尚未配置 OneDrive 客户端", en: "OneDrive client not configured yet", ja: "OneDrive クライアントが未設定です", tok: "nasin pi ilo \"OneDrive\" li lon ala" }, 
+  "cf.notConfiguredClient": { zh: "尚未配置 OneDrive 客户端", en: "OneDrive client not configured yet", ja: "OneDrive クライアントが未設定です", tok: "nasin pi ilo \"OneDrive\" li lon ala" },
+  // ── store busy 文案（@internal/store 0.3.0 StoreUI.text 接缝；store-ui.ts 把 StoreTextKey 映到这 14 键）──
+  //   zh = 库内 0.3.0 之前硬编码的中文原文**逐字**（用户可见中文零变化）；en = 库内英文缺省文案。
+  //   {name} 由库发 params、t() 插值（store-ui 原样转交，不 strip——与旧库内文案行为一致）。
+  "st.syncPushing":      { zh: "正在同步…",           en: "Syncing…",               ja: "同期中…",                 tok: "mi pana tawa poki sewi…" },
+  "st.fileRenaming":     { zh: "重命名…",             en: "Renaming…",              ja: "名前変更中…",             tok: "mi ante e nimi…" },
+  "st.filePulling":      { zh: "拉取中…",             en: "Pulling…",               ja: "クラウドから取得中…",     tok: "mi kama jo tan poki sewi…" },
+  "st.cloudChecking":    { zh: "检查云端…",           en: "Checking cloud…",        ja: "クラウドを確認中…",       tok: "mi lukin e poki sewi…" },
+  "st.fileDeleting":     { zh: "删除中…",             en: "Deleting…",              ja: "削除中…",                 tok: "mi weka…" },
+  "st.trashRestoring":   { zh: "恢复中…",             en: "Restoring…",             ja: "復元中…",                 tok: "mi kama sin…" },
+  "st.trashPurging":     { zh: "彻底删除…",           en: "Deleting permanently…",  ja: "完全に削除中…",           tok: "mi moli…" },
+  "st.trashEmptyTrash":  { zh: "清空回收站…",         en: "Emptying trash…",        ja: "ゴミ箱を空にしています…", tok: "mi weka e ale pi poki jaki…" },
+  "st.trashEmptyBackups":{ zh: "清空备份箱…",         en: "Emptying backup box…",   ja: "バックアップボックスを空にしています…", tok: "mi weka e ale pi poki awen…" },
+  "st.fileEncrypting":   { zh: "正在加密 {name}…",    en: "Encrypting {name}…",     ja: "暗号化中 {name}…",        tok: "mi len e {name}…" },
+  "st.fileDecrypting":   { zh: "正在解除加密 {name}…", en: "Decrypting {name}…",    ja: "暗号化解除中 {name}…",    tok: "mi weka e len pi {name}…" },
+  "st.fileReuploading":  { zh: "重新上传…",           en: "Re-uploading…",          ja: "再アップロード中…",       tok: "mi pana sin…" },
+  "st.folderCreating":   { zh: "新建文件夹…",         en: "Creating folder…",       ja: "フォルダ作成中…",         tok: "mi pali e poki sin…" },
+  "st.folderDeleting":   { zh: "删除文件夹…",         en: "Deleting folder…",       ja: "フォルダ削除中…",         tok: "mi weka e poki…" },
   "br.toolBrush": { zh: "笔刷", en: "Brush", ja: "ブラシ", tok: "ilo sitelen" }, 
   "br.toolEraser": { zh: "橡皮", en: "Eraser", ja: "消しゴム", tok: "ilo weka" }, 
   "br.rackTitle": { zh: "笔架 · {tool}", en: "Brush Rack · {tool}", ja: "ブラシラック · {tool}", tok: "poki pi ilo sitelen · {tool}" }, 
@@ -1212,4 +1236,17 @@ export const S = {
   // 裁切自定义宽高 placeholder（index.html crop toolbar）
   "crop.widthPh":  { zh: "宽px", en: "W px", ja: "幅px" },
   "crop.heightPh": { zh: "高px", en: "H px", ja: "高px" },
+
+  // ── smart save + 云端功能开关（2026-08-21 拍板；topbar-menu.smartSaveAndPush / cloud-capability / settings-menu）──
+  "save.signInPromptTitle": { zh: "已保存到本机", en: "Saved on this device", ja: "この端末に保存しました", tok: "sitelen li awen lon ilo ni" },
+  "save.signInPromptMsg":   { zh: "云端未登录，现在登录同步？", en: "Not signed in to the cloud. Sign in now to sync?", ja: "クラウドに未ログインです。今すぐログインして同期しますか？", tok: "sina lon ala poki sewi. sina wile kama lon poki sewi lon tenpo ni anu seme?" },
+  "save.signInNow":         { zh: "登录", en: "Sign in", ja: "ログイン", tok: "o kama lon poki sewi" },
+  "save.signInLater":       { zh: "暂不", en: "Not now", ja: "今はしない", tok: "tenpo ni la mi wile ala" },
+  "save.savedLocalNotSignedIn": { zh: "已存本地 · 未登录", en: "Saved locally · not signed in", ja: "ローカル保存済み · 未ログイン", tok: "awen lon ilo ni · sina lon ala poki sewi" },
+  "save.cloudOff":          { zh: "已存本地（云端功能已关闭） · {name}", en: "Saved locally (cloud features are off) · {name}", ja: "ローカル保存済み（クラウド機能オフ） · {name}", tok: "awen lon ilo ni (poki sewi li pini) · {name}" },
+  "menu.cloudEnabled":      { zh: "启用云端功能", en: "Enable cloud features", ja: "クラウド機能を有効化", tok: "o ken e poki sewi" },
+  "menu.cloudUnavailableTitle": { zh: "此环境未配置云端，无法启用", en: "Cloud is not configured in this build", ja: "この環境ではクラウドが設定されていません", tok: "ilo ni li ken ala e poki sewi" },
+  "status.cloudEnabled":    { zh: "云端功能：{s}", en: "Cloud features: {s}", ja: "クラウド機能：{s}", tok: "poki sewi: {s}" },
+  "status.cloudOffFlushFailed": { zh: "当前画作尚未保存/推送成功，云端功能未关闭", en: "Current artwork not fully saved/pushed — cloud features stay on", ja: "現在の作品の保存/アップロードが未完了のため、クラウド機能はオフになっていません", tok: "sitelen ni li awen ala lon poki sewi. tan ni la poki sewi li pini ala" },
+  "mi.bootCloudOff":        { zh: "云端功能已关闭：未自动打开上次画作", en: "Cloud features are off — last artwork was not reopened", ja: "クラウド機能オフのため、前回の作品は自動で開きません", tok: "poki sewi li pini. tan ni la sitelen pini li open ala" },
 } as const satisfies Record<string, Entry>;

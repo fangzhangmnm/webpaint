@@ -15,6 +15,7 @@ export interface GItem extends Omit<GalleryItem, "local" | "cloud"> {
     dirty?: boolean;
     ghost?: boolean;
     pendingGone?: boolean;
+    cloudNewer?: boolean;
 }
 export type BadgeKind = "syncedBoth" | "dirtyBoth" | "cloudOnly" | "localOnly" | "ghost" | "pendingGone";
 export interface GalleryTile {

@@ -15,7 +15,7 @@ const encFile = (name: string) => store.file(sessionFileName(name), { isZip: tru
 /** 本地加密作品的缩略图（内存密码解得开→PNG Blob；锁定/没有→null）。非交互——批量渲染不弹窗。 */
 export async function localPeekThumb(name: string): Promise<Blob | null> {
   const zf = encFile(name);
-  const peek = await zf.getPeek({ bytesLength: SUFFIX_BYTES, zipEntry: THUMB_PATH });   // 加密件 → 密文 peek blob（ENC_PEEK_MIME）
+  const peek = await zf.getPeek({ bytesLength: SUFFIX_BYTES, zipEntry: THUMB_PATH, source: "local" });   // 加密件 → 密文 peek blob（ENC_PEEK_MIME）。source=local：这函数语义就是「看本地态」
   return peek ? await zf.decryptPeek(peek) : null;                                      // 内存密码非交互解；锁定→null。明文缩略图不落任何缓存（结果仅 object URL）
 }
 

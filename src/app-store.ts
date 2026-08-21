@@ -130,6 +130,11 @@ function itemToG(it: { path: string; syncState: string; lastModified?: number; s
     dirty: isDirty(it.syncState as never),
     ghost: it.syncState === "ghost",
     pendingGone: it.syncState === "pendingGone",   // clean cloud-gone 孤儿、防抖 grace 内 → gallery 显 badge + 重传/删动作
+    // 云端字节比本地新（本地有副本 ∧ 云 etag 动了 = newer-on-cloud / conflict）→ thumb 取图必须走
+    //   getPeek source:"cloud"（QA 2026-08-21「新 token 配旧字节」根修）：这两态下 it.lastModified 是
+    //   **云端**戳（listing cf 优先），若字节仍本地优先取，就会把旧本地字节配新云 token 写进缩略图缓存 = 永不自愈。
+    //   conflict 也算：token 同样是云戳，只有云字节配得上它（本地 dirty 字节没有可用的本地戳；缓存诚实 > 展示偏好）。
+    cloudNewer: it.syncState === "newer-on-cloud" || it.syncState === "conflict",
   };
 }
 // watchFolder（网盘模型）：订阅**当前文件夹** → 立即本地帧、云端到了同一 cb 再闪。app 只知「这一夹更新了」。
