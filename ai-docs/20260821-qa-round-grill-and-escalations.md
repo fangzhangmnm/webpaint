@@ -1,7 +1,7 @@
-# 2026-08-21 QA 轮：待 grill 决策 + store 库 escalation 清单
+# 2026-08-21 QA 轮：grill 决策记录 + store 库 escalation 清单
 
-> as-of v0.10.15 / 2026-08-21。本轮已修项见同日 commit；本文只收**需要人拍板**的部分。
-> 讨论 thread 默认只读——本文是 AI 的分析稿，不是决定（brainstorm≠decision）。
+> as-of v0.10.15 / 2026-08-21。本轮已修项见同日 commit。
+> **2026-08-21 下午 user 已对本文逐条拍板**——拍板结果见文末「拍板落账」节，正文保留原分析供考古。
 
 ## 1. 主菜单 File 区重排（user 提案 + AI 批判性分析，待 grill）
 
@@ -108,3 +108,74 @@ hit-test 一处，风险低。属手感区（人类钉死），本轮未动，�
   直接相关；若要动，方向是推云异步化/去抖，牵动时间戳走字的拍板，等专门 grill。
 - timelapse 像素画残余的糊：本轮放大已改 nearest，剩下的来自 H.264 4:2:0 色度下采样
   （编码器约束）；预览 `<video>` 也无 pixelated。真要根治要换 codec/加 CSS，暂 park。
+
+---
+
+# 拍板落账（2026-08-21 下午，user 逐条回复原文为准；带▶的当日批二落地）
+
+## §1 主菜单 File —— 拍板
+- **不要「save local file」菜单项**——那是**导出的一个去向**；「另存为（图库复制）」也**并入导出**。
+  user 判据：「如果没有这个功能，用户会自己用导出多步去实现，所以放在导出的选项里面。」
+- ▶ 导出 hub 三去向：导出图片（现有 PNG）/ 存为本地 .ora（保存对话框）/ 复制一份到图库（原另存为）。
+- ▶ **Revert 必须有**——现状按钮 `hidden` 永久隐藏、handler 空转（「居然没接」实锤），接活常显。
+- ▶ 终序：图库 · 新建 / 打开 · 导出/另存为 · 重命名 · 加密 · Revert · Timelapse。
+  （登录条目暂留，等 smart save 轮吸收。）
+
+## §新 无地=除云外全功能（high，家规级心态）
+- user：「timelapse 不是 sidecar（注：录制态在 .ora 容器内随文件走），无地当然要全量 timelapse。
+  我当时 propose 无地就是除了云之外所有功能都应该有。**所有功能只要不需要持久化就不应该
+  依赖持久化，深查。**」已入 memory（feedback-localfile-full-features）。
+- ▶ 当日深查+修 timelapse 无地 gate；大 gap 报告不偷跑。
+
+## §2 Smart save + 「启用云端功能」开关 —— 方向拍板，细化下轮（大查）
+- 按钮行为改口径：**一下**=照旧保存；auth 掉了→按钮换图标，按下=本地已存+**弹 in-app 对话框**
+  「云端未登录，是否登录」（对话框里的登录钮就是 loginRedirect 的手势，iOS 红线天然合规）。
+  从未配置云的第一次登录也走这个对话框（user 自注：不确定会不会混乱——实现时再看）。
+- **新设置「启用云端功能」**（同启用 AI 的姿势，默认开）：关=真无地 single html app，
+  所有云 UI 隐藏。这是宣发前 user 非常想要的形态，也是无地骑士清债的收口。
+- 容器不支持云（如无 MSAL 配置）→ 该开关灰显默认关；容器支持后自愈回用户保存值。
+- 徽章：不开云=save 无小圆点；开云未登录=cloud-unavailable。
+- **待重 grill**：禁用云端 ≠ 无地——禁的是整个 gallery/idb/localStorage 还是只云？
+  （brush rack、AI 权重仍要 idb。）user 问「用模块化工具而不是苦逼查」——AI 方案：
+  建单一接缝模块（如 `src/cloud-capability.ts`），所有云能力判定/云 UI 挂载点只准 import 它，
+  build.sh 加 lint（app-store 接缝同款守法）→ audit = import 图检查而非人肉 grep。下轮做。
+- 可发现性结论（user）：菜单里的登录反而没人看；smart save 按钮态变化就是最强提示。
+  接近「强制植入」的线，用对话框+「启用云端」总开关拦。
+
+## §3 临时橡皮 —— 研究结论（待 user 确认再做）
+- 行业惯例**不是 Shift**：PS=spring-loaded（按住工具键临时切、松开弹回，橡皮=按住 E）；
+  Krita=E 切换当前笔的擦除混合模式；CSP 同属键切。普通画笔目前只有笔尾/副按钮橡皮，键盘临时橡皮未做。
+- AI 提案：**按住 E=临时橡皮**（落笔瞬间判定 mode，画笔/形状笔一致语义）；形状笔 Shift 保持约束反转不动。
+  待确认后实施。
+
+## §4 先斩后奏两件 —— 拍板
+- hex 优先级：**同意**（带#恒hex / 裸串色名优先 / hex 兜底）。▶ 追加：**3 位 hex 也要支持**（#abc 展开）。
+- 保存自动 commit：**同意**。换文档：取决于是否 autosave（隐式不 commit）；
+  **high：换文档（open/new）走丢弃时必须文案提示+弹窗挽留——AI propose 如下，待拍**：
+  切换前检测 fill 预览/浮动变换挂着 → sheet「有未应用的填色/变换」三选：
+  **应用并继续**（commit→存→切，默认）/ **丢弃并继续** / **取消**（留在当前画）。
+  autosave/崩溃路径不弹不 commit（维持 interrupt=cancel）。
+
+## §5 透视 handler —— 拍板：做。nearest-wins + tie-break 内环优先。▶ 当日落地。
+
+## §6 下轮候选 —— 拍板
+- 曲线编辑器：继续欠着。
+- backup 管理：park，但 ▶ UI 先挂「备份箱管理（即将推出）」占位。
+- 图库长驻轮询：维持 park（滚动不构成轮询——token 来自订阅时刻的帧，见 §7.2 分析）。
+- ▶ 追加当日做：图库**自然排序**（10 在 2 后）。
+
+## §7 store escalation —— 拍板（开 store 轮，走 pwa-cloud-store）
+1. busy 文案 i18n 接缝：**同意做**。
+2. getPeek：user 推演确认被 getPeek 本地优先卡死（etag 已能判 cloud-newer，不想全量下载就只剩 peek）。
+   **方向=把来源变成强制必填参数**（`getPeek({ source: "local"|"cloud" })`，无默认），
+   每个调用点被迫声明意图；「本地在场要不要重生成 thumb——应该有」归 app 侧 token 缝判断。
+3. converge 用 per-tab isDirty：**修**（isDirtyAnywhere），且 per-tab 的 isDirty **全量查改名**
+   （如 isDirtyThisTab，名字长一点说清楚）。
+4. 双 tab 把 A 的未推脏字节移进回收站：**修**。心态纠正（已入 memory）：
+   「不能『可恢复』这么想——瑞士奶酪每一层都要假设自己是最后一道承重拦截；
+   做不到必须显式契约说明白。」
+5. ▶ 崩溃环误触发：**修，一起**（app 侧 Web Locks 活实例互认，当日落地）。
+6. **不是无地状态时双实例也要拦**（headline）：▶ app 侧当日做 per-doc Web Locks 门
+   （boot 恢复让位+openItem 警告）；store 侧本地字节互覆护栏进 store 轮。
+
+## §8 parked —— 全部确认维持 park（2k 保存网络瓶颈、timelapse 4:2:0 残糊）。
