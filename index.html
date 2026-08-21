@@ -1339,14 +1339,17 @@
         <span class="menu-item-label" data-i18n="menu.pixelGrid">像素栅格（放大时）</span>
         <span class="menu-item-state" data-state-for="pixelGrid">开</span>
       </button>
-        <button class="menu-item menu-item-with-icon" id="menuDocGrid" type="button" role="menuitemcheckbox" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#snap-grid"/></svg>
-        <span class="menu-item-label" data-i18n="menu.docGrid">主栅格（对齐网格）</span>
-        <span class="menu-item-state" data-state-for="docGrid">关</span>
-      </button>
-        <button class="menu-item menu-item-with-icon" id="menuDocGridCell" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#grid"/></svg>
-        <span class="menu-item-label" data-i18n="menu.docGridCell">主栅格尺寸…</span>
-        <span class="menu-item-state">16px</span>
-      </button>
+        <!-- 主栅格与尺寸并一条（甲方 2026-08-21 拍板，样式参考「导出与另存」行=主按钮+扳手）：
+             主按钮=toggle（snap-grid 图标），扳手=尺寸输入（原 menuDocGridCell handler 原样，id 不动）。
+             顺带消灭 ☰ 里第三处 #grid 撞图——grid 家族四件至此全分家。 -->
+        <div class="menu-item-row">
+          <button class="menu-item menu-item-main menu-item-with-icon" id="menuDocGrid" type="button" role="menuitemcheckbox" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#snap-grid"/></svg>
+          <span class="menu-item-label" data-i18n="menu.docGrid">主栅格（对齐网格）</span>
+          <span class="menu-item-sub" id="menuDocGridCellSub">16px</span>
+          <span class="menu-item-state" data-state-for="docGrid">关</span>
+        </button>
+          <button class="menu-item-wrench" id="menuDocGridCell" type="button" data-i18n-title="menu.docGridCell" data-i18n-aria="menu.docGridCell"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#wrench"/></svg></button>
+        </div>
         <button class="menu-item menu-item-with-icon" id="menuFit" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#maximize-viewport"/></svg>
         <span class="menu-item-label" data-i18n="menu.fit">视口复位</span>
       </button>

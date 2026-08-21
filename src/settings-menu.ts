@@ -246,7 +246,8 @@ export function initSettingsMenu(ctx: AppContext) {
   const applyDocGrid = () => {
     board.setDocGrid?.(desk.grid.on, desk.grid.cell);
     setMenuItem(els.menuDocGrid, desk.grid.on);
-    const cellLabel = els.menuDocGridCell?.querySelector(".menu-item-state");
+    // 并行样式（2026-08-21）：尺寸显示挪进主按钮的 sub 槽（menuDocGridCell 已变扳手，内部无 state 槽）
+    const cellLabel = document.getElementById("menuDocGridCellSub");
     if (cellLabel) cellLabel.textContent = `${desk.grid.cell}px`;
   };
   window.addEventListener("wp:applyEditorState", applyDocGrid);
