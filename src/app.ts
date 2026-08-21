@@ -121,7 +121,11 @@ initI18n();   // 本地化 boot：设 <html lang> + 填静态 HTML data-i18n（�
 // 组合根不再自装配 history/wp2/view/layers——WeebPaintBackend 是唯一装配根（headless/MCP 同一套件，
 // undo 配额也归它）。壳编排（error banner/面板刷新/wp:histchange/状态栏）经 inject.hooks 注入；
 // 换文档仍走 wp2.load（进程内协作面；tab 管理器「弃旧建新」= embedding 纪元的事）。
-const backend = WeebPaintBackend.blank({ width: 2048, height: 2048 }, {
+// 出生画布 1024²（2026-08-21 对齐）：这不再只是「图库背后的占位」——云关时它**就是用户落脚的那张画**
+//   （boot 的 openBlankCanvas → beginFileFirstDoc 把它变成未命名的本地文档）。所以尺寸得跟
+//   新建对话框的默认预设一致：gallery-shell 的 DEFAULT_PRESET = "screen-1024sq"，
+//   注释记着 user 2026-08-19「2048 默认护栏没意义，每次都手动改回 1024」。别再让两处分叉。
+const backend = WeebPaintBackend.blank({ width: 1024, height: 1024 }, {
   appVersion: WEEBPAINT_VERSION,
   // per-tenant 合成注入（C7）：本 backend 的 merged 合成面走 board GL（thunk——board 在下方 const，
   // 调用恒在 boot 后）。doc-render 全局接缝仍在（psd/session 等壳模块单租户消费，见下方 setDocCompositor*）。

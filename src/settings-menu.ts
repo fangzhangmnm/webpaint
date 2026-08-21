@@ -13,6 +13,8 @@ import { desk } from "./workbench-state.ts";   // checkboard = per-doc desk（�
 import { applyTheme, themeLabel, THEMES, currentTheme } from "./theme.ts";
 import { t, lang, setLang, LANGS, langDisplayName, type Key } from "./i18n/index.ts";
 import { KEYBOARD_SHORTCUTS } from "./input.ts";
+import { openChoiceSheet } from "./sheets.ts";
+import { installState, isIOSSafari, promptInstall } from "./install-to-home.ts";   // 装主屏 = 数据安全入口（详该模块头注释）
 import { _updateMenuCropLabel } from "./doc-ops.ts";
 import { positionPopup } from "./anchored-popup.ts";
 import { wireInlineSelect } from "./inline-select.ts";
@@ -136,6 +138,16 @@ function renderCloudEnabled() {
   applyCloudCapabilityGating();
 }
 
+/** 「添加到主屏幕」条目的状态角标。装到主屏会提高拿到持久化存储的概率（WebKit 官方启发式因子），
+ *  所以这条**不是纯 UX**——但按 user 2026-08-21 拍板「不做强制引导」，它只安静地待在设置里。 */
+function renderInstallState() {
+  const btn = document.getElementById("menuAddToHomeScreen");
+  if (!btn) return;
+  const st = installState();
+  const el = btn.querySelector('[data-state-for="installState"]');
+  if (el) el.textContent = t(st === "installed" ? "install.stateInstalled" : st === "promptable" ? "install.stateAvailable" : "install.stateManual");
+}
+
 // gating 显隐的**唯一集中点**（v1.1，2026-08-21 headless 实锤修）：菜单项显隐机制是 `hidden` **属性**
 //   （styles.css:850 `.menu-item[hidden]{display:none}`）——v1 用 `.hidden` class 藏 menuGallery，
 //   而全仓没有全局 .hidden 规则、.menu-item 自身 display:flex 胜出 → 藏了个寂寞。此类显隐一律走属性。
@@ -183,6 +195,7 @@ export function renderSettingsFromPrefs(): void {
   renderFps(syncedUserPreference.getItem<boolean>("show-fps", PREF_DEFAULTS["show-fps"]));
   renderGenAI(genAiEnabled());
   renderCloudEnabled();   // 云端功能开关真值回灌（设备本地 pref；只 render 不写盘）
+  renderInstallState();   // 装主屏状态角标（已安装/可安装/手动）
   renderLongPressPick(syncedUserPreference.getItem<boolean>("long-press-pick", PREF_DEFAULTS["long-press-pick"]));
   renderSingleFingerDraw(syncedUserPreference.getItem<boolean>("single-finger-draw", PREF_DEFAULTS["single-finger-draw"]));
 }
@@ -309,11 +322,44 @@ export function initSettingsMenu(ctx: AppContext) {
         return;
       }
     }
+    // 关云时把「刚 flush 完的那个库文档」记下来 —— 下面要把它从当前会话上摘掉。
+    const detaching = !next ? session.name : null;
+    const wasSignedIn = isSignedIn();
     setCloudEnabled(next);   // 只写设备本地 pref + 广播 wp:cloud-capability-changed；零数据变更（红线）
     renderCloudEnabled();
+    // ★ 关云 = 当前文档变成 new document（user 2026-08-21 拍板；否决了「继续偷偷存回原库身份」，
+    //   理由是**不透明**：用户以为关了云就不写库了，实际还在写，而图库又被封死看不见）。
+    //   顺序 = 先尝试推云（上面那段 flush，推不上去就根本不切换）→ 再断开身份。
+    //   断开只动**指针**不动字节：库里/云上那一份原样留着（关→开自愈，cloud-capability 红线）；
+    //   画布内容也原样留着，只是从此无名无库 —— 保存走 Blockbench 路线（存成用户自己的 .ora）。
+    //   beginFileFirstDoc 内部会 _setActive(null) → 顺带释放 doc 锁（该文档不再被本 tab 持有）。
+    if (detaching) session.beginFileFirstDoc(detaching);
     updateSaveStatus();      // ③save 徽章无云态立即生效
-    setStatus(t("status.cloudEnabled", { s: next ? t("common.on") : t("common.off") }));
+    if (detaching) {
+      setStatus(t(wasSignedIn ? "status.cloudOffDetachedSynced" : "status.cloudOffDetachedLocal", { name: detaching }), true);
+    } else {
+      setStatus(t("status.cloudEnabled", { s: next ? t("common.on") : t("common.off") }));
+    }
   });
+  // 「添加到主屏幕」（user 2026-08-21：「引导装主屏这个还是放在设置里面。不做强制引导。」）
+  //   ⚠ iOS 红线同款：原生安装框和 loginRedirect 一样吃 user-gesture 活化 —— promptInstall() 必须
+  //     在 click 的**同步续体**里调，绝不能排在任何 await 之后（所以 installed/manual 两条先返回）。
+  document.getElementById("menuAddToHomeScreen")?.addEventListener("click", () => {
+    const st = installState();
+    if (st === "installed") { setStatus(t("install.alreadyInstalled"), true); return; }
+    if (st === "promptable") {
+      const p = promptInstall();
+      if (p) { void p.then((outcome) => {
+        setStatus(t(outcome === "accepted" ? "install.done" : "install.dismissed"), true);
+        renderInstallState();
+      }); return; }
+    }
+    // 手动档（iOS Safari 等没有原生安装入口的）：只说明怎么装 + 诚实说清它保证什么、不保证什么。
+    void openChoiceSheet<"ok">(t("install.title"),
+      `${isIOSSafari() ? t("install.howIOS") : t("install.howGeneric")}\n\n${t("install.whyStorage")}`,
+      [{ label: t("common.ok"), value: "ok", primary: true }]);
+  });
+
   // v0.5.37（user）：主题/语言换 in-app 下拉——原生 select 打开态是 chrome 域（iPad 弹层系统字体，
   //   UCSUR 必豆腐；夜间白底、装不了 SVG 同根性坑）。弹层复用紧凑菜单 list 形态 + 锚定。
   //   条目开时现建 → 标签永远新鲜（字体门迟到翻转后 endonym/主题名自动带字形）。

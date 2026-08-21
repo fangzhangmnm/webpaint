@@ -3780,6 +3780,84 @@ export declare const S: {
         readonly ja: "変更を破棄";
         readonly tok: "o weka e ante";
     };
+    readonly "menu.addToHomeScreen": {
+        readonly zh: "添加到主屏幕";
+        readonly en: "Add to Home Screen";
+        readonly ja: "ホーム画面に追加";
+        readonly tok: "o pana e ilo ni tawa lipu open";
+    };
+    readonly "install.stateInstalled": {
+        readonly zh: "已安装";
+        readonly en: "Installed";
+        readonly ja: "インストール済み";
+        readonly tok: "lon";
+    };
+    readonly "install.stateAvailable": {
+        readonly zh: "可安装";
+        readonly en: "Available";
+        readonly ja: "可能";
+        readonly tok: "ken";
+    };
+    readonly "install.stateManual": {
+        readonly zh: "手动";
+        readonly en: "Manual";
+        readonly ja: "手動";
+        readonly tok: "kepeken luka";
+    };
+    readonly "install.title": {
+        readonly zh: "把 WeebPaint 装到主屏";
+        readonly en: "Add WeebPaint to your Home Screen";
+        readonly ja: "WeebPaint をホーム画面に追加";
+        readonly tok: "o pana e ilo WeebPaint tawa lipu open sina";
+    };
+    readonly "install.whyStorage": {
+        readonly zh: "装到主屏之后，浏览器更可能把你的作品当成「持久化存储」保存，也就不容易在设备空间紧张时被清掉。\n\n但这不是保险箱：浏览器存储随时可能被清空。重要的作品请用「存为本地 .ora」另存一份到你自己的文件里。";
+        readonly en: "Once it runs from your Home Screen, the browser is more likely to treat your artwork as persistent storage, so it is less likely to be cleared when the device runs low on space.\n\nThis is not a safe: browser storage can still be wiped. For anything you care about, use “Save as local .ora” and keep your own file.";
+        readonly ja: "ホーム画面から起動すると、ブラウザが作品を「永続ストレージ」として扱う可能性が高くなり、端末の空き容量が減ったときに消されにくくなります。\n\nただし金庫ではありません：ブラウザのストレージはいつ消えてもおかしくありません。大切な作品は「ローカル .ora として保存」で自分のファイルとして残してください。";
+        readonly tok: "sina open e ilo tan lipu open la ilo lukin li awen e sitelen sina kepeken wawa mute. taso ni li poki awen ala — o awen e sitelen suli kepeken lipu .ora pi sina taso.";
+    };
+    readonly "install.howIOS": {
+        readonly zh: "在 Safari 底部点「分享」按钮 → 往下找「添加到主屏幕」。";
+        readonly en: "In Safari, tap the Share button, then choose “Add to Home Screen”.";
+        readonly ja: "Safari の「共有」ボタンをタップし、「ホーム画面に追加」を選んでください。";
+        readonly tok: "lon ilo Safari la o luka e nena pana, o alasa e “Add to Home Screen”.";
+    };
+    readonly "install.howGeneric": {
+        readonly zh: "在浏览器菜单里找「安装」或「添加到主屏幕」。";
+        readonly en: "Look for “Install” or “Add to Home Screen” in your browser menu.";
+        readonly ja: "ブラウザのメニューから「インストール」または「ホーム画面に追加」を探してください。";
+        readonly tok: "lon lipu pi ilo lukin la o alasa e nimi “Install” anu “Add to Home Screen”.";
+    };
+    readonly "install.alreadyInstalled": {
+        readonly zh: "已经在主屏上运行了";
+        readonly en: "Already running from your Home Screen";
+        readonly ja: "すでにホーム画面から起動しています";
+        readonly tok: "ilo ni li lon lipu open sina.";
+    };
+    readonly "install.done": {
+        readonly zh: "已添加到主屏幕";
+        readonly en: "Added to your Home Screen";
+        readonly ja: "ホーム画面に追加しました";
+        readonly tok: "ona li kama lon lipu open sina.";
+    };
+    readonly "install.dismissed": {
+        readonly zh: "没有安装 —— 之后可以随时回设置里再来";
+        readonly en: "Not installed — you can come back to Settings any time";
+        readonly ja: "インストールされていません —— いつでも設定から実行できます";
+        readonly tok: "ona li kama ala. tenpo ale la sina ken kama lon lipu lawa.";
+    };
+    readonly "status.cloudOffDetachedSynced": {
+        readonly zh: "「{name}」已同步到云端并留在图库。当前这份已变成新文档 —— 保存 = 存成你自己的 .ora 文件。";
+        readonly en: "“{name}” is synced to the cloud and stays in your gallery. What you have open is now a new document — saving writes your own .ora file.";
+        readonly ja: "「{name}」はクラウドに同期され、ギャラリーに残ります。いま開いているものは新規ドキュメントになりました —— 保存すると自分の .ora ファイルに書き出されます。";
+        readonly tok: "sitelen {name} li awen lon poki sewi en tomo sitelen. sitelen lon lukin sina la ona li sitelen sin — sina awen la ona li kama lipu .ora pi sina taso.";
+    };
+    readonly "status.cloudOffDetachedLocal": {
+        readonly zh: "「{name}」已存进图库（未登录，没有上云）。当前这份已变成新文档 —— 保存 = 存成你自己的 .ora 文件。";
+        readonly en: "“{name}” was saved to your gallery (not signed in, so nothing went to the cloud). What you have open is now a new document — saving writes your own .ora file.";
+        readonly ja: "「{name}」はギャラリーに保存されました（未サインインのためクラウドには送られていません）。いま開いているものは新規ドキュメントになりました —— 保存すると自分の .ora ファイルに書き出されます。";
+        readonly tok: "sitelen {name} li awen lon tomo sitelen (sina lon ala poki sewi la ona li tawa ala sewi). sitelen lon lukin sina la ona li sitelen sin — sina awen la ona li kama lipu .ora pi sina taso.";
+    };
     readonly "lf.downloadedNoHandle": {
         readonly zh: "已下载 {name} —— 这份文件就是你的作品，请妥善保存。本浏览器不支持原地覆盖，下次保存会再下载一份新的。";
         readonly en: "Downloaded {name} — that file is your artwork, keep it safe. This browser cannot overwrite files in place, so the next save downloads a new copy.";

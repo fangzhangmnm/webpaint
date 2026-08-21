@@ -10,5 +10,5 @@
      需求登记：全局清单 ../20260708 SVG Icons/TODO.md（美工 agent 的取活处）。
      重新烤制：仓库根跑 python3 tools/bake-stopgap-glyphs.py（SPECS 即声明）。
 -->
-
+  <symbol id="add-to-home-screen" data-cat="stopgap" data-src="baked:DroidSansFallbackFull(Apache-2.0)/DejaVuSans-Bold(Bitstream-Vera)" data-note="设置·把本站装到主屏。WebKit 官方把「是否作为主屏 Web App 打开」列为授予持久化存储的启发式因子之一 → 这是数据安全入口不只是 UX。stopgap 字形；真图标建议=手机/方框 + 右下角加号(或向内箭头)，与 download 区分开" viewBox="0 0 24 24"><path d="M8.87 3.19H10.25V10.74H8.87V8.76L4.6 10.36L3.92 8.99Q6.89 8.15 8.87 7.16ZM11.47 5.4H15.28V3.19H16.73V5.4H20.54V6.7H16.73V8.99H20.08V10.28H11.92V8.99H15.28V6.7H11.47ZM5.36 3.8Q6.89 4.72 8.19 5.94L7.12 7.23Q5.75 5.86 4.3 4.94ZM7.04 17.15 4.07 18.29 3 17Q7.88 15.55 10.32 13.87H3.69V12.5H10.93L10.4 11.5L11.85 11.05L12.61 12.5H20.62V13.87H13.91L15.81 16.23Q17.11 15.47 18.03 14.33L19.32 15.32Q18.25 16.46 17.03 17.15Q18.64 18.37 21 19.36L19.86 20.81Q14.75 18.29 12.23 13.87Q10.7 15.32 8.57 16.46V19.28L13.14 18.06L13.6 19.36L7.81 20.73L7.04 19.97Z" fill="currentColor" stroke="none"/></symbol>
 </svg>
