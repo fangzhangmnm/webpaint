@@ -3,7 +3,7 @@
 import { describe, it, assert, eq } from "./runner.mjs";
 const jeq = (a, b, msg) => eq(JSON.stringify(a), JSON.stringify(b), msg);   // eq 是严格 ===，对象/数组走序列化比较
 import {
-  timelapseFrameDims, timelapseFitRect, timelapseDebounceMs, TimelapseSampler,
+  timelapseFrameDims, timelapseFitRect, TimelapseSampler,
   composeTimelapseFrame, timelapseTier, TIMELAPSE_BASE_DEBOUNCE_MS,
 } from "../src/backend/timelapse/timelapse-core.ts";
 import { muxTimelapse, demuxTimelapse, avcCodecString } from "../src/backend/timelapse/timelapse-mux.ts";
@@ -28,30 +28,24 @@ describe("timelapse · 取景框", () => {
   it("fit：小画布允许放大（诚实占满）", () => eq(timelapseFitRect(64, 64, 512, 512).dw, 512));
 });
 
-// ---- 采样闸门（⚡ 平采样：调和衰减 park，user 2026-08-20；等第一个真视频再论证） ----
+// ---- 采样闸门（平采样=终案：调和衰减 2026-08-21 user 否决，见 spec 裁决条） ----
 
 describe("timelapse · 平采样", () => {
-  it("debounce 窗口平的：n 涨到天上去也还是基础 2s", () => {
-    const n0 = timelapseTier(512).n0;
-    eq(timelapseDebounceMs(0, 512), TIMELAPSE_BASE_DEBOUNCE_MS);
-    eq(timelapseDebounceMs(n0, 512), TIMELAPSE_BASE_DEBOUNCE_MS);
-    eq(timelapseDebounceMs(100 * n0, 512), TIMELAPSE_BASE_DEBOUNCE_MS);
-  });
   it("未知档位 throw（防手滑塞任意分辨率）", () => {
     let threw = false;
     try { timelapseTier(500); } catch { threw = true; }
     assert(threw, "500 不是合法档位");
   });
   it("sampler：首 commit 必采；窗口内合并但 n 照涨", () => {
-    const s = new TimelapseSampler(512, 0);
+    const s = new TimelapseSampler(0);
     assert(s.noteCommit(1000) === true, "首帧采");
     assert(s.noteCommit(1500) === false, "0.5s 后合并");
     assert(s.noteCommit(2000) === false, "1s 后仍合并");
     eq(s.n, 3);
-    assert(s.noteCommit(1000 + timelapseDebounceMs(4, 512) + 1) === true, "过窗采帧");
+    assert(s.noteCommit(1000 + TIMELAPSE_BASE_DEBOUNCE_MS + 1) === true, "过窗采帧");
   });
   it("sampler：n 从持久化值续起（跨 session 统计连续）", () => {
-    const s = new TimelapseSampler(512, 1000);
+    const s = new TimelapseSampler(1000);
     s.noteCommit(0);
     eq(s.n, 1001);
   });

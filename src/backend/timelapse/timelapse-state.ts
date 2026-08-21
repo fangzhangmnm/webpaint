@@ -44,7 +44,7 @@ export class TimelapseDocState {
     if (!TIMELAPSE_LONG_EDGES.includes(s.longEdge)) throw new Error(`bad longEdge ${s.longEdge}`);
     if (!TIMELAPSE_ASPECTS.some(([w, h]) => w === s.aspectW && h === s.aspectH)) throw new Error("bad aspect");
     this.settings = { ...s };
-    this.sampler = new TimelapseSampler(s.longEdge, 0);
+    this.sampler = new TimelapseSampler(0);
     this.on = true;
   }
 
@@ -121,7 +121,7 @@ export class TimelapseDocState {
       return st;
     }
     st.settings = { aspectW: j.aspect[0], aspectH: j.aspect[1], longEdge: j.longEdge };
-    st.sampler = new TimelapseSampler(j.longEdge, j.n);
+    st.sampler = new TimelapseSampler(j.n);
     st.on = !!j.on;
     if (mp4Bytes == null || mp4Bytes.length === 0) {
       if (j.motionSamples > 0) {   // json 说有货但 mp4 没了：录像丢失，止损清空

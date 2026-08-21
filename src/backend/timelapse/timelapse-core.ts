@@ -40,19 +40,18 @@ export function timelapseFitRect(cw: number, ch: number, fw: number, fh: number)
 // 数据/契约层一律裸字节数（单位双层制，UX 显示才走 KiB/MiB）。
 
 interface TierConst {
-  n0: number;           // 调和衰减常数（衰减已 park，现不参与采样；留着等真视频论证）
   motionBps: number;    // 运动编码器 M 目标码率（10fps 虚拟节奏下的 bps）
   tailBps: number;      // 尾帧编码器 F 码率（1fps 单帧，全部码字给一张 IDR）
   refBytes: number;     // 选单参考体积（一位有效数字口径；「约」不是承诺）
 }
 
 const TIERS: Record<number, TierConst> = {
-  64:   { n0: 5000, motionBps: 10_000,   tailBps: 60_000,    refBytes: 0.1 * 1048576 },
-  128:  { n0: 2000, motionBps: 25_000,   tailBps: 150_000,   refBytes: 0.2 * 1048576 },
-  256:  { n0: 700,  motionBps: 80_000,   tailBps: 400_000,   refBytes: 0.5 * 1048576 },
-  512:  { n0: 330,  motionBps: 250_000,  tailBps: 1_000_000, refBytes: 2 * 1048576 },
-  720:  { n0: 170,  motionBps: 500_000,  tailBps: 2_000_000, refBytes: 4 * 1048576 },
-  1080: { n0: 90,   motionBps: 1_000_000, tailBps: 4_000_000, refBytes: 8 * 1048576 },
+  64:   { motionBps: 10_000,    tailBps: 60_000,    refBytes: 0.1 * 1048576 },
+  128:  { motionBps: 25_000,    tailBps: 150_000,   refBytes: 0.2 * 1048576 },
+  256:  { motionBps: 80_000,    tailBps: 400_000,   refBytes: 0.5 * 1048576 },
+  512:  { motionBps: 250_000,   tailBps: 1_000_000, refBytes: 2 * 1048576 },
+  720:  { motionBps: 500_000,   tailBps: 2_000_000, refBytes: 4 * 1048576 },
+  1080: { motionBps: 1_000_000, tailBps: 4_000_000, refBytes: 8 * 1048576 },
 };
 
 export function timelapseTier(longEdge: number): TierConst {
@@ -61,7 +60,8 @@ export function timelapseTier(longEdge: number): TierConst {
   return t;
 }
 
-// ---- 采样闸门（⚡ 平采样：调和衰减 park，user 2026-08-20「先做成平的，等第一个视频录好再论证」） ----
+// ---- 采样闸门（平采样=终案：调和衰减 2026-08-21 user 否决——首个真视频实测「越后面单 commit
+// 密度越高」，固定时间窗对后期天然多合并、方向已对，无需再衰减，窗口恒定不随 n 变） ----
 
 export const TIMELAPSE_BASE_DEBOUNCE_MS = 2000;
 /** 每 N 帧强制一张 IDR（seek 保底）。 */
@@ -71,25 +71,19 @@ export const TIMELAPSE_FRAME_US = 100_000;
 /** 尾帧定格 5s（常数不做旋钮，user 2026-08-19）。 */
 export const TIMELAPSE_TAIL_HOLD_US = 5_000_000;
 
-/** debounce 窗口 = 固定 2s（平采样）。调和衰减 `2s × (1 + n/N₀)` park，签名保留以便复议。 */
-export function timelapseDebounceMs(_n: number, _longEdge: number): number {
-  return TIMELAPSE_BASE_DEBOUNCE_MS;
-}
-
 /**
  * 采样闸门（leading-edge：窗口开头的 commit 采，其余合并进下一帧；
  * 收尾状态永远由 F 尾帧兜底，不怕漏掉安静期前的最后一笔）。
- * n 计数所有见过的 commit（含被合并的）——现只做统计，衰减复议时是自变量。
+ * n 计数所有见过的 commit（含被合并的）——纯统计，随 sidecar 持久化（timelapse.json）。
  */
 export class TimelapseSampler {
   n: number;
   private lastCaptureAt: number | null = null;
-  private readonly longEdge: number;
-  constructor(longEdge: number, n = 0) { this.longEdge = longEdge; this.n = n; }
+  constructor(n = 0) { this.n = n; }
   /** 每次有可见变化的 commit 调一次；返回「这个 commit 要不要采帧」。 */
   noteCommit(nowMs: number): boolean {
     this.n++;
-    if (this.lastCaptureAt !== null && nowMs - this.lastCaptureAt < timelapseDebounceMs(this.n, this.longEdge)) return false;
+    if (this.lastCaptureAt !== null && nowMs - this.lastCaptureAt < TIMELAPSE_BASE_DEBOUNCE_MS) return false;
     this.lastCaptureAt = nowMs;
     return true;
   }
