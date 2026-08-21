@@ -63,6 +63,9 @@ export async function bootRestoreSession(ctx: AppContext) {
     //   停在 boot 的空白画布（app.ts 出生即 backend.blank 2048²；gallery overlay 默认 hidden，
     //   这里只补一句 status 说明为什么没开上次的画）。currentFile/标记零变更（关→开自愈）。
     isCloudEnabled: () => isCloudEnabled(),
-    openBlankCanvas: async () => { setStatus(t("mi.bootCloudOff")); },
+    // 云关冷启动 = 直接进 Blockbench 模式的空白画布（user 2026-08-21：「禁用云的时候应该所有
+    //   用户路线都走 blockbench 模式」）。必须调 beginFileFirstDoc —— 否则这张画布既无 store 身份
+    //   也无本地文件身份，`session.dirty` 恒 false：用户画完关 tab **不会有挽留框**，直接丢。
+    openBlankCanvas: async () => { session.beginFileFirstDoc(); setStatus(t("mi.bootCloudOff")); },
   });
 }

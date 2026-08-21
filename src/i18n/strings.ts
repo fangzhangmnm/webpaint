@@ -715,6 +715,8 @@ export const S = {
   "lf.leaveTitle": { zh: "本地文件有未保存修改", en: "Local file has unsaved changes", ja: "ローカルファイルに未保存の変更", tok: "lipu ilo li jo e ante awen ala" },
   "lf.leaveSave": { zh: "保存并继续", en: "Save and continue", ja: "保存して続行", tok: "o awen. o tawa." },
   "lf.leaveDiscard": { zh: "丢弃修改", en: "Discard changes", ja: "変更を破棄", tok: "o weka e ante" },
+  "lf.downloadedNoHandle": { zh: "已下载 {name} —— 这份文件就是你的作品，请妥善保存。本浏览器不支持原地覆盖，下次保存会再下载一份新的。", en: "Downloaded {name} — that file is your artwork, keep it safe. This browser cannot overwrite files in place, so the next save downloads a new copy.", ja: "{name} をダウンロードしました —— このファイルがあなたの作品です。大切に保管してください。このブラウザは上書き保存に対応していないため、次回の保存では新しいファイルが再度ダウンロードされます。", tok: "sitelen sina li kama tawa ilo sina ({name}). o awen e ona! ilo lukin ni li ken ala ante e lipu pini — tenpo kama la sina awen e sitelen la ona li pana e lipu sin." },
+  "lf.fileFirstNew": { zh: "云同步已关：作品不进图库，保存 = 存成你自己的 .ora 文件", en: "Cloud sync is off: artwork is not kept in the gallery — saving writes your own .ora file", ja: "クラウド同期はオフです：作品はギャラリーに保存されません。保存すると自分の .ora ファイルに書き出されます", tok: "poki sewi li lape. sitelen li awen ala lon tomo sitelen — sina awen la ona li kama lipu .ora pi sina taso." },
   "lf.renameNotSupported": { zh: "本地文件模式不支持重命名（可用「另存为」存入图库）", en: "Rename is not supported in local-file mode (use Save As to add it to the gallery)", ja: "ローカルファイルモードでは名前変更できません（「別名で保存」でギャラリーへ）", tok: "nimi sin li ken ala lon nasin lipu ilo. o kepeken「awen sama nimi ante」" }, 
   "ss.saved": { zh: "已保存：{name}", en: "Saved: {name}", ja: "保存しました：{name}", tok: "awen li pini: {name}" }, 
   "ss.saveFailed": { zh: "保存失败：{error}", en: "Save failed: {error}", ja: "保存に失敗しました：{error}", tok: "awen li pakala: {error}" }, 

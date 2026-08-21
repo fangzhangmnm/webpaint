@@ -54,6 +54,7 @@ import { initFillMode } from "./fill-mode.ts";
 import { initPerspEdit } from "./persp-edit.ts";
 import { updateSaveStatus, updateNewerBanner } from "./save-status.ts";
 import { initErrorBadge, reportError } from "./error-badge.ts";
+import { ensureStoragePersistence } from "./storage-persist.ts";   // 申请持久化存储（防浏览器整源驱逐）
 import { initTransientPanels, _suppressTransientPanels, _restoreTransientPanels, _bringPanelTop, _commitTransform, _cancelTransform } from "./transient-panels.ts";
 import { initImportImage, importImageAsLayer } from "./import-image.ts";   // importImageAsNewDoc/setAddImportAsNewDoc 仅 gallery-shell/export-menu 用
 import { initExportImportMenu, exportBaseName } from "./export-import-menu.ts";
@@ -381,6 +382,11 @@ function setStatus(text: string, persist = false) {
 }
 // 统一 error banner：注入状态栏 sink（info 级走这）+ 接管内联 __errBar 的 fatal handler（往后走 severity）。
 initErrorBadge({ status: setStatus });
+// 申请持久化存储（best-effort → persistent）：不申请的话浏览器有权在存储压力下**整源驱逐** IndexedDB，
+//   把用户所有本地作品一次清空，且绕过 app 的一切逻辑。每次 app 打开问一次（Safari 疑似不跨打开保留）。
+//   fire-and-forget：模块自己吞异常、不弹 UI；结果经 getStoragePersistence() 供数据安全文案消费。
+//   详 ai-docs/20260821-storage-eviction-investigation.md
+void ensureStoragePersistence();
 // 文档版本 newer banner + save 按钮 4 态渲染 = save-status.ts。
 // hook board render 更新 HUD
 const origRender = board.render.bind(board);

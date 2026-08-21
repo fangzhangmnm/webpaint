@@ -4,6 +4,11 @@ import { type LocalFileHandle } from "./local-file-session.ts";
 import type { AppContext } from "./app-context.ts";
 import type { GalleryItem } from "./gallery/gallery-model.ts";
 type LoadedDoc = DecodedPainting;
+/** 进入「未命名的本地文档」态 —— Blockbench 模式（云关）的落点。
+ *  user 2026-08-21 拍板：「禁用云的时候应该所有用户路线都走 blockbench 模式」。
+ *  语义 = doc 的家在用户磁盘上，只是**还没选位置**；作品字节一个都不进库。
+ *  保存时由 saveLocalFileNow 现场认领句柄（桌面）或下载一份（Safari，拿不到句柄 → 仍未命名）。 */
+declare function beginUntitledLocalDoc(suggestedName?: string): void;
 /** 打开本地 .ora：明文 + 有 WeebPaint 痕迹 → 原位打开（返回 null）；
  *  加密容器 / 外来 ora → 不原位，把 File 还给调用方走导入路径（返回 File）。 */
 declare function openLocalFile(handle: LocalFileHandle): Promise<File | null>;
@@ -69,6 +74,9 @@ export declare const session: {
     } | null;
     openLocalFile: typeof openLocalFile;
     leaveLocalFile: typeof leaveLocalFile;
+    /** 云关冷启动的空白画布进入 Blockbench 态（boot.ts 的 openBlankCanvas 调）。
+     *  不这么做的话那张画布**没有任何脏轨** —— 用户画完直接关 tab，既不警告也没得救。 */
+    beginFileFirstDoc: typeof beginUntitledLocalDoc;
     markEdited(): void;
     setName: typeof setName;
     restore: typeof restoreSession;

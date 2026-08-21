@@ -97,10 +97,10 @@ export declare const S: {
         readonly tok: "o tawa tomo sitelen";
     };
     readonly "menu.newArtwork": {
-        readonly zh: "新建…";
-        readonly en: "New…";
-        readonly ja: "新規…";
-        readonly tok: "sitelen sin…";
+        readonly zh: "新建 / 打开…";
+        readonly en: "New / Open…";
+        readonly ja: "新規 / 開く…";
+        readonly tok: "sitelen sin / open…";
     };
     readonly "menu.openLocalFile": {
         readonly zh: "打开本地文件…";
@@ -728,7 +728,7 @@ export declare const S: {
     };
     readonly "menu.exportHub": {
         readonly zh: "导出与另存…";
-        readonly en: "Export & save a copy…";
+        readonly en: "Export & save…";
         readonly ja: "書き出しと別名保存…";
         readonly tok: "pana en awen…";
     };
@@ -3780,6 +3780,18 @@ export declare const S: {
         readonly ja: "変更を破棄";
         readonly tok: "o weka e ante";
     };
+    readonly "lf.downloadedNoHandle": {
+        readonly zh: "已下载 {name} —— 这份文件就是你的作品，请妥善保存。本浏览器不支持原地覆盖，下次保存会再下载一份新的。";
+        readonly en: "Downloaded {name} — that file is your artwork, keep it safe. This browser cannot overwrite files in place, so the next save downloads a new copy.";
+        readonly ja: "{name} をダウンロードしました —— このファイルがあなたの作品です。大切に保管してください。このブラウザは上書き保存に対応していないため、次回の保存では新しいファイルが再度ダウンロードされます。";
+        readonly tok: "sitelen sina li kama tawa ilo sina ({name}). o awen e ona! ilo lukin ni li ken ala ante e lipu pini — tenpo kama la sina awen e sitelen la ona li pana e lipu sin.";
+    };
+    readonly "lf.fileFirstNew": {
+        readonly zh: "云同步已关：作品不进图库，保存 = 存成你自己的 .ora 文件";
+        readonly en: "Cloud sync is off: artwork is not kept in the gallery — saving writes your own .ora file";
+        readonly ja: "クラウド同期はオフです：作品はギャラリーに保存されません。保存すると自分の .ora ファイルに書き出されます";
+        readonly tok: "poki sewi li lape. sitelen li awen ala lon tomo sitelen — sina awen la ona li kama lipu .ora pi sina taso.";
+    };
     readonly "lf.renameNotSupported": {
         readonly zh: "本地文件模式不支持重命名（可用「另存为」存入图库）";
         readonly en: "Rename is not supported in local-file mode (use Save As to add it to the gallery)";
@@ -5003,6 +5015,12 @@ export declare const S: {
         readonly en: "Usage: unknown";
         readonly ja: "使用量：不明";
         readonly tok: "suli awen: mi sona ala";
+    };
+    readonly "gs.cloudDisabledNoGallery": {
+        readonly zh: "云端功能已停用，图库不可用（可在设置里重新开启）";
+        readonly en: "Cloud features are disabled; the gallery is unavailable (re-enable in settings)";
+        readonly ja: "クラウド機能が無効のため、ギャラリーは利用できません（設定で再度有効化できます）";
+        readonly tok: "ilo sewi li lape la, poki sitelen li ken ala. (o open e ona lon lawa)";
     };
     readonly "gs.quotaCritical": {
         readonly zh: "本地存储 {pct}% 已满 — 立即去图库卸载不常用的作品";
