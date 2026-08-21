@@ -283,7 +283,7 @@ export class WeebPaintBackend implements WeebPaintBackendInterface {
   }
   layerDuplicate(id: number): BackendAddResult {
     this._guard();
-    const r = this._layers.duplicateLayer(id);
+    const r = this._layers.duplicateNode(id);   // 叶或组皆可（组=递归深拷）
     return r.ok ? { ok: true, id: r.layer.id } : { ok: false, msg: r.msg };
   }
   layerRemove(id: number): BackendOpResult { this._guard(); return this._layers.removeLayer(id, ""); }

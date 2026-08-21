@@ -40,6 +40,24 @@ describe("resample-bytes · 最近邻/双三次/入口", () => {
     const same = resampleBytes(src, 4, 4, 4, 4, "auto");
     assert(src.every((v, i) => v === same[i]), "恒等尺寸逐字节");
   });
+  it("nearest 整数倍放大：逐像素等值块复制（像素画 upscale 完美还原）", () => {
+    const src = mk(2, 2, (x, y) => [x * 100, y * 100, 50, 255]);
+    const out = nearestResampleBytes(src, 2, 2, 6, 6);   // ×3
+    for (let y = 0; y < 6; y++) for (let x = 0; x < 6; x++) {
+      const sx = Math.floor(x / 3), sy = Math.floor(y / 3);
+      const o = (y * 6 + x) * 4, p = (sy * 2 + sx) * 4;
+      for (let c = 0; c < 4; c++) eq(out[o + c], src[p + c], `(${x},${y}) 通道 ${c} 应等于源块`);
+    }
+  });
+  it("nearest 非整数倍放大：尺寸正确、只含源色（无混色缝）", () => {
+    const src = mk(2, 1, (x) => x === 0 ? [255, 0, 0, 255] : [0, 0, 255, 255]);
+    const out = nearestResampleBytes(src, 2, 1, 5, 3);   // ×2.5 / ×3
+    eq(out.length, 5 * 3 * 4, "输出尺寸 5×3");
+    for (let i = 0; i < 15; i++) {
+      const r = out[i * 4], b = out[i * 4 + 2];
+      assert((r === 255 && b === 0) || (r === 0 && b === 255), `像素 ${i} 必是纯红或纯蓝，无中间混色`);
+    }
+  });
   it("bicubic 放大：α 台阶不因负瓣过冲（限幅生效）", () => {
     const src = mk(8, 4, (x) => x < 4 ? [200, 40, 40, 128] : [0, 0, 0, 0]);
     const out = bicubicResampleBytes(src, 8, 4, 24, 12);

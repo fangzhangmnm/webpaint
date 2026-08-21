@@ -29,6 +29,7 @@ import { ShapeBrushEngine } from "./shape-brush.ts";
 import { isPixelStroke, pixelStrokeSpec } from "./engine-registry.ts";
 import { computePinchViewport, snapRotation, isTap, isDoubleTap, gestureTapAction } from "./common/pointer-gesture.ts";
 import { assignRole, effectiveTool, toolToRole } from "./pointer-route.ts";
+import { isBusyActive } from "./fullscreen-busy.ts";
 import { inputSmooth } from "./stroke-input-smooth.ts";
 import { t } from "./i18n/index.ts";
 import { SMOOTH } from "./smooth-config.ts";
@@ -229,6 +230,26 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
     when: _floating, run: (i) => i._commitLasso() },
   { combo: "Escape",           desc: "sc.cancelTransform", category: "sc.cat.lasso",
     when: _floating, run: (i) => i._abortLasso() },
+  // 方向键像素微调（user：「变换的时候可以用上下左右键进行像素坐标精调」）：浮层平移 1 doc px，
+  //   Shift = 10px。每按一下 = 一个 undo 整点（同 flip/rotate90 节奏，无 coalescing——已知取舍）。
+  //   已知无害副作用：Shift+Arrow 会顺带 shapeBrush.setConstrainInvert(true)（_keydown 无条件设），
+  //   floating 时形状笔不活跃，keyup 会清位。
+  { combo: "ArrowLeft",        desc: "sc.nudgeFloat", category: "sc.cat.lasso",
+    when: _floating, run: (i) => { i.lasso.nudgeFloat(-1, 0); i.board.invalidateAll(); } },
+  { combo: "ArrowRight",       desc: "sc.nudgeFloat", category: "sc.cat.lasso",
+    when: _floating, run: (i) => { i.lasso.nudgeFloat(1, 0); i.board.invalidateAll(); } },
+  { combo: "ArrowUp",          desc: "sc.nudgeFloat", category: "sc.cat.lasso",
+    when: _floating, run: (i) => { i.lasso.nudgeFloat(0, -1); i.board.invalidateAll(); } },
+  { combo: "ArrowDown",        desc: "sc.nudgeFloat", category: "sc.cat.lasso",
+    when: _floating, run: (i) => { i.lasso.nudgeFloat(0, 1); i.board.invalidateAll(); } },
+  { combo: "Shift+ArrowLeft",  desc: "sc.nudgeFloat10", category: "sc.cat.lasso",
+    when: _floating, run: (i) => { i.lasso.nudgeFloat(-10, 0); i.board.invalidateAll(); } },
+  { combo: "Shift+ArrowRight", desc: "sc.nudgeFloat10", category: "sc.cat.lasso",
+    when: _floating, run: (i) => { i.lasso.nudgeFloat(10, 0); i.board.invalidateAll(); } },
+  { combo: "Shift+ArrowUp",    desc: "sc.nudgeFloat10", category: "sc.cat.lasso",
+    when: _floating, run: (i) => { i.lasso.nudgeFloat(0, -10); i.board.invalidateAll(); } },
+  { combo: "Shift+ArrowDown",  desc: "sc.nudgeFloat10", category: "sc.cat.lasso",
+    when: _floating, run: (i) => { i.lasso.nudgeFloat(0, 10); i.board.invalidateAll(); } },
   { combo: "Escape",           desc: "sc.polygonCancel", category: "sc.cat.lasso",
     when: (i) => i.lasso.polygonSessionActive() && !_floating(i),
     run: (i) => { i.lasso.polygonCancelSession(); i.board.requestRender(); } },
@@ -327,6 +348,9 @@ function _matchCombo(e: KeyboardEvent, combo: string) {
   if (key === "-")      return e.key === "-" || e.key === "_";
   if (key === "[" || key === "]") return e.key === key;
   if (key === "0")      return e.key === "0";
+  // 方向键（浮层微调）：e.key 就是 "ArrowUp" 等全名，等值匹配。尾行 fallthrough 其实也覆盖，
+  //   这里显式钉住意图——防日后有人改尾行语义时把方向键摔了。
+  if (key.startsWith("Arrow")) return e.key === key;
   if (key.length === 1) {
     return e.code === "Key" + key.toUpperCase() || e.key.toUpperCase() === key.toUpperCase();
   }
@@ -1390,6 +1414,10 @@ export class InputController {
   //   - app.js 菜单的"快捷键"面板从这里读 desc 渲染
   // 加新快捷键：只改这一个数组。
   _keydown(e: KeyboardEvent) {
+    // busy 遮罩只能几何挡 pointer；键盘监听绑在 window 上穿得进来（QA 2026-08-21：同步/加密/导入的
+    //   busy 段里 Ctrl+Z/Y 是唯一还能改 doc 的活口，曾撞上 encode await 窗口被乐观清脏吞编辑）。
+    //   busy 期间键盘快捷键一律不收；_keyup 不拦——修饰键（Space/Alt/Shift）的清位必须永远能落地。
+    if (isBusyActive()) return;
     // 只对**真文本输入**吞快捷键（它们需要打字 + 自己的 Ctrl+Z）。range/checkbox/radio/button
     // 也是 INPUT，但不吃文本——不能整体 return：画布 pointerdown 是 preventDefault 的，点画布
     // **夺不回焦点**，一旦点过工具条滑条/勾选框，焦点就永久困在控件里 → 全部快捷键假死

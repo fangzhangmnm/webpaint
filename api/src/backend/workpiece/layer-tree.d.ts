@@ -74,8 +74,11 @@ export declare class LayerTree implements CollectorComponent {
      *  调用方负责新根 tileset 的净移交（createTileset 后 release）；旧根照常进 collector/record，
      *  load 收尾清栈时旧 doc 资源随 record 驱逐释放。nextId 重播种。 */
     loadRoot(json: TreeJson): void;
-    /** 复制叶（props 原样、tileset 句柄共享零拷贝）；插到源上方，active = 副本。null = maxLeaves/源不在。 */
-    duplicateLayer(id: number): TreeLeaf | null;
+    /** 复制节点（叶或组，props 原样）：叶像素 = duplicateTileset 句柄共享零拷贝；组 = 递归深拷
+     *  （每个后代叶各拿新 ref、所有节点发新 id）。插到源上方，active = 副本根。
+     *  null = 叶数预算超 maxLeaves（现叶数+待复制子树叶数）/源不在/像素缺失。
+     *  referenceLayerId 是 doc 级字段不在节点上——复制含参考层的组不改它（副本不会成为参考层）。 */
+    duplicateNode(id: number): TreeNode | null;
     /** 删叶（keep-one 守卫：最后一叶不删）。active 被删 → 就近换（下方优先）。 */
     removeLayer(id: number): boolean;
     /** 删组连带 children；删空补一叶。 */
@@ -84,9 +87,12 @@ export declare class LayerTree implements CollectorComponent {
     explodeGroupInPlace(id: number): boolean;
     /** 同级移动 delta（越界 → false 不动）。 */
     moveLayer(id: number, delta: number): boolean;
-    /** 移入组（放组内最上）。组不存在/自嵌套 → false。 */
+    /** 移入组，保持相对上下关系（user QA 需求）：与组**同级**且原来在组下方 → 插组内**底**；
+     *  同级在组上方 → 组内**顶**；跨级（不同父）没有可比序 → 沿旧行为放组内顶。
+     *  组不存在/自嵌套 → false。 */
     moveIntoGroup(id: number, gid: number): boolean;
-    /** 移出组：提到组的同级、组上方。不在组内 → false。 */
+    /** 移出组：提到组的同级，保持相对上下关系——原在组内**底**（index 0）→ 插组**下方**；
+     *  其余 → 组上方（底出底、顶出顶，与 moveIntoGroup 对偶成往返）。不在组内 → false。 */
     moveOutOfGroup(id: number): boolean;
     /** 向下合并：合成字节外部烤好递入（零 GL）。under 归一化（opacity=1/source-over/resultClipping）、
      *  top 移除、active=under。守卫：同级正下方必须是叶、under 剪裁而 top 不剪 → false（语义不清）。 */

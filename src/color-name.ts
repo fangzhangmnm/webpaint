@@ -19,6 +19,7 @@
 import { lang } from "./i18n/index.ts";
 import { reportError } from "./error-badge.ts";
 import { srgbToOklab } from "./common/color-dist.ts";
+import { normalizeHex } from "./ui/color-model.ts";   // parseColorInput 用（color-model 保持零依赖纯模块，helper 落这边）
 
 // ---- 数据装载（brushes.ts 同款：成功恒定缓存；失败不留缓存 → 下次调用自动重试）----
 export interface ColorCategory {
@@ -217,7 +218,8 @@ function parseIdx(): Map<string, string> {
   return _parseIdx;
 }
 
-/** 颜色名（任意词库 / 色温 / `category:名`）→ hex；认不出 → null。hex 归调用方先走 normalizeHex。 */
+/** 颜色名（任意词库 / 色温 / `category:名`）→ hex；认不出 → null。
+ *  hex 归调用方（UI 输入框统一走下面的 parseColorInput：带 `#` 恒 hex、裸串色名优先）。 */
 export function parseColorName(text: string): string | null {
   const q = norm(text);
   if (!q) return null;
@@ -239,6 +241,17 @@ export function parseColorName(text: string): string | null {
     // token 不是 category（例：tab:blue 的 "tab"）→ 落回全字典
   }
   return parseIdx().get(q) ?? null;
+}
+
+/** UI 色输入框统一解析（色轮 hex 框 / 导出底色框共用，2026-08-21）：
+ *  · 显式带 `#` → 恒 hex（normalizeHex；非法就 null，色名不掺和）；
+ *  · 裸串 → **先色名**、色名不中再补 `#` 试 hex。
+ *  为什么色名优先：词库（家族色彩库）会持续膨胀，哪天进一个六位纯 hex 字母的词
+ *  （facade/decade 类），旧的「hex 优先」会把它静默当色码吞掉；想要 hex 的用户写 `#` 即恒赢。 */
+export function parseColorInput(text: string): string | null {
+  const v = (text || "").trim();
+  if (v.startsWith("#")) return normalizeHex(v);
+  return parseColorName(v) ?? normalizeHex(v);
 }
 
 // ---- IntelliSense 数据面 ----

@@ -15,6 +15,7 @@ import { Selection } from "./backend/selection.ts";
 import { disposeViewSnap as disposeLayerSnap, type ViewLeafSnap as LayerSnap } from "./backend/workpiece/painting-view.ts";
 import { countViewLeaves } from "./backend/workpiece/painting-view.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
+import { isBusyActive } from "./fullscreen-busy.ts";
 import { reportError } from "./error-badge.ts";
 import { updateLassoToolbar } from "./toolbar.ts";
 import { t } from "./i18n/index.ts";
@@ -177,6 +178,7 @@ export function initSelectionOps(ctx: AppContext) {
   // Ctrl+X：剪切 = 复制 + 从活层擦除（选区形状 dst-out；无选区 = 清整层 bbox）。一次 undo。
   // 复制失败就不擦——剪切绝不许退化成纯删除（数据安全词典序）。
   window.addEventListener("wp:cut", async () => {
+    if (isBusyActive()) return;   // busy 期改 doc 的入口一律闸（键盘门已挡 Ctrl+X，这里兜事件直发）
     // v0.9.27 浮层期软拒（同 Ctrl+C；剪切在浮层期动手比复制更危险——半路剪掉源层像素）
     if (input.lasso.hasFloating()) { setStatus(t("se.floatBeforeClipboard"), true); return; }
     const got = grabActiveLayerBytes();
@@ -207,6 +209,7 @@ export function initSelectionOps(ctx: AppContext) {
   };
   // 按钮入口（图层面板「导入剪贴板」/ lasso ⋯）：click 不产生原生 paste 事件 → 主动 clipboard.read()
   window.addEventListener("wp:paste", async () => {
+    if (isBusyActive()) return;   // busy 期粘贴曾能弹出被遮罩盖住的大图确认框 → 死锁（sheet z 499 < busy 520）
     let blob;
     try { blob = await readImageFromClipboard(); }
     catch (e) { reportError(new Error(t("se.clipboardReadFailed", { error: errMsg(e) })), "warning"); return; }   // #34
@@ -224,6 +227,7 @@ export function initSelectionOps(ctx: AppContext) {
       if (tag === "TEXTAREA" || (tag === "INPUT" && type !== "range" && type !== "checkbox" && type !== "radio" && type !== "button") || tgt.isContentEditable) return;
     }
     if (document.body.dataset.mode === "gallery") return;    // 图库有自己的「从剪切板新建」入口
+    if (isBusyActive()) return;                              // busy 遮罩挡不住原生 paste 事件（QA 2026-08-21）
     if (isMidOperation()) return;                            // iPad 三指误触护栏：笔画/变换拖动中不收
     const items = e.clipboardData?.items;
     let f: File | null = null;

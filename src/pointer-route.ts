@@ -3,10 +3,13 @@
 // 且 effectiveTool→role 的映射在 mouse/pen/touch 三处**各抄一份**。抽出 = 决策可单测、改一处。
 // 行为矩阵沿用 ScratchPad（见 input.ts 顶部注释）；live 事件流 / pointers Map / 手势仍在 input.ts。
 
-// 当前工具 → 有效工具：transform 抢画布路由走 gizmo（机械上 role=lasso）；alt+brush/fill 临时取色。
+// 当前工具 → 有效工具：transform 抢画布路由走 gizmo（机械上 role=lasso）；alt+brush/fill/shapeBrush 临时取色。
 export function effectiveTool(tool: string, altDown: boolean): string {
   if (tool === "transform") return "lasso";
-  if (altDown && (tool === "brush" || tool === "fill")) return "picker";   // v0.7.8：油漆桶也吃 alt 吸色（吸预览色，WYSIWYG）
+  // alt 吸色白名单：brush（原初）；fill（v0.7.8 吸预览色，WYSIWYG）；shapeBrush（user：「形状笔的
+  //   时候应该也能alt取色」——只加 user 点名的，eraser/filterBrush 不扩权）。已知正确副作用：
+  //   input._paintIntent 同函数判定 → alt+形状笔在组/隐藏层上直接吸色而不是报「组不能画」，与 brush 一致。
+  if (altDown && (tool === "brush" || tool === "fill" || tool === "shapeBrush")) return "picker";
   return tool;   // crop/adjust 等 fall-through，由 input 的 canDraw gate 兜
 }
 

@@ -1,6 +1,6 @@
 // Gallery 展示派生测试（UI 深化 candidate 1 · gallery）。
 import { describe, it, eq, assert } from "./runner.mjs";
-import { tileFor, breadcrumb, trashTileFor } from "../src/gallery/gallery-view-model.ts";
+import { tileFor, breadcrumb, trashTileFor, humanSize } from "../src/gallery/gallery-view-model.ts";
 
 describe("gallery-view-model · tileFor 徽章 4 态", () => {
   const local = { name: "a", updatedAt: 100, size: 10, thumb: {} };
@@ -84,4 +84,19 @@ describe("gallery-view-model · trashTileFor", () => {
     eq(trashTileFor({ name: "a", local: null, cloud: {} }).source, "Cloud");
   });
   // （旧 mergeTrash 锚已随函数被 store 库收编 → 真测试在 test/trash-merge.test.ts）
+});
+
+describe("gallery-view-model · humanSize（家规：1024 进制标二进制单位 KiB/MiB）", () => {
+  it("null/0/字节档", () => {
+    eq(humanSize(null), "?");
+    eq(humanSize(undefined), "?");
+    eq(humanSize(0), "0 B");
+    eq(humanSize(1023), "1023 B");
+  });
+  it("KiB/MiB/GiB 档（1024 进制，单位名必须带 i）", () => {
+    eq(humanSize(1024), "1 KiB");
+    eq(humanSize(953 * 1024), "953 KiB");          // ≈0.93 MB 十进制——标 KB 就撒谎了
+    eq(humanSize(1024 * 1024), "1.0 MiB");
+    eq(humanSize(1.5 * 1024 * 1024 * 1024), "1.50 GiB");
+  });
 });

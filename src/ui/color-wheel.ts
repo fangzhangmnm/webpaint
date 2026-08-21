@@ -14,8 +14,8 @@
 import {
   createApp, defineComponent, reactive, ref, computed, watch, onMounted, onUnmounted,
 } from "../../vendor/vue/vue.esm-browser.prod.js";
-import { hsvToHex, hexToHsv, normalizeHex, sameHex } from "./color-model.ts";
-import { parseColorName, searchColorNames, type ColorNameHit } from "../color-name.ts";
+import { hsvToHex, hexToHsv, sameHex } from "./color-model.ts";
+import { parseColorInput, searchColorNames, type ColorNameHit } from "../color-name.ts";
 import { attachInputSense, type InputSenseHandle } from "./input-sense.ts";
 import { attachDragValue, type DragValueHandle } from "./drag-value.ts";
 import { t } from "../i18n/index.ts";
@@ -141,13 +141,14 @@ export const ColorWheel = defineComponent({
     }
     // 文本框契约（2026-07-30 user）：**只有回车才 commit**；失焦/Esc 一律弹回现有 truth
     //   （半输入永不生效——原 @change 在 blur 也 commit，点别处会把没敲完的字当输入吞掉）。
-    // 解析：hex 优先；不是 hex 再按颜色名认——统一词表**全语言搜索**（优先级 mpl > css > en >
-    //   zh > ja > tok：单字母 b / tab:blue / CSS 关键字 / xkcd 全表含 slang / 传统色+拼音 / 和色+かな）。
+    // 解析（parseColorInput，2026-08-21）：带 `#` 恒 hex；裸串**先色名**再试 hex（词库会膨胀，
+    //   防哪天进 facade/decade 类六位 hex 字母词被静默当色码）。色名 = 统一词表**全语言搜索**
+    //   （优先级 mpl > css > en > zh > ja > tok：单字母 b / tab:blue / CSS 关键字 / xkcd 全表含 slang / 传统色+拼音 / 和色+かな）。
     function onHexKey(e: KeyboardEvent) {
       const el = e.target as HTMLInputElement;
       if (e.key === "Enter") {
         e.preventDefault();
-        const norm = normalizeHex(el.value) ?? parseColorName(el.value);
+        const norm = parseColorInput(el.value);
         if (!norm) { el.value = hexText.value; return; }   // 非法：静默弹回（组件不持 status）
         const d = hexToHsv(norm);
         hsv.h = d.h; hsv.s = d.s; hsv.v = d.v;

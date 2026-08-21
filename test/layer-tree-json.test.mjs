@@ -153,13 +153,96 @@ describe("LayerTree · 换根收集与所有权", () => {
 });
 
 describe("LayerTree · verbs 契约", () => {
-  it("duplicateLayer：props 原样、像素零拷贝共享、插源上方", () => {
+  it("duplicateNode(叶)：props 原样、像素零拷贝共享、插源上方", () => {
     const { wp, tree, tiles, undo } = mk();
     let t = wp.begin(); tiles.putRegion(1, 0, 0, 2, 2, solid(2, 2, 66)); t.commit();
-    t = wp.begin(); const d = tree.duplicateLayer(1); t.commit();
+    t = wp.begin(); const d = tree.duplicateNode(1); t.commit();
     assert(d && d.id !== 1);
     eq(tiles.getRegion(d.id, 0, 0, 1, 1)[0], 66, "副本像素同");
     eq(tree.view().activeId, d.id);
+    undo.clear();
+  });
+
+  it("duplicateNode(组)：递归深拷（全节点新 id、后代叶新 ref）、插源上方、active=副本根", () => {
+    const { wp, tree, tiles, undo } = mkGrouped();   // [bg(1), g(10){a(11), b(12)}]
+    let t = wp.begin(); tiles.putRegion(11, 0, 0, 2, 2, solid(2, 2, 10)); t.commit();
+    t = wp.begin(); const d = tree.duplicateNode(10); t.commit();
+    assert(d && "children" in d, "副本是组");
+    eq(tree.view().nodes.length, 3, "插根级");
+    eq(tree.view().nodes[2].id, d.id, "插源组上方");
+    eq(d.children.length, 2, "children 深拷");
+    eq(d.children.map((n) => n.name).join(","), "a,b", "顺序/名字照抄（不改名，与叶 duplicate 一致）");
+    const oldIds = new Set([1, 10, 11, 12]);
+    assert(!oldIds.has(d.id) && d.children.every((n) => !oldIds.has(n.id)), "全节点新 id");
+    assert(d.children.every((n) => n.pixelsRef !== 11 && n.pixelsRef !== 12), "后代叶各拿新 ref");
+    eq(tiles.getRegion(d.children[0].id, 0, 0, 1, 1)[0], 10, "副本像素同源");
+    eq(tree.view().activeId, d.id, "active=副本根");
+    undo.clear();
+  });
+
+  it("duplicateNode(组) 引用计数平衡：复制→undo→redo→删除→驱逐，tileset 全程无泄漏", () => {
+    const { undo, wp, tree, tiles } = mkGrouped();
+    eq(tiles.tilesetCount(), 3, "基线 3 叶");
+    let t = wp.begin(); const d = tree.duplicateNode(10); t.commit();
+    eq(tiles.tilesetCount(), 5, "副本两后代叶各一新 tileset");
+    undo.undo();
+    eq(tree.countLeaves(), 3, "undo 摘副本组");
+    eq(tiles.tilesetCount(), 5, "副本 tileset 由 record 根持有（undo 不释放）");
+    undo.redo();
+    eq(tree.countLeaves(), 5, "redo 恢复");
+    t = wp.begin(); assert(tree.removeGroupAndFillEmpty(d.id)); t.commit();
+    eq(tree.countLeaves(), 3, "副本组已删");
+    undo.clear();   // 驱逐所有 record
+    eq(tiles.tilesetCount(), 3, "驱逐后副本 tileset 归零还池——净移交无泄漏");
+  });
+
+  it("duplicateNode：复制含参考层的组 → referenceLayerId 不变（doc 级字段不随节点复制）", () => {
+    const { undo, wp, tree } = mkGrouped();
+    let t = wp.begin(); tree.setTreeProp("referenceLayerId", 11); t.commit();
+    t = wp.begin(); assert(tree.duplicateNode(10), "复制组 ok"); t.commit();
+    eq(tree.view().referenceLayerId, 11, "仍指原叶（副本不会成为参考层）");
+    undo.clear();
+  });
+
+  it("duplicateNode 叶数预算门：现叶数+待复制组内叶数超 maxLeaves → null；叶预算内照常", () => {
+    const m = mkGrouped({ maxLeaves: 4 });   // 现 3 叶
+    const t = m.wp.begin();
+    eq(m.tree.duplicateNode(10), null, "组 2 叶：3+2>4 拒");
+    assert(m.tree.duplicateNode(1), "叶：3+1≤4 过");
+    eq(m.tree.duplicateNode(1), null, "再复制叶：4+1>4 拒");
+    t.cancel();
+  });
+
+  it("moveIntoGroup 保持相对上下：同级下方→组内底、同级上方→组内顶；moveOutOfGroup 对偶往返", () => {
+    const { undo, wp, tree } = mkGrouped();   // [bg(1), g(10){a(11), b(12)}]
+    // 下方进组 → 组内底
+    let t = wp.begin(); assert(tree.moveIntoGroup(1, 10), "bg（组下方）入组"); t.commit();
+    eq(tree.nodeById(10).children.map((n) => n.id).join(","), "1,11,12", "原在组下方 → 组内底");
+    // 组内底出组 → 组下方（正好回原位）
+    t = wp.begin(); assert(tree.moveOutOfGroup(1)); t.commit();
+    eq(tree.view().nodes.map((n) => n.id).join(","), "1,10", "组内底 → 组下方（入/出往返回原位）");
+    // 上方进组 → 组内顶
+    t = wp.begin();
+    assert(tree.moveLayer(1, +1), "bg 移到组上方");
+    assert(tree.moveIntoGroup(1, 10), "bg（组上方）入组");
+    t.commit();
+    eq(tree.nodeById(10).children.map((n) => n.id).join(","), "11,12,1", "原在组上方 → 组内顶");
+    // 组内非底出组 → 组上方
+    t = wp.begin(); assert(tree.moveOutOfGroup(1)); t.commit();
+    eq(tree.view().nodes.map((n) => n.id).join(","), "10,1", "组内非底 → 组上方");
+    undo.clear();
+  });
+
+  it("moveIntoGroup 跨级（不同父）无可比序 → 沿旧行为放组内顶", () => {
+    const { undo, wp, tree } = mkGrouped();
+    // 根级建第二个组 g2（active=bg(1) 是叶 → 同级之上）
+    let t = wp.begin(); const g2 = tree.addGroup("g2"); t.commit();
+    // g(10) 内的 12、11 依次跨级移入 g2：各自 push 顶 → 结果 [12, 11]（不做跨级排序）
+    t = wp.begin();
+    assert(tree.moveIntoGroup(12, g2.id), "12 跨级入 g2");
+    assert(tree.moveIntoGroup(11, g2.id), "11 跨级入 g2");
+    t.commit();
+    eq(tree.nodeById(g2.id).children.map((n) => n.id).join(","), "12,11", "跨级各自放顶（无可比序）");
     undo.clear();
   });
 
@@ -236,13 +319,13 @@ describe("LayerTree · verbs 契约", () => {
     const t = m.wp.begin();
     assert(m.tree.addLayer("a"), "第二叶可加");
     eq(m.tree.addLayer("b"), null, "到 maxLeaves 返 null");
-    eq(m.tree.duplicateLayer(1), null, "duplicate 同守卫");
+    eq(m.tree.duplicateNode(1), null, "duplicate 同守卫");
     t.cancel();
   });
 });
 
-// 带组变体：nodes = [bg(1), group(10){a(11), b(12)}]
-function mkGrouped() {
+// 带组变体：nodes = [bg(1), group(10){a(11), b(12)}]；opts.maxLeaves 给预算门测试用
+function mkGrouped(opts = {}) {
   const undo = new UndoStack({ maxQuotaBytes: 1 << 30 });
   let tree = null;
   const host = {
@@ -264,7 +347,7 @@ function mkGrouped() {
   const r1 = mkRef(), r11 = mkRef(), r12 = mkRef();
   const leaf = (id, name, pixelsRef) => ({ id, name, visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false, pixelsRef });
   tree = new LayerTree({
-    wp, tiles: wp.layerTiles,
+    wp, tiles: wp.layerTiles, maxLeaves: () => opts.maxLeaves ?? 64,
     initial: {
       nodes: [leaf(1, "bg", r1), { id: 10, name: "g", visible: true, opacity: 1, mode: "source-over", clippingMask: false, children: [leaf(11, "a", r11), leaf(12, "b", r12)] }],
       activeId: 1, referenceLayerId: null, width: 64, height: 64,

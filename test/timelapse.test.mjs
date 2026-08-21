@@ -67,6 +67,25 @@ describe("timelapse · 帧合成", () => {
     const px = (x, y) => out[(y * 8 + x) * 4];
     eq(px(0, 0), 255); eq(px(4, 1), 200); eq(px(7, 3), 255);
   });
+  it("放大走 nearest：像素画棋盘 ×4 逐像素块复制，无混色缝（放大看像素成文规则）", () => {
+    // 2×2 红/蓝棋盘 fit 进 8×8（×4 放大满幅）：每格 4×4 纯色块，area 的跨块混色缝不允许出现
+    const src = new Uint8ClampedArray(2 * 2 * 4);
+    const put = (i, r, g, b) => { src[i * 4] = r; src[i * 4 + 1] = g; src[i * 4 + 2] = b; src[i * 4 + 3] = 255; };
+    put(0, 255, 0, 0); put(1, 0, 0, 255); put(2, 0, 0, 255); put(3, 255, 0, 0);
+    const out = composeTimelapseFrame(src, 2, 2, 8, 8);
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+      const sx = x >> 2, sy = y >> 2, o = (y * 8 + x) * 4, p = (sy * 2 + sx) * 4;
+      eq(out[o], src[p], `(${x},${y}) R 应等于源块`);
+      eq(out[o + 2], src[p + 2], `(${x},${y}) B 应等于源块`);
+    }
+  });
+  it("缩小仍走 area：4×4 纯色块 ÷2 = 块均值（策略只改放大向）", () => {
+    // 4×4 全 (100,60,20,255) → 2×2 仍纯色（area 恒等均值）；顺带确认缩小分支没被 nearest 抢走精度语义
+    const src = new Uint8ClampedArray(4 * 4 * 4);
+    for (let i = 0; i < 16; i++) { src[i * 4] = 100; src[i * 4 + 1] = 60; src[i * 4 + 2] = 20; src[i * 4 + 3] = 255; }
+    const out = composeTimelapseFrame(src, 4, 4, 2, 2);
+    eq(out[0], 100); eq(out[1], 60); eq(out[2], 20); eq(out[3], 255);
+  });
   it("半透明像素 over 白：a=0.5 的黑 → 127.5 灰", () => {
     const src = new Uint8ClampedArray([0, 0, 0, 128]);
     const out = composeTimelapseFrame(src, 1, 1, 1, 1);   // 奇数框仅测合成数学，不走编码

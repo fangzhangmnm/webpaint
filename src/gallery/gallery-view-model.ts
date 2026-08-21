@@ -146,13 +146,15 @@ export function humanTime(ts: number): string {
   if (dt < 7 * 24 * 60 * 60 * 1000) return t("gv.time.dayAgo", { n: Math.floor(dt / 86400000) });
   return d.toLocaleDateString();
 }
+// 家规：数据层裸字节、显示层二进制单位（KiB/MiB，1024 进制）——见 timelapse-state.ts 注释。
+//   旧版 1024 进制却标 KB/MB（十进制单位名）是违约方，2026-08-21 改标 KiB/MiB/GiB。
 export function humanSize(b: number | null | undefined): string {
   if (b == null) return "?";
   if (b === 0) return "0 B";
   if (b < 1024) return `${b} B`;
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)} KB`;
-  if (b < 1024 * 1024 * 1024) return `${(b / 1048576).toFixed(1)} MB`;
-  return `${(b / 1073741824).toFixed(2)} GB`;
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)} KiB`;
+  if (b < 1024 * 1024 * 1024) return `${(b / 1048576).toFixed(1)} MiB`;
+  return `${(b / 1073741824).toFixed(2)} GiB`;
 }
 
 export function trashTileFor(item: TrashGItem): TrashTile {

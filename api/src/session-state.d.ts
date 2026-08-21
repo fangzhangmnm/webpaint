@@ -24,6 +24,7 @@ declare function _readSessionCheckpoint(name: string): Promise<{
 declare function _dropCheckpoint(name: string): Promise<void>;
 declare function saveNow(opts?: {
     implicit?: boolean;
+    commitPending?: boolean;
 }): Promise<void>;
 declare function saveAndPush(): Promise<void>;
 declare function encryptCurrent(): Promise<void>;

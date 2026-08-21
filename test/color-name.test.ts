@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { test, eq, assert } from "./runner.mjs";
 import {
-  _adoptColorWords, colorNameIn, parseColorName, searchColorNames,
+  _adoptColorWords, colorNameIn, parseColorName, parseColorInput, searchColorNames,
   kelvinToHex, namingCategories, categoryLabel,
 } from "../src/color-name.ts";
 
@@ -61,6 +61,20 @@ test("parse 全词库，行序 = 优先级（universal → 小众）", () => {
   eq(parseColorName("laso"), "#0343df");         // tok 裸词首选 = 蓝
   eq(parseColorName("nicht eine farbe"), null);
   eq(parseColorName("#ff0000"), null);           // hex 不归本模块（调用方先走 normalizeHex）
+});
+
+test("parseColorInput 优先级（2026-08-21）：带#恒hex、裸串先色名再试hex", () => {
+  eq(parseColorInput("#ff8800"), "#ff8800");     // 带 # → 恒 hex
+  eq(parseColorInput("#red"), null);             // 带 # 非法 hex → null，色名不掺和
+  eq(parseColorInput(" aabbcc "), "#aabbcc");    // 裸 hex 无撞词 → 照常解析（trim + 补 #）
+  eq(parseColorInput("月白"), "#eef7f2");        // 裸色名照常
+  eq(parseColorInput("5600k"), parseColorName("5600k"));   // 色温走色名路径
+  eq(parseColorInput("nicht eine farbe"), null); // 两头不认 → null
+  // 撞词沙盘：词库哪天进一个六位纯 hex 字母词（facade 类）——裸串归色名，带 # 仍恒 hex
+  _adoptColorWords({ categories: DATA.categories, words: [...DATA.words, ["xkcd", "facade", "#123456"]] });
+  eq(parseColorInput("facade"), "#123456");      // 旧「hex 优先」会静默当 #facade 吞掉
+  eq(parseColorInput("#facade"), "#facade");     // 想要 hex 写 # 即恒赢
+  _adoptColorWords(DATA);                        // 还原，别污染后续测试
 });
 
 test("色温：5600k 等直接算 Planck 黑体色（纯数学，parse/sense 都认）", () => {

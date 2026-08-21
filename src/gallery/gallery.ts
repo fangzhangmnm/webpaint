@@ -98,6 +98,19 @@ export interface GalleryHost {
 const _thumbRev = reactive(new Map<string, number>());   // key = 全名 X.ora（与 cache key 逐字一致）
 onThumbInvalidated((key: string) => { _thumbRev.set(key, (_thumbRev.get(key) ?? 0) + 1); });
 
+// 像素画缩略图保锐（对齐主画布 GL 成文规则「放大 NEAREST 看像素」，gl-compositor 同源）。
+// 阈值 128 的论证：thumb 生成侧**恒不放大**（ora 走 256/192/128 自适应档、图片走 IMAGE_THUMB_MAX=128，
+//   都 Math.min(1, scale)），所以 natural 长边 <128 只可能是「原作本身就这么小」= 像素画/小图标；
+//   而显示格 ≥150 CSS px（.gallery-grid minmax(150px,1fr)，高 DPR 下物理像素还要 ×2+），必被浏览器
+//   放大 → 默认双线性糊掉。128~256 档的 thumb 来自正常尺寸画作的缩小产物，轻微放大时平滑反而对。
+// blob URL 换图时 <img> 会重新 fire load → class 跟着重算，无需额外 watch。
+const PIXELATED_THUMB_MAX_EDGE = 128;
+function thumbLoadPixelated(e: Event): boolean {
+  const img = e.target as HTMLImageElement;
+  const edge = Math.max(img.naturalWidth, img.naturalHeight);
+  return edge > 0 && edge < PIXELATED_THUMB_MAX_EDGE;
+}
+
 const ThumbCell = defineComponent({
   name: "ThumbCell",
   props: {
@@ -181,10 +194,12 @@ const ThumbCell = defineComponent({
       fetchThumb();
     });
     onUnmounted(() => { obs?.disconnect(); if (objUrl) URL.revokeObjectURL(objUrl); });
-    return { url, showCloud, locked, root, ICON, lockedTitle: t("gal.lockedThumb") };
+    const pixelated = ref(false);
+    const onThumbLoad = (e: Event) => { pixelated.value = thumbLoadPixelated(e); };
+    return { url, showCloud, locked, root, ICON, lockedTitle: t("gal.lockedThumb"), pixelated, onThumbLoad };
   },
   template: `
-    <img v-if="url" class="gallery-tile-thumb" :src="url" :alt="alt" loading="lazy" />
+    <img v-if="url" class="gallery-tile-thumb" :class="{ pixelated }" :src="url" :alt="alt" loading="lazy" @load="onThumbLoad" />
     <div v-else-if="locked" class="gallery-tile-thumb placeholder locked" :title="lockedTitle"
          @click.stop="$emit('unlock', encName || alt)">
       <span style="width:42px;height:42px;display:inline-block" v-html="ICON.lock"></span>
@@ -235,10 +250,12 @@ const ImageThumbCell = defineComponent({
     // token 变（云端图片被外部改写）→ 原地重取；tile 复用同 ThumbCell（keyed v-for，无第二次 onMounted）。
     watch(() => props.token, () => { if (!obs) fetchThumb(); });
     onUnmounted(() => { obs?.disconnect(); if (objUrl) URL.revokeObjectURL(objUrl); });
-    return { url, root };
+    const pixelated = ref(false);
+    const onThumbLoad = (e: Event) => { pixelated.value = thumbLoadPixelated(e); };
+    return { url, root, pixelated, onThumbLoad };
   },
   template: `
-    <img v-if="url" class="gallery-tile-thumb" :src="url" :alt="alt" loading="lazy" />
+    <img v-if="url" class="gallery-tile-thumb" :class="{ pixelated }" :src="url" :alt="alt" loading="lazy" @load="onThumbLoad" />
     <div v-else class="gallery-tile-thumb placeholder" ref="root">{{ fallback }}</div>
   `,
 });

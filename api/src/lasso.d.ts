@@ -168,6 +168,7 @@ export declare class LassoEngine {
     canSetMode(mode: Parameters<FloatingTransform["setMode"]>[0]): boolean;
     flipFloatHorizontal(): void;
     rotateFloat90(): void;
+    nudgeFloat(dx: number, dy: number): void;
     resetFloatTransform(): boolean;
     hitTest(x: number, y: number, screenScale?: number): import("./floating-transform.ts").Hit | null;
     beginDrag(hit: Parameters<FloatingTransform["beginDrag"]>[0], x: number, y: number): void;

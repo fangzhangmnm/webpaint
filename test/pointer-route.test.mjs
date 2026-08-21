@@ -6,7 +6,11 @@ describe("pointer-route · effectiveTool", () => {
   it("transform → lasso（抢画布路由走 gizmo）", () => eq(effectiveTool("transform", false), "lasso"));
   it("alt + brush → picker（临时取色）", () => eq(effectiveTool("brush", true), "picker"));
   it("alt + fill → picker（v0.7.8 油漆桶吸色，吸预览色）", () => eq(effectiveTool("fill", true), "picker"));
-  it("alt 只对 brush/fill 生效", () => { eq(effectiveTool("eraser", true), "eraser"); eq(effectiveTool("lasso", true), "lasso"); });
+  it("alt + shapeBrush → picker（user：形状笔也能 alt 取色）", () => eq(effectiveTool("shapeBrush", true), "picker"));
+  it("alt 只对 brush/fill/shapeBrush 生效（eraser/filterBrush 不扩权）", () => {
+    eq(effectiveTool("eraser", true), "eraser"); eq(effectiveTool("lasso", true), "lasso");
+    eq(effectiveTool("filterBrush", true), "filterBrush");
+  });
   it("其余原样", () => { eq(effectiveTool("brush", false), "brush"); eq(effectiveTool("crop", false), "crop"); });
 });
 
@@ -56,9 +60,10 @@ describe("pointer-route · assignRole", () => {
     eq(role({ pointerType: "touch", penEverSeen: false, singleFingerDraw: true, tool: "brush" }), "draw");
   });
 
-  it("transform → lasso；alt+brush → pick（经 effectiveTool）", () => {
+  it("transform → lasso；alt+brush / alt+shapeBrush → pick（经 effectiveTool）", () => {
     eq(role({ tool: "transform", button: 0 }), "lasso");
     eq(role({ tool: "brush", altDown: true, button: 0 }), "pick");
+    eq(role({ tool: "shapeBrush", altDown: true, button: 0 }), "pick");
   });
 
   it("回归锁：三设备分支对同一非特殊工具给同一 role（旧 map 抄 3 份的去重）", () => {

@@ -88,6 +88,9 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
 
   let _name: string | null = null;
   let _dirty = false;                              // 内存脏：editor 改过、还没落本地（驱动 autosave）
+  let _editEpoch = 0;                              // 编辑代数：onChange 单调递增。persist 用「freeze 时的代数」判定
+                                                   //   清脏是否合法——encode/save 的 await 窗口里进来的编辑绝不被
+                                                   //   乐观清脏吞掉（QA 2026-08-21：busy 期键盘 undo 曾被静默宣布已落盘）。
   let _pushPending = false;                        // 推-pending：自上次成功推后编辑过（驱动退出推；≠内存脏，flushLocal 清内存脏但留 push-pending）
   let _saving = false;                             // 落盘中（防重入/竞态）
   let _timer: ReturnType<typeof setInterval> | null = null;
@@ -99,7 +102,7 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
     if (_onChangeWired) return;
     _onChangeWired = true;
     editor.onChange(() => {
-      _dirty = true; _pushPending = true;
+      _dirty = true; _pushPending = true; _editEpoch++;
       if (pushOn.has("idle")) scheduleIdle();
     });
   }
@@ -127,9 +130,13 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
     //   永不重试、退出时那个专为保存失败设计的「重试/丢弃」循环（session-state 的 while (es.isDirty())）
     //   也被一并解除武装。那是 K2 红线（绝不无条件宣布干净）破在执行它的模块下面一层。
     const wasDirty = _dirty, wasPushPending = _pushPending;
+    // freeze 代数：encode() 的同步前缀就是快照冻结点（此行到调用之间无 await，不可能插进编辑）。
+    //   encode/save 的 await 窗口里若有编辑（busy 只有几何遮罩，键盘 undo/redo 穿得进来），
+    //   代数就会走动 → 下面的清脏/清 push-pending 一律不许执行（宁可多存一轮，绝不假清）。
+    const epochAtFreeze = _editEpoch;
     try {
       const { bytes, peek } = await editor.encode();
-      _dirty = false;                              // 清内存脏：encode 已取快照；期间再改会重新置脏（下轮 autosave 收）
+      if (_editEpoch === epochAtFreeze) _dirty = false;   // 清内存脏：encode 已取快照；快照**之后**的编辑保住脏（下轮 autosave 收）
       // 新建画布/import 首存 → mode:"new"（撞名不静默覆盖，抛 CloudNameCollisionError；saveNow 已 try/catch surface）；成功即转 existing（后续 autosave = 编辑）。
       const mode = _createFor === _name ? "new" : "existing";
       const res = await store.file(_name, { isZip, mode }).save(bytes, { tryPush, hint: peek != null ? { peek } : undefined });
@@ -140,7 +147,7 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
       //    那个队列永不 drain。）
       //   `res?.pushed !== true` 而非 `!res.pushed`：store 没报告结果（旧适配器/mock）时**假定没推上去**，
       //   保住 push-pending 下次重试。宁可多推一次，也不要静默清干净（优先级②）。
-      if (tryPush) _pushPending = res?.pushed !== true;
+      if (tryPush) _pushPending = res?.pushed !== true || _editEpoch !== epochAtFreeze;   // 推上去的是 freeze 快照——之后的编辑还欠一推
       if (_createFor === _name) _createFor = null;   // 首存成功 → 这个身份已建，后续都是编辑
       // 落盘成功 → 通知 app 域字节变了（缩略图等派生缓存作废）。save() 能 resolve = 本地已写成
       //   （push 失败被 store 内部 catch 成 banner，不影响「字节已变」这个事实）。
@@ -149,7 +156,9 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
       // 还原**入场时的真实状态**（不是无脑置脏）：本来脏就继续脏（工作没丢、重试武装着）；
       //   本来干净（force save 一个未改动的 doc）就保持干净，别造一个假的脏 badge。
       //   store.save() 内部已吞掉 push 失败（只 reportError），所以能抛到这里的基本都是"本地也没写成"。
-      _dirty = wasDirty; _pushPending = wasPushPending;
+      //   入场后（await 窗口里）又编辑过 → 无论入场时多干净，现在必须是脏的（epoch 兜底）。
+      _dirty = wasDirty || _editEpoch !== epochAtFreeze;
+      _pushPending = wasPushPending || _editEpoch !== epochAtFreeze;
       throw e;
     } finally {
       _saving = false;

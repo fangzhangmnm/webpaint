@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none">
-<!-- WebPaint 本地 stopgap 补丁 sprite —— 共享库（20260708 SVG Icons）里还没有的图标先用
+<!-- WeebPaint 本地 stopgap 补丁 sprite —— 共享库（20260708 SVG Icons）里还没有的图标先用
      【中文字烤成轮廓 path】顶位（旧协议：占地不解决 pictogram，每条都是过渡态待真图形）。
      字形烤自系统 DroidSansFallbackFull（Apache-2.0），不依赖设备字体，无豆腐块。
 
@@ -10,6 +10,5 @@
      需求登记：全局清单 ../20260708 SVG Icons/TODO.md（美工 agent 的取活处）。
      重新烤制：仓库根跑 python3 tools/bake-stopgap-glyphs.py（SPECS 即声明）。
 -->
-  <symbol id="cut" data-cat="stopgap" data-src="baked:DroidSansFallbackFull(Apache-2.0)/DejaVuSans-Bold(Bitstream-Vera)" data-note="剪切到剪贴板（Ctrl+X，lasso ⋯ 菜单）。真图标建议=剪刀，与 copy/clipboard 同笔重" viewBox="0 0 24 24"><path d="M8.26 3Q9.12 3.86 9.74 4.95H14.18L15.35 3L16.99 3.47L15.97 4.95H20.81V6.35H3.19V4.95H7.95L7.01 3.78ZM17.84 6.9H19.32V12.97Q19.32 15 17.61 15L15.82 14.84L15.51 13.29L17.38 13.52Q17.84 13.52 17.84 12.58ZM12.39 7.13V13.13Q12.39 14.84 10.6 14.84L9.35 14.69L9.04 13.36L10.52 13.52Q10.91 13.52 10.91 12.43H6.08V14.77H4.52V7.13ZM6.08 9.31H10.91V8.53H6.08ZM6.08 11.26H10.91V10.48H6.08ZM14.1 7.44H15.51V12.9H14.1ZM3.82 15.47H19.48Q19.48 19.29 18.97 20.1Q18.47 20.92 16.91 20.92L13.87 20.61L13.64 19.13L16.68 19.44Q17.45 19.44 17.69 19.09Q17.92 18.74 18 16.87H10.75Q9.9 19.75 4.52 21L3.43 19.68Q8.1 18.82 9.12 16.87H3.82Z" fill="currentColor" stroke="none"/></symbol>
-  <symbol id="copy-merged" data-cat="stopgap" data-src="baked:DroidSansFallbackFull(Apache-2.0)/DejaVuSans-Bold(Bitstream-Vera)" data-note="合并复制：合成图∩选区→剪贴板（Ctrl+Shift+C / 双击 Ctrl+C；lasso Row1 常驻钮）。真图标建议=copy 双矩形+多层压扁暗示（所有图层合成）" viewBox="0 0 24 24"><path d="M11.89 3.08 13.49 3.54 12.96 4.15Q16.79 7.21 21 8.9L20.08 10.43Q16.02 8.67 12.04 5.14Q8.44 8.51 3.84 10.58L3 9.2Q9.2 6.29 11.89 3.08ZM6.22 9.66H17.78V11.2H6.22ZM18.47 13.26V20.92H16.94V19.7H6.98V20.92H5.45V13.26ZM6.98 18.24H16.94V14.72H6.98Z" fill="currentColor" stroke="none"/></symbol>
+
 </svg>

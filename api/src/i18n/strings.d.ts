@@ -2400,6 +2400,18 @@ export declare const S: {
         readonly ja: "変形をキャンセル";
         readonly tok: "weka pi ante selo";
     };
+    readonly "sc.nudgeFloat": {
+        readonly zh: "微调浮层（1 像素）";
+        readonly en: "Nudge float (1 px)";
+        readonly ja: "浮遊レイヤーを微調整（1px）";
+        readonly tok: "tawa lili pi lipu sewi";
+    };
+    readonly "sc.nudgeFloat10": {
+        readonly zh: "微调浮层（10 像素）";
+        readonly en: "Nudge float (10 px)";
+        readonly ja: "浮遊レイヤーを微調整（10px）";
+        readonly tok: "tawa lili mute pi lipu sewi";
+    };
     readonly "sc.deselect": {
         readonly zh: "取消选区";
         readonly en: "Deselect";
@@ -6419,6 +6431,18 @@ export declare const S: {
         readonly zh: "盖印（写入但保留浮层，可连击多次叠加）";
         readonly en: "Stamp (writes but keeps the floating layer; tap repeatedly to stack)";
         readonly ja: "スタンプ（書き込み後もフロートを保持、連打で重ねられます）";
+    };
+    readonly "la.applyTf": {
+        readonly zh: "应用变换";
+        readonly en: "Apply transform";
+        readonly ja: "変形を適用";
+        readonly tok: "pini pi ante selo";
+    };
+    readonly "la.cancelTf": {
+        readonly zh: "取消变换";
+        readonly en: "Cancel transform";
+        readonly ja: "変形をキャンセル";
+        readonly tok: "weka pi ante selo";
     };
     readonly "crop.widthPh": {
         readonly zh: "宽px";

@@ -1,7 +1,7 @@
 // Timelapse 核心域：取景框几何 / 采样闸门 / 帧合成（纯数学，node 可测）。
 // spec = ai-docs/20260819-timelapse-spec.md。翻案史勿回 docs/20260727 旧案（分段/预算/consolidation 全废）。
 // ⚡ 2026-08-20 user：调和衰减 park——采样先做平的（固定 2s 窗口），等第一个真视频录出来再论证。
-import { areaResampleBytes } from "../algorithms/resample-bytes.ts";
+import { areaResampleBytes, nearestResampleBytes } from "../algorithms/resample-bytes.ts";
 
 // ---- 取景框（开录 pin 死，中途不可改；改 = 清除重录） ----
 
@@ -93,12 +93,19 @@ export class TimelapseSampler {
 
 /**
  * src = 画布合成图 straight-alpha RGBA。输出 = fw×fh 不透明帧（内容 over 白，白边填充）。
- * 缩放走 areaResampleBytes（面积平均，缩小专业对口；放大=块状，诚实）。
+ * 缩放两向分治（对齐主画布 GL 成文规则「缩小 LINEAR 抗锯齿、放大 NEAREST 看像素」，
+ * gl-compositor.ts 同源）：缩小走 areaResampleBytes（面积平均，专业对口）；放大走
+ * nearestResampleBytes——像素画 upscale 录 timelapse 整数倍完美还原、非整数倍诚实块状
+ * （area 放大是近似盒复制，跨块有混色缝，非整数倍尤其脏——resample-bytes.ts 头注自己都说别用）。
+ * 注：nearest 之后残余的糊来自 H.264 4:2:0 色度下采样（timelapse-encoder.ts 编码器约束），
+ * 不是插值问题，这里救不了。
  */
 export function composeTimelapseFrame(src: Uint8ClampedArray, cw: number, ch: number,
                                       fw: number, fh: number): Uint8ClampedArray {
   const { dx, dy, dw, dh } = timelapseFitRect(cw, ch, fw, fh);
-  const scaled = (dw === cw && dh === ch) ? src : areaResampleBytes(src, cw, ch, dw, dh);
+  const scaled = (dw === cw && dh === ch) ? src
+    : (dw > cw || dh > ch) ? nearestResampleBytes(src, cw, ch, dw, dh)
+    : areaResampleBytes(src, cw, ch, dw, dh);
   const out = new Uint8ClampedArray(fw * fh * 4).fill(255);   // 全白不透明
   for (let y = 0; y < dh; y++) {
     let si = y * dw * 4;

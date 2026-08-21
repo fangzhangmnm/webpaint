@@ -100,6 +100,7 @@ export declare class FloatingTransform {
     private _transformLivePoints;
     flipHorizontal(): void;
     rotate90CCW(): void;
+    nudge(dx: number, dy: number): void;
     resetToCenterOriginal(): boolean;
     private _pushTransformCheckpoint;
     private _bakeDown;

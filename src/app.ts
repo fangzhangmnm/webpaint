@@ -587,5 +587,13 @@ new PwaShell({
     editMode.applyPendingTransient();
     await session.save();   // saveNow 内含 blank/dirty 守卫（es.flushLocal 不脏 no-op）
   },
-  onForeground: () => { pullSettingsAndState(); if (isSignedIn() && session.name) _store.file(sessionFileName(session.name), { isZip: true, mode: "existing" }).pullIfClean().catch(() => {}); },   // 前台：拉 4 库 + 当前文件快进（边界转全名）
+  onForeground: () => {
+    pullSettingsAndState();                                   // 前台：拉 4 库
+    if (isSignedIn() && session.name) _store.file(sessionFileName(session.name), { isZip: true, mode: "existing" }).pullIfClean().catch(() => {});   // 当前文件快进（边界转全名）
+    // 图库开着回前台 → 刷新列表（fire-and-forget，判据同 auth/online 现有姿势）。云端帧只在
+    //   watchFolder 订阅时来一次，不刷的话别的设备的新保存永远看不到——这一刀只让「回前台」变诚实；
+    //   长驻前台的轮询要 store 从被动库变主动 agent = 更大的 ADR（ai-docs/20260528-backlog.md
+    //   「能否在深模块强制」节），本批不做。
+    if (!els.galleryFull.classList.contains("hidden")) gallery.refresh();
+  },
 }).init();

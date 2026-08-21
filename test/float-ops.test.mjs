@@ -189,6 +189,51 @@ describe("S6 · 变换 metadata 微整点（FloatLayerComponent.setTransform）"
   });
 });
 
+// 方向键像素微调（user：「变换的时候可以用上下左右键进行像素坐标精调」）：nudge = doc px 整树平移，
+// 走 _transformLivePoints 模板 → 每按一下一个 undo 整点（无 coalescing，已知取舍）。
+describe("方向键微调 nudge（doc px 平移 + 每按一整点）", () => {
+  it("nudge 平移数学：每次调用 = 一个整点；undo 逐整点回退", () => {
+    const { doc, h, ft, float } = mk();
+    const L = doc.activeLayer;
+    paintRect(L, 20, 20, 40, 40);
+    doc.selection = rectSel(30, 30, 16, 16);
+    ft.lift(L);
+    const d0 = h.depth;
+
+    ft.nudge(1, 0);
+    eq(h.depth, d0 + 1, "一次 nudge = 一个整点");
+    let m = float.view().transform.mesh;
+    eq(m[0][0].x, 31, "TL x +1"); eq(m[0][0].y, 30);
+    eq(m[1][1].x, 47, "BR 同步平移（整树）"); eq(m[1][1].y, 46);
+
+    ft.nudge(0, -10);   // Shift 档步长（input 层给 10）
+    eq(h.depth, d0 + 2, "第二次 nudge = 第二个整点");
+    m = float.view().transform.mesh;
+    eq(m[0][0].x, 31); eq(m[0][0].y, 20, "TL y -10");
+
+    h.undo();
+    eq(float.view().transform.mesh[0][0].y, 30, "undo 回上一步（只回 -10 那步）");
+    h.undo();
+    eq(float.view().transform.mesh[0][0].x, 30, "再 undo 回原位");
+    ft.syncFromWorkpiece();
+    eq(ft._live.mesh[0][0].x, 30, "引擎 live 网格重采纳");
+  });
+
+  it("整数微调保整数刚体态：nudge(3,-2) 后 commit 走置换快路，标记像素逐字节到位", () => {
+    const { doc, ft } = mk();
+    const L = doc.activeLayer;
+    paintRect(L, 20, 20, 40, 40);
+    seedWrite(L, () => L.pixels.putRegion(30, 30, 1, 1, px(1, 2, 3, 255)));   // TL 标记像素（种子）
+    doc.selection = rectSel(30, 30, 16, 16);
+    ft.lift(L);
+    ft.nudge(3, -2);
+    eq(ft.commit(null), true, "整数平移 → CPU 置换快路，无需 bakeFn");
+    const m = L.sampleAt(33, 28);
+    eq(m[0], 1); eq(m[1], 2); eq(m[2], 3); eq(m[3], 255, "标记像素平移 (+3,-2) 到位");
+    eq(L.sampleAt(30, 30)[3], 0, "原位留洞（lift cut）");
+  });
+});
+
 describe("S6 · reject（cancel = identity 写回，非 undo）", () => {
   it("binary mask：lift(cut) → reject → 像素逐字节回原；reject 是可撤销整点", () => {
     const { doc, h, ft, float } = mk();

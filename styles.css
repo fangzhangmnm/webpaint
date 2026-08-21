@@ -2124,6 +2124,10 @@ body[data-mode="gallery"] .board { display: none !important; }
   /* 白纸：alpha 区露白底，跟画在白纸上一样 */
   background: #ffffff;
 }
+/* 像素画缩略图保锐：thumb 生成侧恒不放大 → natural 长边 <128 = 原作本身就这么小（像素画），
+   而 tile ≥150 CSS px 必被浏览器放大 → 默认双线性糊。JS onload 按 naturalWidth/Height 挂本 class
+   （见 gallery.ts thumbLoadPixelated 的阈值论证）。纯渲染属性，暗色主题无关。 */
+.gallery-tile-thumb.pixelated { image-rendering: pixelated; }
 .gallery-tile-thumb.placeholder {
   display: flex; align-items: center; justify-content: center;
   color: rgba(0,0,0,0.35);

@@ -26,8 +26,15 @@ export declare function categoryLabel(id: string): string;
 export declare function colorNameIn(l: string, r: number, g: number, b: number): string;
 /** 默认 culture（按 localization 映射）下这个颜色叫什么（死字符串，烘焙即定）。 */
 export declare function colorNameOf(r: number, g: number, b: number): string;
-/** 颜色名（任意词库 / 色温 / `category:名`）→ hex；认不出 → null。hex 归调用方先走 normalizeHex。 */
+/** 颜色名（任意词库 / 色温 / `category:名`）→ hex；认不出 → null。
+ *  hex 归调用方（UI 输入框统一走下面的 parseColorInput：带 `#` 恒 hex、裸串色名优先）。 */
 export declare function parseColorName(text: string): string | null;
+/** UI 色输入框统一解析（色轮 hex 框 / 导出底色框共用，2026-08-21）：
+ *  · 显式带 `#` → 恒 hex（normalizeHex；非法就 null，色名不掺和）；
+ *  · 裸串 → **先色名**、色名不中再补 `#` 试 hex。
+ *  为什么色名优先：词库（家族色彩库）会持续膨胀，哪天进一个六位纯 hex 字母的词
+ *  （facade/decade 类），旧的「hex 优先」会把它静默当色码吞掉；想要 hex 的用户写 `#` 即恒赢。 */
+export declare function parseColorInput(text: string): string | null;
 /** 候选：色词（name+hex）或词库本身（category——IntelliSense 是 discovery，部分输入 category
  *  名即出「中国传统色:」候选，选中回填前缀继续浏览整板）。 */
 export interface ColorNameHit {

@@ -1,7 +1,7 @@
 import type { History } from "./workpiece/history.ts";
 import type { LayerTree } from "./workpiece/layer-tree.ts";
 import type { LayerTiles, Rect } from "./workpiece/layer-tiles.ts";
-import { type PaintingView, type ViewLeaf } from "./workpiece/painting-view.ts";
+import { type PaintingView, type ViewLeaf, type ViewNode } from "./workpiece/painting-view.ts";
 import { type DocCompositorBytesFn } from "./doc-render.ts";
 export type OpStatus = {
     ok: true;
@@ -21,6 +21,13 @@ export interface RunOpts {
 export type AddLayerResult = {
     ok: true;
     layer: ViewLeaf;
+} | {
+    ok: false;
+    msg?: string;
+};
+export type AddNodeResult = {
+    ok: true;
+    layer: ViewNode;
 } | {
     ok: false;
     msg?: string;
@@ -46,8 +53,9 @@ export declare class LayersFace {
     private _point;
     /** 新建空层（active 同级之上 / active 是组则组内顶；active=新层）。失败：msg="maxLayers"。 */
     addLayer(name?: string, o?: RunOpts): AddLayerResult;
-    /** 复制叶层（插源层之上 + 设 active；tileset 句柄共享零拷贝）。msg="max"|"missing"。 */
-    duplicateLayer(id: number, o?: RunOpts): AddLayerResult;
+    /** 复制节点——叶或组（插源之上 + 设 active；叶 tileset 句柄共享零拷贝、组递归深拷）。
+     *  msg="max"（叶数预算超上限）|"missing"。 */
+    duplicateNode(id: number, o?: RunOpts): AddNodeResult;
     /** 删除叶层（keep-one 守卫：msg="keep-one guard"）。 */
     removeLayer(id: number, _layerName: string, o?: RunOpts): OpStatus;
     /** 删组（连带 children；删到 0 叶自动补一张空层）。 */
@@ -79,9 +87,9 @@ export declare class LayersFace {
         bytes: Uint8ClampedArray;
         rect: Rect;
     } | null, statuses: TreeStatuses, o?: RunOpts): OpStatus;
-    /** 移入组（组内顶部）。 */
+    /** 移入组（保持相对上下：同级下方→组内底、其余→组内顶，见 LayerTree.moveIntoGroup）。 */
     moveIntoGroup(id: number, gid: number, statuses: TreeStatuses, o?: RunOpts): OpStatus;
-    /** 移出组（组同级、组上方）。 */
+    /** 移出组（组同级；组内底→组下方、其余→组上方）。 */
     moveOutOfGroup(id: number, statuses: TreeStatuses, o?: RunOpts): OpStatus;
     /** 按颜色拆分（v0.7.9 explode）：叶同位替换成 n 张新叶。 */
     explodeLayer(id: number, parts: {

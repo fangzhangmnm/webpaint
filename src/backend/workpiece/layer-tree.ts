@@ -207,22 +207,38 @@ export class LayerTree implements CollectorComponent {
     this._nextId = maxId + 1;
   }
 
-  /** 复制叶（props 原样、tileset 句柄共享零拷贝）；插到源上方，active = 副本。null = maxLeaves/源不在。 */
-  duplicateLayer(id: number): TreeLeaf | null {
-    if (this.countLeaves() >= this._maxLeaves()) return null;
-    const src = this.leafById(id);
+  /** 复制节点（叶或组，props 原样）：叶像素 = duplicateTileset 句柄共享零拷贝；组 = 递归深拷
+   *  （每个后代叶各拿新 ref、所有节点发新 id）。插到源上方，active = 副本根。
+   *  null = 叶数预算超 maxLeaves（现叶数+待复制子树叶数）/源不在/像素缺失。
+   *  referenceLayerId 是 doc 级字段不在节点上——复制含参考层的组不改它（副本不会成为参考层）。 */
+  duplicateNode(id: number): TreeNode | null {
+    const src = this.nodeById(id);
     if (!src) return null;
-    const ref = this._tiles.duplicateTileset(src.pixelsRef);
-    if (ref === null) return null;
-    const nid = this._nextId++;
-    const leaf: TreeLeaf = { ...src, id: nid, pixelsRef: ref };
+    let addLeaves = 0;
+    this._eachNode([src], (n) => { if (!isGroupNode(n)) addLeaves++; });
+    if (this.countLeaves() + addLeaves > this._maxLeaves()) return null;
+    // 深拷先攒 refs；任一叶 duplicateTileset 失败 → 整体放弃并释放已拿的 ref（防半成品泄漏）。
+    const refs: number[] = [];
+    const copy = (n: TreeNode): TreeNode | null => {
+      if (isGroupNode(n)) {
+        const children: TreeNode[] = [];
+        for (const c of n.children) { const k = copy(c); if (!k) return null; children.push(k); }
+        return { ...n, id: this._nextId++, children };
+      }
+      const ref = this._tiles.duplicateTileset(n.pixelsRef);
+      if (ref === null) return null;
+      refs.push(ref);
+      return { ...n, id: this._nextId++, pixelsRef: ref };
+    };
+    const dup = copy(src);
+    if (!dup) { for (const r of refs) this._tiles.releaseTileset(r); return null; }
     const next = this._clone(this._json);
     const loc = this._locate(next.nodes, id)!;
-    loc.parentArr.splice(loc.index + 1, 0, leaf);
-    next.activeId = nid;
+    loc.parentArr.splice(loc.index + 1, 0, dup);
+    next.activeId = dup.id;
     this._swapRoot(next);
-    this._tiles.releaseTileset(ref);
-    return this.leafById(nid);
+    for (const r of refs) this._tiles.releaseTileset(r);   // json 已收养（_swapRoot acquire）——净移交
+    return this.nodeById(dup.id);
   }
 
   /** 删叶（keep-one 守卫：最后一叶不删）。active 被删 → 就近换（下方优先）。 */
@@ -288,7 +304,9 @@ export class LayerTree implements CollectorComponent {
     return true;
   }
 
-  /** 移入组（放组内最上）。组不存在/自嵌套 → false。 */
+  /** 移入组，保持相对上下关系（user QA 需求）：与组**同级**且原来在组下方 → 插组内**底**；
+   *  同级在组上方 → 组内**顶**；跨级（不同父）没有可比序 → 沿旧行为放组内顶。
+   *  组不存在/自嵌套 → false。 */
   moveIntoGroup(id: number, gid: number): boolean {
     if (id === gid) return false;
     const g0 = this.nodeById(gid);
@@ -298,23 +316,29 @@ export class LayerTree implements CollectorComponent {
     if (isGroupNode(moving) && this._contains([moving], gid)) return false;   // 组不能进自己后代
     const next = this._clone(this._json);
     const loc = this._locate(next.nodes, id)!;
+    // 判据取**摘出前**的位置：同一 parentArr 且被移层 index 低于组 = 原在组下方。
+    const gloc = this._locate(next.nodes, gid)!;
+    const fromBelow = loc.parentArr === gloc.parentArr && loc.index < gloc.index;
     const [n] = loc.parentArr.splice(loc.index, 1);
     let target: TreeGroup | null = null;
     this._eachNode(next.nodes, (x) => { if (x.id === gid && isGroupNode(x)) target = x; });
     if (!target) return false;   // clone 前查过，防御
-    (target as TreeGroup).children.push(n);
+    if (fromBelow) (target as TreeGroup).children.unshift(n);
+    else (target as TreeGroup).children.push(n);
     this._swapRoot(next);
     return true;
   }
 
-  /** 移出组：提到组的同级、组上方。不在组内 → false。 */
+  /** 移出组：提到组的同级，保持相对上下关系——原在组内**底**（index 0）→ 插组**下方**；
+   *  其余 → 组上方（底出底、顶出顶，与 moveIntoGroup 对偶成往返）。不在组内 → false。 */
   moveOutOfGroup(id: number): boolean {
     const next = this._clone(this._json);
     const loc = this._locate(next.nodes, id);
     if (!loc || loc.parentGroup === null) return false;
+    const wasBottom = loc.index === 0;
     const [n] = loc.parentArr.splice(loc.index, 1);
     const gloc = this._locate(next.nodes, loc.parentGroup.id)!;
-    gloc.parentArr.splice(gloc.index + 1, 0, n);
+    gloc.parentArr.splice(wasBottom ? gloc.index : gloc.index + 1, 0, n);
     this._swapRoot(next);
     return true;
   }

@@ -460,7 +460,9 @@ export const S = {
   "sc.mergeDown":       { zh: "向下合并图层", en: "Merge layer down", ja: "下のレイヤーと結合", tok: "wan e lipu anpa" },
   "sc.pasteLayer":      { zh: "粘贴为新层", en: "Paste as new layer", ja: "新規レイヤーとして貼り付け", tok: "kama jo tawa lipu sin" },
   "sc.applyTransform":  { zh: "应用变换", en: "Apply transform", ja: "変形を適用", tok: "pini pi ante selo" }, 
-  "sc.cancelTransform": { zh: "取消变换", en: "Cancel transform", ja: "変形をキャンセル", tok: "weka pi ante selo" }, 
+  "sc.cancelTransform": { zh: "取消变换", en: "Cancel transform", ja: "変形をキャンセル", tok: "weka pi ante selo" },
+  "sc.nudgeFloat":      { zh: "微调浮层（1 像素）", en: "Nudge float (1 px)", ja: "浮遊レイヤーを微調整（1px）", tok: "tawa lili pi lipu sewi" },
+  "sc.nudgeFloat10":    { zh: "微调浮层（10 像素）", en: "Nudge float (10 px)", ja: "浮遊レイヤーを微調整（10px）", tok: "tawa lili mute pi lipu sewi" },
   "sc.deselect":        { zh: "取消选区", en: "Deselect", ja: "選択を解除", tok: "wile ala" }, 
   "sc.selectAll":       { zh: "全选", en: "Select all", ja: "すべて選択", tok: "wile ale" }, 
   "sc.invert":          { zh: "反选", en: "Invert selection", ja: "選択を反転", tok: "wile ante" }, 
@@ -1187,6 +1189,10 @@ export const S = {
   "la.tfUniform": { zh: "等比缩放", en: "Uniform scale", ja: "等倍スケール" },
   "la.tfDistort": { zh: "透视变换", en: "Perspective transform", ja: "遠近変形" },
   "la.stampTip":  { zh: "盖印（写入但保留浮层，可连击多次叠加）", en: "Stamp (writes but keeps the floating layer; tap repeatedly to stack)", ja: "スタンプ（書き込み後もフロートを保持、連打で重ねられます）" },
+  // ✓/✕ 按钮 tooltip。与 sc.applyTransform/sc.cancelTransform（快捷键表）刻意分键——
+  //   快捷键表文案日后可能带 (Enter)/(Esc) 后缀，tooltip 不跟。tok 措辞抄 sc 那份。
+  "la.applyTf":   { zh: "应用变换", en: "Apply transform", ja: "変形を適用", tok: "pini pi ante selo" },
+  "la.cancelTf":  { zh: "取消变换", en: "Cancel transform", ja: "変形をキャンセル", tok: "weka pi ante selo" },
   // 裁切自定义宽高 placeholder（index.html crop toolbar）
   "crop.widthPh":  { zh: "宽px", en: "W px", ja: "幅px" },
   "crop.heightPh": { zh: "高px", en: "H px", ja: "高px" },

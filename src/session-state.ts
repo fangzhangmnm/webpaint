@@ -39,6 +39,7 @@ import type { GalleryItem } from "./gallery/gallery-model.ts";
 import { t } from "./i18n/index.ts";
 import { createEditorSession, type EditorSession, type StoreLike } from "./editor-session/index.ts";
 import { timelapseDetach, timelapseAdopt, timelapseForSave } from "./timelapse-session.ts";
+import { commitFillNow } from "./fill-mode.ts";
 
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
 
@@ -141,7 +142,7 @@ async function openLocalFile(handle: LocalFileHandle): Promise<File | null> {
 /** Ctrl+S / save 按钮在无地模式的落点：encode → mtime 陈旧对表 → 原子写回句柄。 */
 async function saveLocalFileNow(): Promise<boolean> {
   if (!_localFile) return false;
-  if (editMode.hasPendingTransient()) editMode.applyPendingTransient();
+  _applyPendingForExplicitSave();   // 无地保存全部来自显式动作（implicit 在 saveNow 就 no-op 了）
   if (_loadedDocIsNewer && !_loadedDocNewerConfirmed) {
     const ok = await openConfirmSheet(t("ss.overwriteNewerTitle"), t("ss.overwriteNewerMsg", { writer: String(_loadedDocWriterVer), version: WEEBPAINT_VERSION }));
     if (!ok) { setStatus(t("ss.saveCancelled")); return false; }
@@ -390,14 +391,26 @@ async function _dropCheckpoint(name: string) {
   try { await deleteCheckpoint(checkpointKey(toFull(name))); } catch (e) { reportError(new Error("[checkpoint] cleanup failed: " + String(e)), "log"); }
 }
 
+// 显式保存前收口 pending 状态（QA 2026-08-21 像素图标事故）：fill 预览是第一类持久工具、不在
+//   transient 轴上——此前**任何**保存路径都不 commit 它，「填色→保存」= 填色蒸发；且 Ctrl+S 一路
+//   （saveAndPush）连 transient 都不 apply——浮层变换挂着时会把挖了洞的源层存出去。
+//   只挂**显式**保存/退出：implicit（autosave / pagehide / beforeunload 偷存）保持 interrupt=cancel
+//   语义，不背着用户 commit；换文档（openItem）保持「切换=丢弃」的既有拍板（fill-mode.ts 文件头），
+//   不在本批夹带。commitFillNow 预览没挂着时是 no-op。
+function _applyPendingForExplicitSave() {
+  if (editMode.hasPendingTransient()) editMode.applyPendingTransient();
+  commitFillNow();
+}
+
 // ---- 保存（本地）----
-async function saveNow(opts: { implicit?: boolean } = {}) {
+async function saveNow(opts: { implicit?: boolean; commitPending?: boolean } = {}) {
   // 无地分流：显式保存 → 写回本地文件；implicit（beforeunload 偷存等）→ no-op——
   //   静默写用户磁盘文件违背 Windows 文件语义（Alt+F4 = 不保存，human 拍板）。
   if (_localFile) { if (!opts.implicit) await saveLocalFileNow(); return; }
   if (!_activeSessionName) return;
   if (_docIsBlankUnnamed()) return;
   if (editMode.hasPendingTransient()) { if (opts.implicit) return; editMode.applyPendingTransient(); }
+  if (opts.commitPending && !opts.implicit) commitFillNow();   // 显式保存入口（Ctrl+Shift+S 等）自带收口
   if (_loadedDocIsNewer && !_loadedDocNewerConfirmed) {
     if (opts.implicit) return;
     const ok = await openConfirmSheet(t("ss.overwriteNewerTitle"), t("ss.overwriteNewerMsg", { writer: String(_loadedDocWriterVer), version: WEEBPAINT_VERSION }));
@@ -421,6 +434,7 @@ let _pushInFlight = false;
 async function saveAndPush() {
   if (_localFile) { await saveLocalFileNow(); return; }   // 无地：Ctrl+S/save 按钮 = 写回本地文件（无云腿）
   if (!_activeSessionName) { setStatus(t("ss.noDocCannotSave"), true); return; }
+  _applyPendingForExplicitSave();   // Ctrl+S/save 按钮 = 显式保存：fill 预览 commit + transient apply（QA 2026-08-21）
   // 版本降级守卫：新版本文档未确认 → 只本地不推（saveNow 的 confirm 已挡本地覆盖，这里挡推）。
   if (_loadedDocIsNewer && !_loadedDocNewerConfirmed) {
     await saveNow();
@@ -530,6 +544,9 @@ async function renameCurrentSession({ suggested, reason }: { suggested?: string;
 
 // ---- 退出到图库（推 + 保存失败重试环）----
 async function exitCanvasToGallery() {
+  // 显式离开编辑场景：pending 先收口再落盘（QA 2026-08-21——此前 exit 是先 flushAndPush 再等
+  //   setGalleryOpen 里 apply transient：浮层挖洞的半成品先被推上了云）。
+  _applyPendingForExplicitSave();
   if (!(await leaveLocalFile())) return;   // 无地且脏 → 问；取消 = 留在画布
   if (_activeSessionName) {
     // v409（D-Q6）：退出**只有内容脏/push-pending 才推**；只改 desk（无像素编辑）→ 不推不落本地，
@@ -668,6 +685,12 @@ async function restoreSession(name: string): Promise<boolean> {
   //   并行 pullandreconcile 下，fire and forget 不用 await」）。**绝不 await**：对齐是锦上添花，
   //   不该让开画等网络（且离线/local-only 内部本就 no-op）。
   pullSettingsAndState();
+  // 无地闸（QA 2026-08-21 P0）：restoreSession 曾是唯一没设 _localFile 闸的 es 重绑入口——
+  //   双击 .ora 启动时 launchQueue 的 openLocalFile 先落地、boot 自动恢复慢半拍（等网络/密码）后落地，
+  //   画布被换成上次 session 的画而保存目标仍是用户磁盘文件 → Ctrl+S 把别的画整体写进用户 .ora。
+  //   每个 await 关口后都要重查（openLocalFile 的接管块是同步的，查到就是真接管了）；
+  //   es 适配器的 adopt 里还有最后一道硬闸兜 es.open 内部的窗口。
+  if (_localFile) return false;
   try {
     // 加密件的冷启动/tab 重开契约（v415 核对确认现状即正确，勿"优化"掉）：
     //   ① 先问密码（ensureUnlocked 在 busy 外弹，验的是 peek，便宜）；
@@ -678,7 +701,9 @@ async function restoreSession(name: string): Promise<boolean> {
     //      取消密码常是瞬态的，清了下次冷启动就再也不自动开这张画）——见 boot.ts。
     //   store 侧的两半已有 node 覆盖（seal.test.ts：无密码写抛 LOCKED 绝不静默存明文；锁定读返 null）。
     if (await _file(name).isEncrypted()) { if (!(await ensureUnlocked(name))) return false; }
+    if (_localFile) return false;   // 密码框/加密探测悬着期间本地文件落地 → 让位
     if (!(await es.open(toFull(name)))) return false;   // 文件缺失/锁定 → 未装入。边界转全名。
+    if (_localFile) return false;   // es.open 期间本地文件落地（adopt 硬闸已挡画布；这里别再抢身份）
     _esRebound();
     _setActive(name); _isLazyBlankSession = false; _recomputePhase(); _refreshEncrypted();
     updateSaveStatus();
@@ -689,6 +714,7 @@ async function restoreSession(name: string): Promise<boolean> {
 // 另存为：当前内容写新身份（旧的不动）+ 切到新名继续编辑。
 // 无地模式下另存为 = **收编入库**：无地 doc 获得 store 身份，本地文件留在原处不再跟踪。
 async function saveAs(newName: string): Promise<void> {
+  _applyPendingForExplicitSave();   // 显式保存：fill 预览也收口（topbar 侧只 apply 了 transient）
   const { bytes, peek } = await _encodeCurrentOraWithPeek();
   // 另存为=写**新身份** → mode:"new"（撞名不静默覆盖；topbar 已 nameOccupied 预检，这里 store 层再兜底红线）。
   await _store.file(toFull(newName), { isZip: true, mode: "new" }).save(bytes, { tryPush: true, hint: peek ? { peek } : undefined });
@@ -766,7 +792,14 @@ export function initSession(ctx: AppContext) {
     store: _store as unknown as StoreLike,   // 真 store 结构满足 StoreLike（file/reconcile 超集）；断言解耦
 
     editor: {
-      adopt: async (bytes: Blob) => { const loaded = await decodeOraToPainting(bytes) as LoadedDoc; adoptModel(loaded); },
+      adopt: async (bytes: Blob) => {
+        const loaded = await decodeOraToPainting(bytes) as LoadedDoc;
+        // 无地硬闸（QA 2026-08-21 P0）：decode 的 await 期间本地文件接管了画布 → 这次 adopt 再落地
+        //   就是「画布=store 画、保存目标=用户磁盘文件」的撕裂态（Ctrl+S 会把别的画写进用户 .ora）。
+        //   抛错让 es.open 按「没开成」收场（restoreSession/openItem 都已按 false 处理）。
+        if (_localFile) throw new Error("[session] adopt blocked: local-file session took over the canvas");
+        adoptModel(loaded);
+      },
       encode: async () => await _encodeCurrentOraWithPeek(),
       // 字节落盘成功 → 作废该画的缩略图缓存 + 广播（gallery 在世 tile 原地重取，getPeek 本地优先
       //   = 刚写的字节）。覆盖显式保存/autosave/退出 flush 全路径（v0.10.2 缩略图冻结根修）。

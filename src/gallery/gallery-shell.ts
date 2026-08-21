@@ -22,6 +22,7 @@ import { reportError } from "../error-badge.ts";
 import { els } from "../els.ts";
 import { readImageFromClipboard } from "../session.ts";
 import { uniqueBareName } from "./gallery-model.ts";   // 撞名后缀兜底（纯·已 pin）；占用检查按库身份（全名 X.ora）查
+import { humanSize } from "./gallery-view-model.ts";   // 展示格式化（纯·KiB/MiB）；此前本模块私有一份逐字节拷贝，2026-08-21 收敛
 import { isSignedIn } from "../app-store.ts";
 import { anchorPopupToBtn } from "../anchored-popup.ts";
 import { wireInlineSelect } from "../inline-select.ts";
@@ -51,9 +52,12 @@ function _galleryChrome(view: string) {
 
 export async function setGalleryOpen(open: boolean) {
   if (open) {
-    // 进图库 = 用户离开编辑场景 → apply 所有 pending transient（套索浮层等）+ 保存
+    // 进图库 = 用户离开编辑场景 → apply 所有 pending transient（套索浮层等）+ 保存。
+    // implicit（QA 2026-08-21 P0）：这句是兜底保存，不是用户显式动作——boot 失败路径也会走到这里，
+    //   无地模式下必须 no-op（saveNow 的 implicit 门），否则会在无用户手势时静默写用户磁盘文件
+    //   （违反无地 spec §7.1「Alt+F4=不保存」拍板）。显式退出的保存在 exitCanvasToGallery 已做完。
     editMode.applyPendingTransient();
-    if (session.dirty) await session.save();
+    if (session.dirty) await session.save({ implicit: true });
     await session.awaitCloudPushIdle();   // 等 cloud push 完，防 status race
     document.body.dataset.mode = "gallery";
     els.galleryFull.classList.remove("hidden");
@@ -62,7 +66,7 @@ export async function setGalleryOpen(open: boolean) {
     updateIdbUsage();
   } else {
     editMode.applyPendingTransient();
-    if (session.dirty) await session.save();
+    if (session.dirty) await session.save({ implicit: true });   // 同上：兜底非显式，无地必须 no-op
     els.galleryFull.classList.add("hidden");
     delete document.body.dataset.mode;
     // 关闭可能打开的 popup
@@ -164,15 +168,8 @@ export async function checkQuotaAndWarn() {
   } catch {}
 }
 
-// （humanTime 死码已删 2026-06：gallery-shell 无调用者；展示用的 humanTime 在 gallery-view-model.ts。）
-function humanSize(b: number | null | undefined): string {
-  if (b == null) return "?";
-  if (b === 0) return "0 B";
-  if (b < 1024) return `${b} B`;
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)} KB`;
-  if (b < 1024 * 1024 * 1024) return `${(b / 1048576).toFixed(1)} MB`;
-  return `${(b / 1073741824).toFixed(2)} GB`;
-}
+// （humanTime 死码已删 2026-06：gallery-shell 无调用者；展示用的 humanTime 在 gallery-view-model.ts。
+//   本地那份逐字节复制的 humanSize 也删了 2026-08-21——统一 import gallery-view-model 那份，单位 KiB/MiB。）
 
 // 拿一个不占用的名字（X / X 1 / X 2 / ...）。
 //   走 store.files.nameOccupied = **唯一权威**占用检查（本地 + 在线时云端；本地命中即短路，

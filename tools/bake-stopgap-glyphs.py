@@ -47,11 +47,9 @@ def text_path(text, box, font='cjk'):
 
 # (id, 文字, 盒, 语义 note)
 SPECS = [
-    # 2026-08-19 图标收货：fill-gap/reset-transform/timelapse-record/pause/play/replay 六枚真图入库
-    # （media 批 + 工单批，见库仓 63087ff），stopgap 再度**清零**。历史见 git。
-    # 2026-08-19 晚 剪贴板正宫化（v0.9.22，spec ai-docs/20260819-clipboard-and-local-file-spec.md）两枚：
-    ("cut", "剪", (3, 3, 18, 18), "剪切到剪贴板（Ctrl+X，lasso ⋯ 菜单）。真图标建议=剪刀，与 copy/clipboard 同笔重"),
-    ("copy-merged", "合", (3, 3, 18, 18), "合并复制：合成图∩选区→剪贴板（Ctrl+Shift+C / 双击 Ctrl+C；lasso Row1 常驻钮）。真图标建议=copy 双矩形+多层压扁暗示（所有图层合成）"),
+    # 2026-08-21 图标收货：cut（剪刀 CCW145）/copy-picture（copy+画片，原登记名 copy-merged 甲方定名改之）
+    # 两枚真图入库（库仓 5976d20），stopgap 再度**清零**。历史见 git。
+    # 注意：收货同时 index.html 的 <use href="#copy-merged"> 已改 #copy-picture（id 随甲方定名走）。
 ]
 syms = []
 for sid, text, box, note in SPECS:

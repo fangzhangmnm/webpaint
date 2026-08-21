@@ -450,6 +450,12 @@ export class FloatingTransform {
   }
   flipHorizontal() { this._transformLivePoints((p, cx, _cy) => ({ x: 2 * cx - p.x, y: p.y })); }
   rotate90CCW()    { this._transformLivePoints((p, cx, cy) => ({ x: cx + (p.y - cy), y: cy - (p.x - cx) })); }
+  // 方向键像素微调（user：「变换的时候可以用上下左右键进行像素坐标精调」）：整树平移 (dx,dy)。
+  //   步长单位 = doc px——"像素坐标精调"的语义就是文档像素，不做屏幕 px 换算（缩放视图下 1px 就是
+  //   1 个 texel，这正是精调要的）。整数步长在整数刚体态下天然保刚体（wasRigid 的 round 是恒等），
+  //   置换快路不丢。已知取舍：每按一下 = 一个 undo 整点（同 flip/rotate90 的事务节奏），长按连发
+  //   会攒一串整点，无 coalescing——接受，先按简单做。
+  nudge(dx: number, dy: number) { this._transformLivePoints((p) => ({ x: p.x + dx, y: p.y + dy })); }
 
   // v0.7.37（user：「reset scale + rot + align to center」）：一键复位——尺寸回 float 原始 rect
   // （union AABB，同 lift 初始），画布居中，缩放/旋转/透视全清。全整数坐标 → 整数刚体态 →

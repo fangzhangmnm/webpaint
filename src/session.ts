@@ -1,6 +1,7 @@
 // Session 管理：当前 session 名的读写面 + 缩略图渲染 + 导出下载 / 分享。
 //
-// **当前 session 名**：SSoT = `appState.currentFile`（synced-app-state collection，跨设备 resume）。
+// **当前 session 名**：SSoT = `appState.currentFile`（**local-app-state** collection，v438 起 device-local——
+//   synced 会让远端设备驾驶本机驱逐守卫，见 app-state.ts 头注释）。
 //   ⚠ 不是 localStorage —— v406 起迁进 collection 了，别信任何还说 "localStorage 记当前 name" 的注释。
 //   默认 "未命名"。重名直接覆盖。
 //
@@ -37,7 +38,7 @@ type FileShareNavigator = Navigator & {
 
 
 // gallery-first: 空字符串 = 没活动 session（在 gallery）。
-// active session = appState.currentFile（synced-app-state，非 null → boot 自动 open；跨设备 resume）。
+// active session = appState.currentFile（local-app-state，device-local v438；非 null → boot 自动 open）。
 //   null/未设 → 返 ""（停 gallery，等用户选）。try/catch 兜 pre-init（collection 未 hydrate 时 setItem 抛）。
 export function getCurrentSessionName() {
   try { return appState.currentFile ?? ""; }

@@ -19,6 +19,7 @@ export type OpStatus = { ok: true } | { ok: false; msg?: string };
 export interface TreeStatuses { undoStatus?: string; redoStatus?: string }
 export interface RunOpts { checkpoint?: boolean; label?: string; statuses?: TreeStatuses }
 export type AddLayerResult = { ok: true; layer: ViewLeaf } | { ok: false; msg?: string };
+export type AddNodeResult = { ok: true; layer: ViewNode } | { ok: false; msg?: string };
 
 export class LayersFace {
   private _history: History;
@@ -63,13 +64,14 @@ export class LayersFace {
     return { ok: true, layer: this._port.findLayer(r.value.id) as ViewLeaf };
   }
 
-  /** 复制叶层（插源层之上 + 设 active；tileset 句柄共享零拷贝）。msg="max"|"missing"。 */
-  duplicateLayer(id: number, o?: RunOpts): AddLayerResult {
-    if (!this._tree.leafById(id)) return { ok: false, msg: "missing" };
-    const r = this._point("duplicateLayer", o, () => this._tree.duplicateLayer(id));
+  /** 复制节点——叶或组（插源之上 + 设 active；叶 tileset 句柄共享零拷贝、组递归深拷）。
+   *  msg="max"（叶数预算超上限）|"missing"。 */
+  duplicateNode(id: number, o?: RunOpts): AddNodeResult {
+    if (!this._tree.nodeById(id)) return { ok: false, msg: "missing" };
+    const r = this._point("duplicateNode", o, () => this._tree.duplicateNode(id));
     if (!r.ok) return { ok: false, msg: r.msg };
     if (!r.value) return { ok: false, msg: "max" };
-    return { ok: true, layer: this._port.findLayer(r.value.id) as ViewLeaf };
+    return { ok: true, layer: this._port.findLayer(r.value.id)! };
   }
 
   /** 删除叶层（keep-one 守卫：msg="keep-one guard"）。 */
@@ -186,14 +188,14 @@ export class LayersFace {
     return r.value ? { ok: true } : { ok: false, msg: "not-group" };
   }
 
-  /** 移入组（组内顶部）。 */
+  /** 移入组（保持相对上下：同级下方→组内底、其余→组内顶，见 LayerTree.moveIntoGroup）。 */
   moveIntoGroup(id: number, gid: number, statuses: TreeStatuses, o?: RunOpts): OpStatus {
     const r = this._point("moveIntoGroup", { ...o, statuses }, () => this._tree.moveIntoGroup(id, gid));
     if (!r.ok) return { ok: false, msg: r.msg };
     return r.value ? { ok: true } : { ok: false, msg: "cannot move" };
   }
 
-  /** 移出组（组同级、组上方）。 */
+  /** 移出组（组同级；组内底→组下方、其余→组上方）。 */
   moveOutOfGroup(id: number, statuses: TreeStatuses, o?: RunOpts): OpStatus {
     const r = this._point("moveOutOfGroup", { ...o, statuses }, () => this._tree.moveOutOfGroup(id));
     if (!r.ok) return { ok: false, msg: r.msg };

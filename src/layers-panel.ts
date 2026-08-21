@@ -287,12 +287,13 @@ function _moveLayerDelta(L: LayerNode | null, delta: number) {
   if (!st.ok) return;
   _afterDocChange();
 }
-// v267 复制图层：模型 op 归 doc.duplicateLayer；记账（undo 摘新层时才捕 spec、
-//   redo 经 insertLayerAt 连像素恢复）已随 args 舞蹈下沉进 layers.duplicateLayer。
+// v267 复制图层（v0.10.14 放宽到组：递归深拷，记账/undo 归 layers.duplicateNode）。
+// 前置检查按叶数**预算**：组副本带出组内全部叶，现叶数+待复制叶数超上限就拒（与 tree verb 同门）。
 function _duplicateLayer(L: LayerNode | null) {
   if (!L) return;
-  if (countViewLeaves(doc.layers) >= doc.maxLayers) { setStatus(t("lp.st.maxLayers", { n: doc.maxLayers })); return; }
-  if (!layers.duplicateLayer(L.id).ok) return;
+  const addLeaves = L.isGroup ? countViewLeaves(L.children!) : 1;
+  if (countViewLeaves(doc.layers) + addLeaves > doc.maxLayers) { setStatus(t("lp.st.maxLayers", { n: doc.maxLayers })); return; }
+  if (!layers.duplicateNode(L.id).ok) return;
   _afterDocChange();
   setStatus(t("lp.st.duplicated", { name: L.name }));
 }
@@ -577,8 +578,8 @@ const LayerRow = defineComponent({
       <Teleport to="body"><div v-if="menuOpen" ref="menuEl" class="menu-panel layer-tools-popup" @click.stop>
         <button class="menu-item menu-item-with-icon" type="button" @click="act('rename')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#rename"/></svg><span class="menu-item-label">{{ L.rename }}</span></button>
 
-        <!-- 叶专属：复制 -->
-        <button v-if="!isGroup" class="menu-item menu-item-with-icon" type="button" :disabled="!canDuplicate" @click="act('duplicate')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#copy"/></svg><span class="menu-item-label">{{ L.duplicate }}</span></button>
+        <!-- 复制（叶+组皆可；组=递归深拷，disabled 按叶数预算） -->
+        <button class="menu-item menu-item-with-icon" type="button" :disabled="!canDuplicate" @click="act('duplicate')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#copy"/></svg><span class="menu-item-label">{{ L.duplicate }}</span></button>
 
         <!-- 图层组 reparent：解组（仅组）/ 移入某组（dropdown，不挤占菜单空间）/ 移出组。编组 = 「+」里新建空组 -->
         <hr class="menu-sep" v-if="isGroup || moveTargets.length || canMoveOut" />
@@ -665,7 +666,9 @@ const LayersPanel = defineComponent({
           };
           if (n.isGroup) {
             const collapsed = layersUi.collapsedIds.has(n.id);
-            out.push({ ...base, collapsed, isRef: false, canDuplicate: false, canMergeDown: false, hasPx: false, childLeafCount: countViewLeaves(n.children) });
+            const childLeaves = countViewLeaves(n.children);
+            // 组可复制：叶数预算（现叶数+组内叶数）不超上限（空组恒可复制——预算 +0）。
+            out.push({ ...base, collapsed, isRef: false, canDuplicate: totalLeaves + childLeaves <= doc.maxLayers, canMergeDown: false, hasPx: false, childLeafCount: childLeaves });
             if (!collapsed) walk(n.children!, depth + 1, n);
           } else {
             out.push({

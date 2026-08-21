@@ -28,6 +28,7 @@ import { signIn, isAuthConfigured } from "./app-store.ts";   // auth 是公共�
 import { sessionNameConflict } from "./session-name.ts";
 import { supportsFileSystemAccess, pickLocalOraFile } from "./local-file-session.ts";
 import { anchorPopupToBtn } from "./anchored-popup.ts";
+import { isBusyActive } from "./fullscreen-busy.ts";
 import { reportError } from "./error-badge.ts";
 import { decodeOraToPainting } from "./backend/ora.ts";
 import { t } from "./i18n/index.ts";
@@ -100,8 +101,10 @@ export function initTopbarMenu(ctx: AppContext) {
   // Ctrl+S = 完整保存（本地 + 云端）；Ctrl+Shift+S = 只存本地（不推云）。合流状态机在 Store（_store.session）。
   window.addEventListener("keydown", (e: KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
-      e.preventDefault();
-      if (e.shiftKey) session.save(); else session.saveAndPush();   // Ctrl+Shift+S=只本地；Ctrl+S=存+推
+      e.preventDefault();               // busy 期也吞掉，否则漏给浏览器的「保存网页」
+      if (isBusyActive()) return;       // busy 遮罩挡不住 window keydown（QA 2026-08-21）
+      // commitPending：Ctrl+Shift+S 也是显式保存 → fill 预览一并收口（saveAndPush 在 session 内自收）
+      if (e.shiftKey) session.save({ commitPending: true }); else session.saveAndPush();   // Ctrl+Shift+S=只本地；Ctrl+S=存+推
     }
   });
   // autosave configure/start + visibility/pagehide flush 已切到 session-state.ts initSession。

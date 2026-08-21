@@ -2,7 +2,7 @@
 // （区分 layer-tree-json.test.mjs——那是 v2 树组件的 verb 契约；本文件测 workpiece.layers 门面 =
 //   app 调用面的「写即记账」行为：undo/redo 往返、checkpoint 聚合、keep-one、hint 文案。）
 // 迁移自旧 operator-流版（v0.8.1 S1）——锚语义逐条保留：
-//   - addLayer/duplicateLayer = 创建即记账（undo 摘层回 prevActive、redo 连像素恢复——像素随
+//   - addLayer/duplicateNode = 创建即记账（undo 摘层回 prevActive、redo 连像素恢复——像素随
 //     tileset 在 record 根里保活，v2 天然给出旧「undo 摘层时才捕 spec」的效果）；
 //   - deleteGroup 删到 0 叶自动补空层；removeLayer keep-one 守卫透传；
 //   - checkpoint:false 微步聚合（import 单整点语义 v0.7.41）；
@@ -83,12 +83,12 @@ describe("workpiece-layer-tree · addLayer（创建即记账）", () => {
   });
 });
 
-describe("workpiece-layer-tree · duplicateLayer", () => {
-  it("复制含像素 → undo/redo 往返", () => {
+describe("workpiece-layer-tree · duplicateNode", () => {
+  it("复制叶含像素 → undo/redo 往返", () => {
     const { doc, h, lt } = mk();
     const src = doc.activeLayer;
     seedWrite(src, () => src.pixels.putRegion(3, 3, 1, 1, px(1, 2, 3, 255)));   // 基线内容（种子，不入 undo——C7 硬化后走显式态）
-    const a = lt.duplicateLayer(src.id);
+    const a = lt.duplicateNode(src.id);
     assert(a.ok, "duplicate ok");
     eq(readPx(a.layer, 3, 3), "1,2,3,255", "像素已复制");
     h.undo();
@@ -97,9 +97,27 @@ describe("workpiece-layer-tree · duplicateLayer", () => {
     h.redo();
     eq(countViewLeaves(doc.layers), 2, "redo 恢复");
   });
+  it("复制组：递归深拷含像素 → undo/redo 往返", () => {
+    const { doc, h, lt } = mk();
+    const leaf = doc.activeLayer;
+    seedWrite(leaf, () => leaf.pixels.putRegion(2, 2, 1, 1, px(5, 6, 7, 255)));
+    const g = lt.addGroup("组");
+    assert(g.ok, "建组");
+    assert(lt.moveIntoGroup(leaf.id, g.groupId, {}).ok, "叶移入");
+    const r = lt.duplicateNode(g.groupId);
+    assert(r.ok, "组可复制");
+    assert(r.layer.isGroup, "副本是组");
+    eq(r.layer.name, "组", "名字照抄原名（与叶 duplicate 一致不改名）");
+    eq(countViewLeaves(doc.layers), 2, "副本带出组内叶");
+    eq(readPx(r.layer.children[0], 2, 2), "5,6,7,255", "后代叶像素已复制");
+    h.undo();
+    eq(countViewLeaves(doc.layers), 1, "undo 摘副本组");
+    h.redo();
+    eq(countViewLeaves(doc.layers), 2, "redo 恢复");
+  });
   it("复制缺失 id → {ok:false,'missing'}", () => {
     const { lt } = mk();
-    eq(lt.duplicateLayer(99999).msg, "missing", "reason 透传");
+    eq(lt.duplicateNode(99999).msg, "missing", "reason 透传");
   });
 });
 

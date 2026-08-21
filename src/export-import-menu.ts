@@ -10,8 +10,7 @@
 // app 协作件经 ctx 绑入：doc / setStatus（核心单例）。
 
 import { getExporter, listExportersByKind } from "./exporters.ts";
-import { parseColorName, colorNameOf } from "./color-name.ts";
-import { normalizeHex } from "./ui/color-model.ts";
+import { parseColorInput, colorNameOf } from "./color-name.ts";
 import { parseExportBg } from "./backend/algorithms/flatten-bg.ts";
 import { els } from "./els.ts";
 import { t } from "./i18n/index.ts";
@@ -254,7 +253,7 @@ export function initExportImportMenu(ctx: AppContext) {
       if (!proj && bgChecked) {
         if (bgChecked.value !== "custom") desk.export.bg = bgChecked.value;
         else {
-          const parsed = normalizeHex(bgInput.value) ?? parseColorName(bgInput.value);
+          const parsed = parseColorInput(bgInput.value);   // 带#恒hex / 裸串先色名（口径同色轮 hex 框）
           if (parsed) desk.export.bg = parsed;
         }
       }
