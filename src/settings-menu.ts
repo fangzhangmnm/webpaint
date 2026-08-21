@@ -19,7 +19,7 @@ import { wireInlineSelect } from "./inline-select.ts";
 import { openInputSheet } from "./sheets.ts";
 import { reportError } from "./error-badge.ts";   // 全 app 唯一错误汇拢点（CLAUDE.md）
 import { initInstallCapture, bindInstallButton } from "./install-prompt.ts";
-import { isCloudEnabled, setCloudEnabled } from "./cloud-capability.ts";
+import { isCloudEnabled, setCloudEnabled, CLOUD_CAPABILITY_EVENT } from "./cloud-capability.ts";
 import { isAuthConfigured, isSignedIn } from "./app-store.ts";   // auth 公共面（cloud-auth-ui 同款直连）
 import { session } from "./session-state.ts";   // 云开关关闭前 flush（saveAndPush）用；只调不改
 import type { AppContext } from "./app-context.ts";
@@ -133,9 +133,21 @@ function renderCloudEnabled() {
   btn.title = configured ? "" : t("menu.cloudUnavailableTitle");
   const st = btn.querySelector('[data-state-for="cloudEnabled"]');
   if (st) st.textContent = configured ? (on ? t("common.on") : t("common.off")) : t("common.off");
-  // gating ①：菜单「图库」项显隐（图库藏了 → 云账号 popup 等云 UI 一并不可达）
-  els.menuGallery?.classList.toggle("hidden", !on);
+  applyCloudCapabilityGating();
 }
+
+// gating 显隐的**唯一集中点**（v1.1，2026-08-21 headless 实锤修）：菜单项显隐机制是 `hidden` **属性**
+//   （styles.css:850 `.menu-item[hidden]{display:none}`）——v1 用 `.hidden` class 藏 menuGallery，
+//   而全仓没有全局 .hidden 规则、.menu-item 自身 display:flex 胜出 → 藏了个寂寞。此类显隐一律走属性。
+//   订阅 CLOUD_CAPABILITY_EVENT：将来任何地方切开关，这里一处重贴全部 UI。
+function applyCloudCapabilityGating() {
+  const on = isCloudEnabled();
+  if (els.menuGallery) els.menuGallery.hidden = !on;                   // 图库入口（云账号 popup 等随图库一并不可达）
+  const cloudImport = document.getElementById("layerImportCloudBtn");  // 图层面板「从云盘导入…」
+  if (cloudImport) (cloudImport as HTMLButtonElement).hidden = !on;
+  document.getElementById("referencePanel")?.toggleAttribute("no-cloud", !on);   // 参考窗云盘选图钮（组件观察属性）
+}
+window.addEventListener(CLOUD_CAPABILITY_EVENT, applyCloudCapabilityGating);
 
 // v124 快捷键 sheet：从 KEYBOARD_SHORTCUTS 自动渲染（input.js 注册的唯一真理源）
 const _shortcutsSheet = document.getElementById("shortcutsSheet");
@@ -284,9 +296,13 @@ export function initSettingsMenu(ctx: AppContext) {
     if (!isAuthConfigured()) return;   // 灰显强制关：容器不支持云，点了也不动用户存值
     const next = !isCloudEnabled();
     if (!next && session.name) {
-      // 关闭前 flush：有活动 store 画 → 先存+推；没推成（内存脏残留 / 云腿仍 pending）→ 提示并**不切换**。
-      //   未登录时 pushPending 恒不成立（computeSaveState 同判据）——本地落盘成功即可关。
-      try { await session.saveAndPush(); } catch { /* saveAndPush 内部已 surface；下面判据兜底 */ }
+      // 关闭前 flush：有活动 store 画 → 先存（登录着才带云腿；**未登录只本地**——v1.1 headless 实锤：
+      //   未登录跑 saveAndPush 会让云腿把「Not signed in」推上红 banner，关云的动作自己先炸一条云错误）。
+      //   没落成（内存脏残留 / 登录态云腿仍 pending）→ 提示并**不切换**。
+      try {
+        if (isSignedIn()) await session.saveAndPush();
+        else await session.save({ commitPending: true });
+      } catch { /* 内部已 surface；下面判据兜底 */ }
       if (session.dirty || (isSignedIn() && session.pushPending)) {
         setStatus(t("status.cloudOffFlushFailed"), true);
         renderCloudEnabled();

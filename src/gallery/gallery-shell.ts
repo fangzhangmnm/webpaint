@@ -18,6 +18,7 @@
 //   直接 import（leaf/singleton）。
 
 import { session } from "../session-state.ts";
+import { isCloudEnabled } from "../cloud-capability.ts";
 import { reportError } from "../error-badge.ts";
 import { els } from "../els.ts";
 import { readImageFromClipboard } from "../session.ts";
@@ -52,6 +53,9 @@ function _galleryChrome(view: string) {
 
 export async function setGalleryOpen(open: boolean) {
   if (open) {
+    // 云功能关（cloud-capability v1.1）：图库整体停用——入口都已显隐/短路，这里是**中央兜底闸**
+    //   （防未来新增调用点漏 gate；关=false 分支永不拦，回画布必须永远可行）。纯 UI gating 零数据变更。
+    if (!isCloudEnabled()) { setStatus(t("gs.cloudDisabledNoGallery"), true); return; }
     // 进图库 = 用户离开编辑场景 → apply 所有 pending transient（套索浮层等）+ 保存。
     // implicit（QA 2026-08-21 P0）：这句是兜底保存，不是用户显式动作——boot 失败路径也会走到这里，
     //   无地模式下必须 no-op（saveNow 的 implicit 门），否则会在无用户手势时静默写用户磁盘文件

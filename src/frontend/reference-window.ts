@@ -143,7 +143,7 @@ canvas:active { cursor: grabbing; }
 </div>`;
 
 export class WpReferenceWindow extends HTMLElement {
-  static get observedAttributes() { return ["open"]; }
+  static get observedAttributes() { return ["open", "no-cloud"]; }   // no-cloud：宿主云功能关 → 藏云盘选图钮（2026-08-21 cloud-capability v1.1）
 
   // 宿主可换的 pull 端口（手势中查询宿主态；见约定 doc「pull 例外」）
   queryLongPressPick: () => boolean = () => false;
@@ -192,6 +192,11 @@ export class WpReferenceWindow extends HTMLElement {
   get open(): boolean { return this.hasAttribute("open"); }
   set open(v: boolean) { this.toggleAttribute("open", !!v); }
   attributeChangedCallback(name: string, oldV: string | null, newV: string | null) {
+    if (name === "no-cloud") {
+      const b = this.shadowRoot?.querySelector('[data-act="cloud"]') as HTMLElement | null;
+      if (b) b.style.display = newV != null ? "none" : "";
+      return;
+    }
     if (name === "open" && oldV !== newV && newV != null) this._afterShow();
   }
   close() { this.open = false; }   // ReferenceWindowHandle 兼容（程序性）

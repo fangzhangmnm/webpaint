@@ -18,6 +18,7 @@ import { els } from "./els.ts";
 import { t } from "./i18n/index.ts";
 import { setMenuOpen } from "./settings-menu.ts";
 import { session } from "./session-state.ts";
+import { isCloudEnabled } from "./cloud-capability.ts";
 import { openChoiceSheet } from "./sheets.ts";
 import { runSaveAsFlow } from "./topbar-menu.ts";   // hub「复制一份到图库」= 原另存为（逻辑在 topbar-menu，红线原样）
 import { supportsSaveFilePicker, pickSaveOraFile, writeHandleBlob } from "./local-file-session.ts";
@@ -253,7 +254,8 @@ export function initExportImportMenu(ctx: AppContext) {
       [
         { label: t("tm.hubExportImage", { cfg }), value: "image", primary: true },
         { label: enc ? t("tm.hubSaveLocalOraPlain") : t("tm.hubSaveLocalOra"), value: "local" },
-        { label: t("tm.hubCopyToGallery"), value: "gallery" },
+        // 云功能关 → 图库不可见，「复制一份到图库」一并收（cloud-capability v1.1 gating）
+        ...(isCloudEnabled() ? [{ label: t("tm.hubCopyToGallery"), value: "gallery" as const }] : []),
       ],
     );
     if (choice === "image") await runConfiguredExport();

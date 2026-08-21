@@ -922,7 +922,9 @@ export const S = {
   "gs.footUsage": { zh: "作品占用：{size}（{count} 件）", en: "Artwork usage: {size} ({count} items)", ja: "作品の使用量：{size}（{count} 件）", tok: "suli awen: {size} ({count} sitelen)" }, 
   "gs.footUsageTitle": { zh: "浏览器分配上限约 {size}；当前 {pct}% 已用（含 SW 缓存等）", en: "Browser allocation cap ~{size}; {pct}% used now (incl. SW cache, etc.)", ja: "ブラウザ割り当て上限は約 {size}；現在 {pct}% 使用中（SW キャッシュ等を含む）", tok: "ilo lukin li pana e poki pi suli {size}. {pct}% li kepeken." }, 
   "gs.usedSuffix": { zh: " · 已用 {pct}%", en: " · {pct}% used", ja: " · {pct}% 使用", tok: " · {pct}% li kepeken" }, 
-  "gs.usageUnknown": { zh: "占用：未知", en: "Usage: unknown", ja: "使用量：不明", tok: "suli awen: mi sona ala" }, 
+  "gs.usageUnknown": { zh: "占用：未知", en: "Usage: unknown", ja: "使用量：不明", tok: "suli awen: mi sona ala" },
+  // cloud-capability v1.1：setGalleryOpen(true) 中央兜底闸（理论不可达——入口都已显隐/短路；防漏 gate）
+  "gs.cloudDisabledNoGallery": { zh: "云端功能已停用，图库不可用（可在设置里重新开启）", en: "Cloud features are disabled; the gallery is unavailable (re-enable in settings)", ja: "クラウド機能が無効のため、ギャラリーは利用できません（設定で再度有効化できます）", tok: "ilo sewi li lape la, poki sitelen li ken ala. (o open e ona lon lawa)" }, 
   "gs.quotaCritical": { zh: "本地存储 {pct}% 已满 — 立即去图库卸载不常用的作品", en: "Local storage {pct}% full — go to the gallery now and offload works you rarely use", ja: "ローカルストレージが {pct}% 使用済み — 今すぐギャラリーで使わない作品を退避してください", tok: "poki pi ilo ni li kama ale ({pct}%)! o tawa tomo sitelen. o weka e sitelen pi kepeken ala tan ilo ni." }, 
   "gs.quotaWarn": { zh: "本地存储 {pct}% 已用 — 建议在图库整理", en: "Local storage {pct}% used — consider tidying up in the gallery", ja: "ローカルストレージが {pct}% 使用済み — ギャラリーで整理することをおすすめします", tok: "poki pi ilo ni li kama mute ({pct}%). o lukin e tomo sitelen." }, 
   "gs.lockLabel": { zh: "锁定加密作品（忘掉密码）", en: "Lock encrypted works (forget password)", ja: "暗号化作品をロック（パスワードを破棄）", tok: "o pini e sitelen len (mi weka e nimi len tan lawa mi)" }, 
