@@ -62,3 +62,17 @@ user 原话定性：「是wp的红线区错误：你上传好之后gallery点开
 - 单测：dirty ∧ cloudMoved → open 必弹（onNewer 被调、choice 生效）；clean ∧ cloudMoved → 静默快进拉云端；dirty ∧ !base ∧ hasCloud → 弹；clean ∧ !base ∧ hasCloud → 快进不弹；离线 → 现状（秒开本地）不回归。
 - 真机复现脚本（本次事故同款）：iPad/桌面 WP 打开某文件留 dirty 本地副本 → 另一端（OneDrive 桌面镜像放新字节）更新云端同名文件 → 回 WP **gallery 点开** → 应当场弹「云端有新版本」sheet，而不是等保存。
 - 红线自查：takeCloud 路径 .backup 真落盘；处处 If-Match 不回归（`push.ts:62,72`、`cloud-sync.ts:194-198`）。
+
+## 5. QA/redteam 轮追记（2026-08-20 同日，v0.2.1 修完后的只读审 → v0.2.2 落地）
+
+对 v0.2.1 的对抗性审查发现 5 条 + 若干无恙确认；1/3/4/5 已修（upstream **v0.2.2**，WeebPaint **v0.10.11** 收货）：
+
+1. **【已修，红线边缘】clean ∧ !base 快进曾是无备份覆盖**：safePull 跳 .backup 的论据（clean=可从云重取的已知版本）在谱系未知时不成立；kv=localStorage、字节=IDB → localStorage 被清/驱逐而 IDB 幸存时 **durable dirty 与 etag 同批丢** → 全部文件变 clean∧!base → B 修后会静默用云端逐个覆盖本地零备份（修前=in-sync 留本地+push collision surface，此角落系 B 引入的回归）。修：safePull 备份闸加 `head.seenBase(name)==null`（谱系未知 → 覆盖前必 move-aside）。
+2. **【待人类】keepMine 两侧语义漂移**：同一张 sheet 同一「保留本地」按钮——push 412 侧=立即 weakOverride（本地强推、云端 loser 进 .backup）；open 侧=什么都不做（留 dirty，保存时再问一遍）。安全无丢字节但重复问询+同标签两后果。**与「冲突 sheet 文案 grill 重写」是两件事但强相关**——文案轮应一并裁：统一语义 or 分场景措辞。
+3. **【已修，被 4 顺带消灭】**sheet 前预拉云 blob 的长窗口会吞掉「跳过到离线」点击（escape 闸与 sheet 共用 lockSyncGate 单槽）。预拉删除后窗口不存在。
+4. **【已修】冲突回调不再预拉云端 blob**（`onConflict` 的 cloud 恒 null）：两宿主（WeebPaint/JRP）sheet 只用 name；预拉=双倍下载（takeCloud 时 safePull 反正拉最新）。push 412 侧同款受益。将来要云端预览 → escalate 改 StoreUI 契约（懒取），别回填预拉。
+5. **【已修，文案+分级】**拉取失败 surface 移进 freshness（分支感知）：**takeCloud 没成 = warning banner**（反煤气灯——绝不让用户以为拿到云端版），文案「『X』未能取回云端版本（原因短语），本次打开的仍是本地版本」；**clean 快进没成 = info 状态栏**（快进没承诺过什么，captive portal 下每次 open 不 banner spam），文案「『X』云端有新版本但暂时取不到（原因短语），已打开本地版本」。原因短语表在 `freshness.ts pullFailText`。⚠ 这些是**库侧中文串**，不在 app i18n SSoT 内（既有张力，如 singleFlight「有另一项操作进行中」同款）——文案 grill 轮顺手过一眼。
+
+无恙确认（推演+源码核对）：zip 路径共用 makeRaw.open（.ora 覆盖到）；lockSyncGate 单槽各交错序无死锁、finally settle 无害；reconcile 降级先 trash 不产生 clean∧!base 残留；dirty∧!base cancel 后 push 走 surfaceCollision 有出路；exports 无变化；app 旧 gateCloudSyncOnOpen 已删无双闸。
+
+**真机批补两条**：① escape 闸 × 冲突 sheet 交互（在线打开 dirty∧云端动过 → 弹 sheet → 三按钮各走一遍；此前测试 rig 无 offlineEscape，纯靠推演）；② 0.1.0→0.2.x 跨了 0.2.0 的 token-source 接缝/SW 网关改动，auth 真路径未验 → 加登录/同步 smoke。
