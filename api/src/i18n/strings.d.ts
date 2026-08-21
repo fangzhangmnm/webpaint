@@ -5094,29 +5094,47 @@ export declare const S: {
         readonly ja: "スキップしてオフライン";
         readonly tok: "o open kepeken ilo ni taso";
     };
-    readonly "cf.conflictBothChanged": {
-        readonly zh: "「{name}」云端与本地都改过，保留哪份？";
-        readonly en: "“{name}” was changed both in the cloud and locally. Which version do you want to keep?";
-        readonly ja: "「{name}」はクラウドとローカルの両方で変更されています。どちらのバージョンを残しますか？";
-        readonly tok: "sitelen \"{name}\" li ante lon poki sewi li ante lon ilo ni. sina wile awen e seme?";
-    };
     readonly "cf.cloudNewerTitle": {
         readonly zh: "云端有新版本";
         readonly en: "A newer version exists in the cloud";
         readonly ja: "クラウドに新しいバージョンがあります";
         readonly tok: "sitelen sin li lon poki sewi";
     };
-    readonly "cf.keepLocal": {
-        readonly zh: "保留本地（之后 push 会再确认）";
-        readonly en: "Keep local (will reconfirm on next push)";
-        readonly ja: "ローカルを保持（後で push 時に再確認）";
-        readonly tok: "o awen e sitelen pi ilo ni (pana kama la mi toki sin)";
+    readonly "cf.body.push": {
+        readonly zh: "「{name}」在云端和本机各有一版新改动。";
+        readonly en: "“{name}” has new changes both in the cloud and on this device.";
+        readonly ja: "「{name}」はクラウドとこの端末の両方に新しい変更があります。";
+        readonly tok: "sitelen \"{name}\" li jo e ante sin lon poki sewi lon ilo ni kin.";
     };
-    readonly "cf.overwriteLocal": {
-        readonly zh: "用云端覆盖本地（本地先备份进 .backup）";
-        readonly en: "Overwrite local with cloud (local is backed up to .backup first)";
-        readonly ja: "クラウドでローカルを上書き（ローカルは先に .backup へバックアップ）";
-        readonly tok: "o kepeken e sitelen pi poki sewi (sitelen pi ilo ni li tawa poki awen \".backup\" lon tenpo open)";
+    readonly "cf.body.open": {
+        readonly zh: "「{name}」本机还有未上传的改动。";
+        readonly en: "“{name}” has changes on this device that were not uploaded yet.";
+        readonly ja: "「{name}」にはまだアップロードしていない変更がこの端末にあります。";
+        readonly tok: "ilo ni li jo e ante pi pana ala pi sitelen \"{name}\".";
+    };
+    readonly "cf.act.localWins": {
+        readonly zh: "本地覆盖云端";
+        readonly en: "Local overwrites cloud";
+        readonly ja: "ローカルでクラウドを上書き";
+        readonly tok: "o pana e sitelen pi ilo ni tawa poki sewi";
+    };
+    readonly "cf.act.cloudWins": {
+        readonly zh: "云端覆盖本地";
+        readonly en: "Cloud overwrites local";
+        readonly ja: "クラウドでローカルを上書き";
+        readonly tok: "o kepeken e sitelen pi poki sewi";
+    };
+    readonly "cf.act.openLocal": {
+        readonly zh: "打开本地";
+        readonly en: "Open local";
+        readonly ja: "ローカルを開く";
+        readonly tok: "o open e sitelen pi ilo ni";
+    };
+    readonly "cf.note.keptSafe": {
+        readonly zh: "被替换的版本会自动留底，不会丢失";
+        readonly en: "The replaced version is kept automatically — nothing is lost";
+        readonly ja: "置き換えられたバージョンは自動的に保管され、失われません";
+        readonly tok: "sitelen weka li awen lon poki awen. ona li moli ala";
     };
     readonly "cf.cloudAccountOfflineTitle": {
         readonly zh: "云端：{who}（离线，无法推 / 拉）";

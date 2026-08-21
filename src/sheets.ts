@@ -143,10 +143,10 @@ export function openChoiceSheet<T>(title: string, message: string, choices: { la
 // 动作 value 多态：多数是选择字符串（store onConflict / 文件夹名），cloud-freshness 用 { kind:"skip" } 哨兵。
 // → lockSyncGate<T>；外部 settleSyncGate 可用任意值兜底关闭（pending resolve 因此擦成 unknown）。
 interface SyncGateAction<T = string> { label: string; value: T; primary?: boolean; }
-interface SyncGateOpts<T = string> { title: string; message: string; showSpinner?: boolean; actions: SyncGateAction<T>[]; }
+interface SyncGateOpts<T = string> { title: string; message: string; showSpinner?: boolean; actions: SyncGateAction<T>[]; note?: string; }
 const syncGate: {
   backdrop: HTMLElement; sheet: HTMLElement; title: HTMLElement; message: HTMLElement;
-  spinner: HTMLElement; actions: HTMLElement; _pendingResolve: ((value: unknown) => void) | null;
+  spinner: HTMLElement; actions: HTMLElement; note: HTMLElement; _pendingResolve: ((value: unknown) => void) | null;
 } = {
   backdrop: $("syncGateBackdrop"),
   sheet: $("syncGateSheet"),
@@ -154,12 +154,15 @@ const syncGate: {
   message: $("syncGateMessage"),
   spinner: $("syncGateSpinner"),
   actions: $("syncGateActions"),
+  note: $("syncGateNote"),
   _pendingResolve: null,
 };
 
-export function lockSyncGate<T = string>({ title, message, showSpinner, actions }: SyncGateOpts<T>): Promise<T> {
+export function lockSyncGate<T = string>({ title, message, showSpinner, actions, note }: SyncGateOpts<T>): Promise<T> {
   syncGate.title.textContent = title;
   syncGate.message.textContent = message;
+  syncGate.note.textContent = note ?? "";          // 每次 lock 都重置：上一位调用者的小字不残留
+  syncGate.note.classList.toggle("hidden", !note);
   syncGate.spinner.classList.toggle("hidden", !showSpinner);
   syncGate.actions.innerHTML = "";
   return new Promise<T>((resolve) => {

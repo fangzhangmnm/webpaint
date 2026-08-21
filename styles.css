@@ -1993,6 +1993,13 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   animation: spinner-rot 0.8s linear infinite;
 }
 @keyframes spinner-rot { to { transform: rotate(360deg); } }
+.sync-gate-note {
+  margin: 10px 0 0 0;
+  font-size: 11px;
+  color: var(--ink-soft);
+  opacity: 0.85;
+}
+.sync-gate-note.hidden { display: none; }
 .sync-gate-actions {
   display: flex; flex-direction: column;
   gap: 8px; margin-top: 8px;

@@ -76,3 +76,15 @@ user 原话定性：「是wp的红线区错误：你上传好之后gallery点开
 无恙确认（推演+源码核对）：zip 路径共用 makeRaw.open（.ora 覆盖到）；lockSyncGate 单槽各交错序无死锁、finally settle 无害；reconcile 降级先 trash 不产生 clean∧!base 残留；dirty∧!base cancel 后 push 走 surfaceCollision 有出路；exports 无变化；app 旧 gateCloudSyncOnOpen 已删无双闸。
 
 **真机批补两条**：① escape 闸 × 冲突 sheet 交互（在线打开 dirty∧云端动过 → 弹 sheet → 三按钮各走一遍；此前测试 rig 无 offlineEscape，纯靠推演）；② 0.1.0→0.2.x 跨了 0.2.0 的 token-source 接缝/SW 网关改动，auth 真路径未验 → 加登录/同步 smoke。
+
+## 6. 冲突 sheet 文案 grill 拍板 + 落地（2026-08-21，user 逐项裁）
+
+发现 2（keepMine 语义漂移）与文案重写一起收：**行为零改动，靠分场景写实文案化解**。
+
+- **引擎 v0.2.3**：`ui.resolveConflict` ctx 加 `occasion: "open" | "push"`（user 批的唯一契约变化，api/store.api.md +1 行）。
+- **按钮（user 原话定稿）**：push（保存 412/撞名）= `本地覆盖云端`(primary，=keepMine 立即强推) / `云端覆盖本地` / `取消`；open = `打开本地`(primary，=cancel 暂不解决保存时再裁) / `云端覆盖本地`。**不提 .backup/push 等行话**（「字少一点抓住重点反而清晰」）。
+- **标题**：两时机统一「云端有新版本」（user 拍板）。正文一句：push=「在云端和本机各有一版新改动」、open=「本机还有未上传的改动」。
+- **安心小字**（两时机都有，syncGate 新增 note 槽）：「被替换的版本会自动留底，不会丢失」——**刻意不承诺入口**，因为备份箱现在没有用户门（云端 loser 在 OneDrive .backup/ 可见；本地 loser 在 IDB 无 UI，引擎也缺 restoreBackup/purgeBackup API）。**备份箱 UI = 下一轮做（user：已记账）**，上线后小字升级为「可在备份箱找回」。
+- **库侧中文串**：磨措辞不改架构（pullFailText 对齐「留底」词汇）；**i18n 化（reason code + app 翻译，连 busy 标签一族）= 登记宣发后议题**。
+- i18n：`cf.conflictBothChanged`/`cf.keepLocal`/`cf.overwriteLocal` 三旧键删除，新键 `cf.body.push/open`、`cf.act.localWins/cloudWins/openLocal`、`cf.note.keptSafe`（四语）。
+- 落地：internal-store v0.2.3 + WeebPaint v0.10.13。真机验收并入 §5 的批。

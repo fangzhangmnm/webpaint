@@ -19,8 +19,9 @@ interface SyncGateOpts<T = string> {
     message: string;
     showSpinner?: boolean;
     actions: SyncGateAction<T>[];
+    note?: string;
 }
-export declare function lockSyncGate<T = string>({ title, message, showSpinner, actions }: SyncGateOpts<T>): Promise<T>;
+export declare function lockSyncGate<T = string>({ title, message, showSpinner, actions, note }: SyncGateOpts<T>): Promise<T>;
 export declare function unlockSyncGate(): void;
 export declare function settleSyncGate(value: unknown): void;
 export {};

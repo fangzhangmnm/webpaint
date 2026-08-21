@@ -13,20 +13,35 @@ export const storeUI: StoreUI = {
   // 用户态写流强制锁屏（可重入 ref-count）。深模块内部 push/rename/del/加密都包这个。
   busy: withBusy,
 
-  // 冲突必 surface（ADR-0009）：本地 vs 云端二选一（+ 取消）。绝不静默 cancel——引擎强制真 sheet。
+  // 冲突必 surface（ADR-0009）：绝不静默 cancel——引擎强制真 sheet。
   //   注：引擎 ResolveChoice = keepMine|takeCloud|cancel（旧的「keep both/branch」不在此模型，见收敛报告）。
-  resolveConflict: async ({ name }): Promise<"keepMine" | "takeCloud" | "cancel"> => {
-    const choice = await lockSyncGate<"keepMine" | "takeCloud" | "cancel">({
-      title: t("cf.cloudNewerTitle"),
-      message: t("cf.conflictBothChanged", { name: stripSessionExt(name) }),
-
-      showSpinner: false,
-      actions: [
-        { label: t("cf.keepLocal"), value: "keepMine", primary: true },
-        { label: t("cf.overwriteLocal"), value: "takeCloud" },
-        { label: t("common.cancel"), value: "cancel" },
-      ],
-    });
+  //   2026-08-21 grill 拍板：按 occasion 分两套按钮/正文（标题统一「云端有新版本」+ 留底安心小字）——
+  //   push（保存 412/撞名）三键：本地覆盖云端(=keepMine 立即强推) / 云端覆盖本地 / 取消；
+  //   open（打开时）两键：打开本地(=cancel，暂不解决保存时再裁) / 云端覆盖本地。按钮写实，语义不再漂移。
+  resolveConflict: async ({ name, occasion }): Promise<"keepMine" | "takeCloud" | "cancel"> => {
+    const n = stripSessionExt(name);
+    const choice = occasion === "open"
+      ? await lockSyncGate<"cancel" | "takeCloud">({
+          title: t("cf.cloudNewerTitle"),
+          message: t("cf.body.open", { name: n }),
+          note: t("cf.note.keptSafe"),
+          showSpinner: false,
+          actions: [
+            { label: t("cf.act.openLocal"), value: "cancel", primary: true },
+            { label: t("cf.act.cloudWins"), value: "takeCloud" },
+          ],
+        })
+      : await lockSyncGate<"keepMine" | "takeCloud" | "cancel">({
+          title: t("cf.cloudNewerTitle"),
+          message: t("cf.body.push", { name: n }),
+          note: t("cf.note.keptSafe"),
+          showSpinner: false,
+          actions: [
+            { label: t("cf.act.localWins"), value: "keepMine", primary: true },
+            { label: t("cf.act.cloudWins"), value: "takeCloud" },
+            { label: t("common.cancel"), value: "cancel" },
+          ],
+        });
     return choice ?? "cancel";
   },
 
