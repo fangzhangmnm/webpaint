@@ -50,8 +50,8 @@ SPECS = [
     # 2026-08-21 图标收货：cut（剪刀 CCW145）/copy-picture（copy+画片，原登记名 copy-merged 甲方定名改之）
     # 两枚真图入库（库仓 5976d20），stopgap 再度**清零**。历史见 git。
     # 注意：收货同时 index.html 的 <use href="#copy-merged"> 已改 #copy-picture（id 随甲方定名走）。
-    # —— 2026-08-21 新增需求（存储驱逐调查）——
-    ("add-to-home-screen", "装", (3, 3, 18, 18), "设置·把本站装到主屏。WebKit 官方把「是否作为主屏 Web App 打开」列为授予持久化存储的启发式因子之一 → 这是数据安全入口不只是 UX。stopgap 字形；真图标建议=手机/方框 + 右下角加号(或向内箭头)，与 download 区分开"),
+    # 2026-08-21 图标收货（第二轮）：add-to-home-screen 真图入库（库仓 b62c33a，甲方拍板候选 1 号
+    # = iOS 原味：圆角方框 16 见方 rx4.6 + 居中加号 7.2）。中文「装」stopgap 撤除，stopgap 再度清零。
 ]
 syms = []
 for sid, text, box, note in SPECS:
