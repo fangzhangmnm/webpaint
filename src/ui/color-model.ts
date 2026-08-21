@@ -53,9 +53,12 @@ export function hexToHsv(hex: string): Hsv {
 }
 
 // 把用户在 HEX 输入框敲的东西规整成 "#rrggbb"，失败返回 null（调用方负责报错/还原）。
+// 3 位缩写（#abc → #aabbcc）也收（user 拍板 2026-08-21：「三位六位 hex 都支持」）；
+// 输出恒 6 位小写，下游契约不变。8 位（alpha）不收。
 export function normalizeHex(input: string): string | null {
   let v = (input || "").trim();
   if (!v.startsWith("#")) v = "#" + v;
+  if (/^#[0-9a-fA-F]{3}$/.test(v)) v = `#${v[1]}${v[1]}${v[2]}${v[2]}${v[3]}${v[3]}`;
   return /^#[0-9a-fA-F]{6}$/.test(v) ? v.toLowerCase() : null;
 }
 

@@ -726,11 +726,11 @@ export declare const S: {
         readonly ja: "dev";
         readonly tok: "\"dev\"";
     };
-    readonly "menu.exportImage": {
-        readonly zh: "导出";
-        readonly en: "Export";
-        readonly ja: "書き出す";
-        readonly tok: "o pana";
+    readonly "menu.exportHub": {
+        readonly zh: "导出与另存…";
+        readonly en: "Export & save a copy…";
+        readonly ja: "書き出しと別名保存…";
+        readonly tok: "pana en awen…";
     };
     readonly "menu.rename": {
         readonly zh: "重命名当前画作…";
@@ -738,17 +738,11 @@ export declare const S: {
         readonly ja: "作品名を変更…";
         readonly tok: "ante nimi…";
     };
-    readonly "menu.saveAs": {
-        readonly zh: "另存为…";
-        readonly en: "Save as…";
-        readonly ja: "名前を付けて保存…";
-        readonly tok: "awen kepeken nimi sin…";
-    };
     readonly "menu.revert": {
-        readonly zh: "撤销修改…";
-        readonly en: "Revert changes…";
-        readonly ja: "変更を取り消す…";
-        readonly tok: "kama sin tawa tenpo pini…";
+        readonly zh: "回到打开时的版本…";
+        readonly en: "Back to opened version…";
+        readonly ja: "開いた時点のバージョンに戻す…";
+        readonly tok: "kama sin tawa tenpo open…";
     };
     readonly "menu.encrypt": {
         readonly zh: "加密保护…";
@@ -2562,6 +2556,12 @@ export declare const S: {
         readonly ja: "クラウドのゴミ箱を空に";
         readonly tok: "o moli e insa pi poki jaki (poki sewi)";
     };
+    readonly "gal.chrome.backupBox": {
+        readonly zh: "备份箱管理（即将推出）";
+        readonly en: "Manage backup box (coming soon)";
+        readonly ja: "バックアップボックス管理（近日公開）";
+        readonly tok: "lawa pi poki awen (tenpo kama la ona li lon)";
+    };
     readonly "gal.chrome.versionTip": {
         readonly zh: "当前 WeebPaint 版本";
         readonly en: "Current WeebPaint version";
@@ -4092,6 +4092,18 @@ export declare const S: {
         readonly ja: "開くのに失敗しました：{error}";
         readonly tok: "open li pakala: {error}";
     };
+    readonly "ss.docLockedElsewhereTitle": {
+        readonly zh: "这幅画已在其他窗口打开";
+        readonly en: "Already open in another window";
+        readonly ja: "別のウィンドウで開いています";
+        readonly tok: "sitelen ni li open lon lupa ante";
+    };
+    readonly "ss.docLockedElsewhereMsg": {
+        readonly zh: "「{name}」正在另一个窗口中编辑，同时编辑会相互覆盖。仍要打开？";
+        readonly en: "\"{name}\" is being edited in another window; editing in both will overwrite each other. Open anyway?";
+        readonly ja: "「{name}」は別のウィンドウで編集中です。同時に編集するとお互いの変更を上書きしてしまいます。それでも開きますか？";
+        readonly tok: "sitelen \"{name}\" li open lon lupa ante. lupa tu li ante e ona la ante li moli e ante. sina wile open ala open?";
+    };
     readonly "ss.notPushedNeedPassword": {
         readonly zh: "未推送：需要密码解锁（已取消）";
         readonly en: "Not pushed: password required to unlock (cancelled)";
@@ -4133,6 +4145,54 @@ export declare const S: {
         readonly en: "Active layer cleared (Ctrl+Z to undo)";
         readonly ja: "現在のレイヤーを消去しました（Ctrl+Z で取り消し）";
         readonly tok: "mi weka e ale pi lipu ni (Ctrl+Z)";
+    };
+    readonly "tm.hubTitle": {
+        readonly zh: "导出与另存";
+        readonly en: "Export & save a copy";
+        readonly ja: "書き出しと別名保存";
+        readonly tok: "pana en awen";
+    };
+    readonly "tm.hubExportImage": {
+        readonly zh: "导出图片（{cfg}）";
+        readonly en: "Export image ({cfg})";
+        readonly ja: "画像を書き出す（{cfg}）";
+        readonly tok: "o pana e sitelen ({cfg})";
+    };
+    readonly "tm.hubSaveLocalOra": {
+        readonly zh: "存为本地 .ora 文件";
+        readonly en: "Save a local .ora file";
+        readonly ja: "ローカル .ora ファイルに保存";
+        readonly tok: "o awen e lipu .ora lon ilo ni";
+    };
+    readonly "tm.hubSaveLocalOraPlain": {
+        readonly zh: "存为本地 .ora 文件（明文）";
+        readonly en: "Save a local .ora file (plaintext)";
+        readonly ja: "ローカル .ora ファイルに保存（平文）";
+        readonly tok: "o awen e lipu .ora lon ilo ni (len ala)";
+    };
+    readonly "tm.hubCopyToGallery": {
+        readonly zh: "复制一份到图库";
+        readonly en: "Save a copy to the gallery";
+        readonly ja: "ギャラリーに複製を保存";
+        readonly tok: "o awen e sitelen sama tawa tomo sitelen";
+    };
+    readonly "tm.hubEncryptedPlainNote": {
+        readonly zh: "加密作品在编辑时已解密：「存为本地 .ora 文件」导出的是明文副本。";
+        readonly en: "Encrypted artwork is decrypted while editing: \"Save a local .ora file\" exports a plaintext copy.";
+        readonly ja: "暗号化された作品は編集中は復号されています。「ローカル .ora ファイルに保存」は平文のコピーを書き出します。";
+        readonly tok: "sitelen ni li jo e len. taso tenpo ni la ona li len ala. awen lon ilo ni la lipu li len ala.";
+    };
+    readonly "tm.localOraSaved": {
+        readonly zh: "已存为本地文件：{name}";
+        readonly en: "Saved local file: {name}";
+        readonly ja: "ローカルファイルに保存しました：{name}";
+        readonly tok: "mi awen e lipu {name} lon ilo ni";
+    };
+    readonly "tm.localOraSaveFailed": {
+        readonly zh: "本地保存失败：{err}";
+        readonly en: "Local save failed: {err}";
+        readonly ja: "ローカル保存に失敗しました：{err}";
+        readonly tok: "awen li pakala: {err}";
     };
     readonly "tm.saveAs": {
         readonly zh: "另存为";
@@ -5813,6 +5873,12 @@ export declare const S: {
         readonly en: "Last artwork \"{name}\" not found; pick one or create a new one";
         readonly ja: "前回の作品「{name}」が見つかりません。選ぶか新規作成してください";
         readonly tok: "sitelen pini \"{name}\" li lon ala. o wile e sitelen ante (anu: o pali e sin).";
+    };
+    readonly "mi.restoreLockedElsewhere": {
+        readonly zh: "上次的画 \"{name}\" 正在另一个窗口打开，这里没有自动打开";
+        readonly en: "Your last artwork \"{name}\" is open in another window, so it wasn't auto-opened here";
+        readonly ja: "前回の作品「{name}」は別のウィンドウで開いているため、ここでは自動で開きませんでした";
+        readonly tok: "sitelen pini \"{name}\" li open lon lupa ante. tan ni la mi open ala e ona lon ni.";
     };
     readonly "mi.restoreCrashLoop": {
         readonly zh: "上次打开 \"{name}\" 时应用意外退出（可能内存不足），已暂停自动打开；可从图库手动打开它";

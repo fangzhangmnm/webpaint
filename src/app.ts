@@ -56,7 +56,7 @@ import { updateSaveStatus, updateNewerBanner } from "./save-status.ts";
 import { initErrorBadge, reportError } from "./error-badge.ts";
 import { initTransientPanels, _suppressTransientPanels, _restoreTransientPanels, _bringPanelTop, _commitTransform, _cancelTransform } from "./transient-panels.ts";
 import { initImportImage, importImageAsLayer } from "./import-image.ts";   // importImageAsNewDoc/setAddImportAsNewDoc 仅 gallery-shell/export-menu 用
-import { initExportImportMenu } from "./export-import-menu.ts";
+import { initExportImportMenu, exportBaseName } from "./export-import-menu.ts";
 import { initGalleryShell, setGalleryOpen, checkQuotaAndWarn, uniqueNameFor } from "./gallery/gallery-shell.ts";
 import { initCloudPickerHost } from "./cloud-picker-host.ts";   // 云盘图片 picker 宿主层（spec 20260820）
 import { initTopbarMenu } from "./topbar-menu.ts";
@@ -353,7 +353,9 @@ initSideWindows(ctx);
 initPlatformGuards(ctx);
 // timelapse（宣发轮 2026-08-19）：commit 钩子=wp:histchange；per-doc 串扰墙在 session-state adopt 两端。
 initTimelapse(doc, (nodes, w, h) => board.compositeDisplayBytes(nodes, w, h));   // 采帧=WYSIWYG（含 fill 预览/调整替身）
-initTimelapseUi(() => session.name || t("nd.untitled"));
+// 导出 mp4 文件名与其它导出 sink 同源（exportBaseName）：无地本地文件模式 session.name 恒 null
+//   （双墙设计），基名用打开的本地文件 stem——录像跟着 ora 走，无地当然全量支持（user 2026-08-21）。
+initTimelapseUi(() => exportBaseName());
 
 // 笔架异步 boot（fire-and-forget；ctx 已建好）。
 initRackBoot(ctx);

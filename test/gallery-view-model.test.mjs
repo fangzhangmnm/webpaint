@@ -1,6 +1,7 @@
 // Gallery 展示派生测试（UI 深化 candidate 1 · gallery）。
 import { describe, it, eq, assert } from "./runner.mjs";
 import { tileFor, breadcrumb, trashTileFor, humanSize } from "../src/gallery/gallery-view-model.ts";
+import { naturalCompare } from "../src/gallery/natural-order.ts";
 
 describe("gallery-view-model · tileFor 徽章 4 态", () => {
   const local = { name: "a", updatedAt: 100, size: 10, thumb: {} };
@@ -98,5 +99,27 @@ describe("gallery-view-model · humanSize（家规：1024 进制标二进制单�
     eq(humanSize(953 * 1024), "953 KiB");          // ≈0.93 MB 十进制——标 KB 就撒谎了
     eq(humanSize(1024 * 1024), "1.0 MiB");
     eq(humanSize(1.5 * 1024 * 1024 * 1024), "1.50 GiB");
+  });
+});
+
+// 图库自然排序（user 2026-08-21：「图库排序是自然排序吧（10 在 2 后面）」）——共享 collator 的行为锁。
+// 消费点：app-store.watchFolder（docs 倒序 / images 退路倒序 / folderNames 正排）+ gallery.move 目标夹列表。
+describe("gallery · naturalCompare 自然排序", () => {
+  it("数字段按数值比：a2 < a10（旧字典序会把 10 排 2 前面）", () => {
+    assert(naturalCompare("a2", "a10") < 0, "a2 < a10");
+    assert(naturalCompare("a10", "a2") > 0, "a10 > a2");
+    eq(["a10", "a1", "a2"].sort(naturalCompare).join(","), "a1,a2,a10");
+    eq(["画作10", "画作2", "画作1"].sort(naturalCompare).join(","), "画作1,画作2,画作10", "中文前缀+数字");
+  });
+  it("倒序消费形状（watchFolder items：naturalCompare(b,a)）", () => {
+    eq(["20260101-a", "20260110-b", "20260102-c"].sort((a, b) => naturalCompare(b, a)).join(","),
+      "20260110-b,20260102-c,20260101-a", "新日期在前");
+  });
+  it("中文/大小写不炸且自洽", () => {
+    eq(naturalCompare("月白", "月白"), 0, "同名相等");
+    eq(naturalCompare("ABC", "abc"), 0, "sensitivity base：大小写同序");
+    const arr = ["樱花", "月白", "abc", "ABC2", "abc10"].sort(naturalCompare);
+    eq(arr.length, 5, "排序不炸不丢");
+    assert(arr.indexOf("ABC2") < arr.indexOf("abc10"), "跨大小写数字段仍数值比");
   });
 });

@@ -85,6 +85,10 @@ export declare const session: {
     /** 当前作品的 at-rest **密文**字节（原样，不解壳、不要密码）。非加密件 → null。
      *  先 saveNow()：at-rest 字节是「上次保存」的内容，不先落盘就会导出成旧版本。 */
     readEncryptedBytes(): Promise<EncryptedBlob | null>;
+    /** 当前 doc 的完整 .ora 字节（**明文**；2026-08-21「导出与另存」hub 的「存为本地 .ora」用）。
+     *  与显式保存同一落盘形（_encodeCurrentOraWithPeek：meta+timelapse+mergedimage）；加密作品也出
+     *  明文——内存本就是解密态，入口 sheet 文案已说清。纯导出副本：不落库、不碰 es/_localFile 身份。 */
+    encodeCurrentOra(): Promise<Blob>;
     readCheckpoint: typeof _readSessionCheckpoint;
     dropCheckpoint: typeof _dropCheckpoint;
     awaitCloudPushIdle: () => Promise<void>;

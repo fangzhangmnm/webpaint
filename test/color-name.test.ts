@@ -70,6 +70,10 @@ test("parseColorInput 优先级（2026-08-21）：带#恒hex、裸串先色名�
   eq(parseColorInput("月白"), "#eef7f2");        // 裸色名照常
   eq(parseColorInput("5600k"), parseColorName("5600k"));   // 色温走色名路径
   eq(parseColorInput("nicht eine farbe"), null); // 两头不认 → null
+  // 3 位 hex（2026-08-21 拍板「三位六位都支持」）：normalizeHex 展开，本模块零改动自动获得
+  eq(parseColorInput("#abc"), "#aabbcc");        // 带 # 3 位 → 展开
+  eq(parseColorInput("abc"), "#aabbcc");         // 裸 3 字符非色名 → hex 兜底展开
+  eq(parseColorInput("#ab"), null);              // 2 位仍非法
   // 撞词沙盘：词库哪天进一个六位纯 hex 字母词（facade 类）——裸串归色名，带 # 仍恒 hex
   _adoptColorWords({ categories: DATA.categories, words: [...DATA.words, ["xkcd", "facade", "#123456"]] });
   eq(parseColorInput("facade"), "#123456");      // 旧「hex 优先」会静默当 #facade 吞掉

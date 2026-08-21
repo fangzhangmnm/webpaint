@@ -28,9 +28,13 @@ export interface RestorePorts {
   /** 标记必须在 restore 之前**落盘**——collection 冷写是 400ms 防抖，OOM 崩溃可比它快。 */
   flushMarker(): Promise<void>;
   onCrashLoopSkipped(name: string): void;
+  // ── 双实例互认（Web Locks，2026-08-21 双实例案）：wanted 是否被**别的窗口**持有 ──
+  /** 无 Web Locks 支持时恒 false（整套降级为现状，行为不变）。 */
+  isDocLockedElsewhere(name: string): Promise<boolean>;
+  onLockedElsewhere(name: string): void;
 }
 
-export type RestoreOutcome = "restored" | "gallery-no-name" | "gallery-failed" | "gallery-crash-loop";
+export type RestoreOutcome = "restored" | "gallery-no-name" | "gallery-failed" | "gallery-crash-loop" | "gallery-locked-elsewhere";
 
 export async function restoreLastSession(p: RestorePorts): Promise<RestoreOutcome> {
   const wanted = p.getWantedName();
@@ -39,6 +43,19 @@ export async function restoreLastSession(p: RestorePorts): Promise<RestoreOutcom
     p.updateSaveStatus();
     await p.openGallery();
     return "gallery-no-name";
+  }
+  // ★ 纪律④（双实例互认，2026-08-21）：wanted 正被**另一个活窗口**持有 ⇒ ① 不自动开
+  //   （双 tab 同画编辑 = 本地字节互覆，入口拦住）；② 这也**不是崩溃**——上一实例还活着，
+  //   restoreAttempt 标记只是还没到清点（慢加载/正编辑中）。所以本检查必须排在断路器判定
+  //   **之前**：否则「A 冷启动写了标记、慢加载中用户开 B」会让 B 读到 A 的在途标记误判崩溃环。
+  //   标记**原样不动**（不写不清）——断路器语义不被消耗：A 若真死在半路，锁被浏览器自动释放
+  //   （Web Locks 语义），下次 boot 无锁 + 标记在场 → 照常断路。
+  if (await p.isDocLockedElsewhere(wanted)) {
+    p.setNameMemoryOnly(null);
+    p.updateSaveStatus();
+    await p.openGallery();
+    p.onLockedElsewhere(wanted);
+    return "gallery-locked-elsewhere";
   }
   // ★ 纪律③（崩溃环断路，v0.10.9）：标记 == 想开的画 ⇒ 上次 boot 死在开它的半路（小内存设备
   //   开超大文件 OOM 被杀等——tab 直接死，永远走不到下面的「优雅失败」分支）。若无此闸，

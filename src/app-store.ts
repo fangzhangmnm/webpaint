@@ -15,6 +15,7 @@ import { wirePreferences } from "./app-prefs.ts";
 import { wireAppState, appState } from "./app-state.ts";
 import { builtinBrushInitData } from "./brushes.ts";
 import { isDocPath, isImagePath, imageBasename } from "./gallery/cloud-image-model.ts";
+import { naturalCompare } from "./gallery/natural-order.ts";
 
 // ============ 显式装配（v0.8.7 · B 骑士）============
 // store = 插件不是地基：装配收进 _assemble()，按 detectStoreAbsent()（?nostore / localStorage 开关）
@@ -152,8 +153,8 @@ const _toImageItems = (items: { path: string; syncState: string; lastModified?: 
       lastModified: it.lastModified,
       cached: isCached(it.syncState as never),
     }))
-    // 素材收件箱语义：新的在前（lastModified 倒序，缺失退名字倒序）
-    .sort((a, b) => (b.lastModified ?? 0) - (a.lastModified ?? 0) || b.name.localeCompare(a.name, undefined, { numeric: true }));
+    // 素材收件箱语义：新的在前（lastModified 倒序，缺失退名字倒序；自然序见 natural-order.ts）
+    .sort((a, b) => (b.lastModified ?? 0) - (a.lastModified ?? 0) || naturalCompare(b.name, a.name));
 
 export function watchFolder(
   folder: string,
@@ -163,13 +164,14 @@ export function watchFolder(
   return store.files.watchFolder(folder, (snap) => {
     cb({
       path: snap.path,
-      // 文件名**倒序**（localeCompare numeric）：新文档名 yyyymmdd-xxxx → 新日期在前，稳定（不随存盘时间跳）。
+      // 文件名**倒序**（自然序 numeric，见 natural-order.ts）：新文档名 yyyymmdd-xxxx → 新日期在前，稳定（不随存盘时间跳）。
       //   store 列举顺序不保证；排序是 app 展示策略（对齐 gallery-model.sliceFolder 的既定倒序），故在此 app 层做。
       // 路由：画作（isDocPath）= 主 tile；图片 = 次级 tile（v0.9.34 拍板：可见+孪生语义，替代已删的＋菜单 picker 入口）；
       //   其余杂物（.md 等）不进图库（诚实性余账见 ai-docs/20260820-gallery-hidden-files-honesty-handoff.md）。
-      items: snap.items.filter((it) => isDocPath(it.path)).map(itemToG).sort((a, b) => b.name.localeCompare(a.name, undefined, { numeric: true })),
+      items: snap.items.filter((it) => isDocPath(it.path)).map(itemToG).sort((a, b) => naturalCompare(b.name, a.name)),
       images: _toImageItems(snap.items),
-      folderNames: snap.folders.map((f) => f.slice(prefix.length)).filter(Boolean),   // 全路径 → immediate 段
+      // 文件夹 tile 自然序正排（store 列举顺序不保证；user 2026-08-21：10 要排在 2 后面）
+      folderNames: snap.folders.map((f) => f.slice(prefix.length)).filter(Boolean).sort(naturalCompare),   // 全路径 → immediate 段
     });
   });
 }
@@ -184,7 +186,7 @@ export function watchFolderImages(
     cb({
       path: snap.path,
       images: _toImageItems(snap.items),
-      folderNames: snap.folders.map((f) => f.slice(prefix.length)).filter(Boolean),
+      folderNames: snap.folders.map((f) => f.slice(prefix.length)).filter(Boolean).sort(naturalCompare),
     });
   });
 }

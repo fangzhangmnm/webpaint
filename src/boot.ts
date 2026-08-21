@@ -10,6 +10,7 @@ import { reportError } from "./error-badge.ts";
 import { session } from "./session-state.ts";
 import { getCurrentSessionName } from "./session.ts";
 import { restoreLastSession } from "./boot-restore.ts";
+import { isDocLockedElsewhere } from "./instance-locks.ts";
 import { appState, flushAppState } from "./app-state.ts";
 import type { AppContext } from "./app-context.ts";
 
@@ -54,5 +55,8 @@ export async function bootRestoreSession(ctx: AppContext) {
     setRestoreAttempt: (name) => { appState.restoreAttempt = name; },
     flushMarker: () => flushAppState(),
     onCrashLoopSkipped: (name) => setStatus(t("mi.restoreCrashLoop", { name }), true),
+    // 双实例互认（2026-08-21）：boot 期少打扰——status 提示，不弹 sheet（openItem 入口才弹确认）。
+    isDocLockedElsewhere: (name) => isDocLockedElsewhere(name),
+    onLockedElsewhere: (name) => setStatus(t("mi.restoreLockedElsewhere", { name }), true),
   });
 }

@@ -35,6 +35,27 @@ export async function pickLocalOraFile(): Promise<LocalFileHandle | null> {
   }
 }
 
+/** showSaveFilePicker 在场探测（Chromium 桌面）。与 open 侧分开探——两 API 支持面可能不同。 */
+export function supportsSaveFilePicker(): boolean {
+  return typeof (globalThis as { showSaveFilePicker?: unknown }).showSaveFilePicker === "function";
+}
+
+/** 系统「另存为」框挑 .ora 落点（2026-08-21，「导出与另存」hub 的本地去向用）。
+ *  用户取消 → null（不是错误）。必须在 user-gesture 活化窗口内调（调用方先 pick 再 encode）。 */
+export async function pickSaveOraFile(suggestedName: string): Promise<LocalFileHandle | null> {
+  const picker = (globalThis as unknown as { showSaveFilePicker?: (o: unknown) => Promise<LocalFileHandle> }).showSaveFilePicker;
+  if (!picker) return null;
+  try {
+    return (await picker({
+      suggestedName,
+      types: [{ description: "OpenRaster", accept: { "image/openraster": [".ora"] } }],
+    })) ?? null;
+  } catch (e) {
+    if ((e as { name?: string })?.name === "AbortError") return null;   // 用户取消保存框
+    throw e;
+  }
+}
+
 /** 读句柄当前字节（File 自带 name/lastModified，打开时顺手拿 mtime 基线）。 */
 export async function readHandleFile(h: LocalFileHandle): Promise<File> { return h.getFile(); }
 

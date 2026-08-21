@@ -233,6 +233,36 @@ describe("FloatingTransform · setMode 记账制（v0.6.34 替代投影）+ adap
     const hit = ft.hitTest(100, 0, 1);                         // TR 角
     assert(hit && hit.kind === "corner" && hit.row === 0 && hit.col === 1, "命中 TR corner");
   });
+
+  // nearest-wins（user 拍板 2026-08-21：「handler 挤太近了点不到中间那个——nearest wins，tie break 优先内环」）
+  it("hitTest：正常间距行为不变（唯一候选照旧命中）", () => {
+    const big = [[{ x: 0, y: 0 }, { x: 100, y: 0 }], [{ x: 0, y: 100 }, { x: 100, y: 100 }]];
+    const ft = mkFloat("distort", 1, big);
+    const e = ft.hitTest(50, 2, 1);                            // 上边中点附近
+    assert(e && e.kind === "edge" && e.edge === "top", "上边中点照旧命中");
+    const c = ft.hitTest(98, 3, 1);                            // TR 角附近
+    assert(c && c.kind === "corner" && c.row === 0 && c.col === 1, "TR 角照旧命中");
+    assert(ft.hitTest(50, 50, 1).kind === "translate", "quad 内空处仍是 translate");
+  });
+
+  it("hitTest：挤近场景 nearest wins——中点不再被角吃掉", () => {
+    // 10px 小方块：所有 handle 都在彼此的 18px 半径里。旧 first-match 点 (5,0) 会命中列表序
+    // 靠前的 TL 角（dist=5 < 18）；nearest wins 应命中正压着的上边中点（dist=0）。
+    const ft = mkFloat("distort", 1, SQ());
+    const e = ft.hitTest(5, 0, 1);
+    assert(e && e.kind === "edge" && e.edge === "top", `点上边中点应得 edge:top，实得 ${e && e.kind}`);
+    const c = ft.hitTest(0.5, 0.5, 1);                         // 贴着 TL 角：角仍最近，角赢
+    assert(c && c.kind === "corner" && c.row === 0 && c.col === 0, "贴角点仍命中角");
+  });
+
+  it("hitTest：完全重合 tie → 内环（edge 中点）优先", () => {
+    // 宽度压扁成 0：TL/TR 角与上边中点全部重合在 (0,0)。距离并列 + 中心距并列 → 环位裁决，
+    // edge（内环）> corner。
+    const flat = [[{ x: 0, y: 0 }, { x: 0, y: 0 }], [{ x: 0, y: 10 }, { x: 0, y: 10 }]];
+    const ft = mkFloat("distort", 1, flat);
+    const hit = ft.hitTest(0, 0, 1);
+    assert(hit && hit.kind === "edge" && hit.edge === "top", `重合 tie 应得 edge:top，实得 ${hit && hit.kind}`);
+  });
 });
 
 // Slice 3：多 source（组变换）= 一个 gizmo 驱动多 source。核心数学 = source.rect 经

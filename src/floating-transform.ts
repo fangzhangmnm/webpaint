@@ -341,11 +341,15 @@ export class FloatingTransform {
     }
     const r = 18 / screenScale;
     const handles = this._visibleHandles(screenScale);
-    for (const h of handles) {
-      const dx = x - h.pos!.x, dy = y - h.pos!.y;
-      if (dx * dx + dy * dy < r * r) return h;
-    }
-    return { kind: "translate" };
+    // nearest-wins（user 拍板 2026-08-21：「handler 挤太近了点不到中间那个——nearest wins，
+    //   tie break 优先内环」）：半径内取最近；并列（重合/缩得极小时）取离 gizmo 中心近的。
+    //   只改选中，不动半径 / 拖动行为；单候选场景与旧 first-match 同解。
+    const N = f.meshN, m = f.mesh;
+    const center = {
+      x: (m[0][0].x + m[0][N - 1].x + m[N - 1][0].x + m[N - 1][N - 1].x) / 4,
+      y: (m[0][0].y + m[0][N - 1].y + m[N - 1][0].y + m[N - 1][N - 1].y) / 4,
+    };
+    return pickNearestHandle(handles, x, y, r, center) ?? { kind: "translate" };
   }
 
   beginDrag(hit: Hit | null, x: number, y: number) {
@@ -976,6 +980,29 @@ function solveAffineEdge(mesh: Mesh, meshSnap: Mesh, drag: Drag, edge: string, x
 // （unionRects/bboxToQuad 已随 lift 内联进 lift() 编排——初始 gizmo/mesh 在令牌内产。）
 function sub(a: Point, b: Point): Point { return { x: a.x - b.x, y: a.y - b.y }; }
 function mid(a: Point, b: Point): Point { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
+
+// handle 选中（纯函数，hitTest 用；export 供测试）——user 拍板 2026-08-21：
+//   「透视变换 handler 挤太近了点不到中间那个——nearest wins，tie break 优先内环」。
+// 半径 r 内候选取最近；距离并列（差 < ε）时「内环优先」两级裁：先取离 center（gizmo 中心）
+//   近的（凸 quad 里边中点恒比角更靠内 → 挤成一团时中点不再被列表序靠前的角吃掉）；
+//   连中心距都并列（压扁/重合退化）再按环位 kind 裁（edge 中点=内环 > corner > rotate/basisRotate 外环）。
+//   ε 取 r 的千分之一：只兜浮点渣与真重合，正常间距下就是严格 nearest。
+const RING_RANK: Record<Hit["kind"], number> = { edge: 0, corner: 1, rotate: 2, basisRotate: 2, translate: 3 };
+export function pickNearestHandle(handles: Hit[], x: number, y: number, r: number, center: Point): Hit | null {
+  const eps = r * 1e-3;
+  let best: Hit | null = null, bestD = Infinity, bestC = Infinity, bestK = Infinity;
+  for (const h of handles) {
+    if (!h.pos) continue;
+    const d = Math.hypot(x - h.pos.x, y - h.pos.y);
+    if (d >= r) continue;                                  // 半径判定与旧版一致（严格 <）
+    const c = Math.hypot(h.pos.x - center.x, h.pos.y - center.y);
+    const k = RING_RANK[h.kind] ?? 3;
+    if (d < bestD - eps || (d < bestD + eps && (c < bestC - eps || (c < bestC + eps && k < bestK)))) {
+      best = h; bestD = d; bestC = c; bestK = k;
+    }
+  }
+  return best;
+}
 function norm(v: Point): Point {
   const len = Math.hypot(v.x, v.y);
   return len > 1e-6 ? { x: v.x / len, y: v.y / len } : { x: 1, y: 0 };

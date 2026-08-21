@@ -79,6 +79,30 @@ describe("timelapse · ora 集成", () => {
     eq(back.motion.length, 0);
   });
 
+  // 无地本地文件模式（spec 20260819 §7；user 2026-08-21「timelapse 跟着 ora 走，无地当然全量」）：
+  // 录制态的持久化只经 ora 字节进出，**零 store 身份依赖**——本用例整链只有字节：
+  // 开录→存（=Ctrl+S 写回本地文件的 encode 等价物）→回读（=openLocalFile 的 adopt 等价物）→续录→再存→再回读。
+  it("无 store 身份（无地轨）：字节 round-trip 后续录再存，录制态/样本全保真", async () => {
+    const st = new TimelapseDocState();
+    st.startRecording({ aspectW: 1, aspectH: 1, longEdge: 512 });
+    st.pushMotionSample({ bytes: nalu(1), key: true }, FAKE_AVCC);
+    const saved1 = st.serializeForSave({ bytes: nalu(9), key: true }, 512, 512);
+    const blob1 = await encodeDocToOra(mkDoc(), { wroteWith: "v-test", timelapse: saved1 });
+    const dec1 = await decodeOraToPainting(blob1);
+    const back = TimelapseDocState.restore(dec1._timelapseJson ?? null, dec1._timelapseMp4 ?? null);
+    eq(back.restoreIssue, null);
+    eq(back.on, true, "开关 sticky：重开本地文件仍在录");
+    back.pushMotionSample({ bytes: nalu(2), key: false });   // 续录两帧
+    back.pushMotionSample({ bytes: nalu(3), key: false });
+    const saved2 = back.serializeForSave({ bytes: nalu(9), key: true }, 512, 512);
+    const blob2 = await encodeDocToOra(mkDoc(), { wroteWith: "v-test", timelapse: saved2 });
+    const dec2 = await decodeOraToPainting(blob2);
+    const back2 = TimelapseDocState.restore(dec2._timelapseJson ?? null, dec2._timelapseMp4 ?? null);
+    eq(back2.restoreIssue, null);
+    eq(back2.motion.length, 3, "1 旧 + 2 续录（尾帧照常截掉）");
+    jeq(back2.settings, { aspectW: 1, aspectH: 1, longEdge: 512 });
+  });
+
   it("无录像文档：一个 timelapse entry 都不写（存量画作字节形状零变化）", async () => {
     const blob = await encodeDocToOra(mkDoc(), { wroteWith: "v-test", timelapse: null });
     const bytes = await blobBytes(blob);

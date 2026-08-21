@@ -6,7 +6,8 @@
 //   _store.autosave/_store.edits 的红线清单说的调用早已一个都不剩，import 也删了。）
 //
 // **红线（CRITICAL）**：本模块只接线，**绝不**改任何 session.* 调用的参数/顺序/语义。
-//   menuSaveAs 用 session.saveAs（内部 = store.file(name,{mode:"new"}).save）；
+//   另存为（runSaveAsFlow，入口 2026-08-21 挪进「导出与另存」hub 的「复制一份到图库」，
+//   由 export-import-menu 的 choice sheet 调）用 session.saveAs（内部 = store.file(name,{mode:"new"}).save）；
 //   menuRevert 用 session.readCheckpoint + session.adoptAsExisting（**既有身份**，别错用 adoptAsNew）。
 //   要改 store 行为 → STOP，escalate。
 //
@@ -211,36 +212,11 @@ export function initTopbarMenu(ctx: AppContext) {
       } catch (e) { reportError(new Error("[local-file] open failed: " + String(e)), "warning"); }
     });
   }
-  // v125 (user：「菜单加另存为（画库 + 名字冲突检查）」)
-  //   "另存为" = 当前 doc 复制到新名字 session（原 session 保留）。
-  //   完成后切到新 session 继续编辑（Photoshop 语义）。同名检查本地 + 云端。
-  els.menuSaveAs.addEventListener("click", async () => {
-    setMenuOpen(false);
-    editMode.applyPendingTransient();
-    const oldName = session.name || t("nd.untitled");
-    let candidate = `${oldName} ${t("name.copySuffix")}`;
-    while (true) {
-      const input = await openInputSheet(t("tm.saveAs"), candidate, { placeholder: t("tm.newArtworkNamePlaceholder") });
-      if (input === null) return;
-      const trimmed = input.trim();
-      if (!trimmed) { setStatus(t("tm.nameEmpty"), true); candidate = ""; continue; }
-      if (trimmed === oldName) { setStatus(t("tm.nameSameAsCurrent"), true); candidate = trimmed; continue; }
-      const occ = await sessionNameConflict(trimmed);   // 统一 store.files.nameOccupied（boolean：local + 在线 remote）
-      if (occ) { setStatus(t("tm.nameExists", { name: trimmed }), true); candidate = trimmed; continue; }
-      // 极端 race（预检后到落盘间被占）→ file(name,{mode:"new"}) 的护栏抛 CloudNameCollisionError，
-      //   下面 catch 兜底循环重问。另存为 = 写新身份、旧的不动（本地存 + 云端 best-effort 推）。
-      try {
-        await session.saveAs(trimmed);   // 当前内容写新身份 + 切新名（session 编排；tryPush best-effort）
-        setStatus(t("tm.savedAsWithCloud", { name: trimmed }));
-        return;
-      } catch (e) {
-        if ((e as { name?: string })?.name === "CloudNameCollisionError") { setStatus(t("tm.cloudNameExists", { name: trimmed }), true); candidate = trimmed; continue; }
-        setStatus(t("tm.saveAsFailed", { err: String(errMsg(e)) }));
-        return;
-      }
-    }
-  });
-  // v133 revert：从 IDB checkpoint 恢复 session 打开时的状态
+  // 另存为（v125）：2026-08-21 菜单行删除，入口挪进「导出与另存」hub 的「复制一份到图库」
+  //   （export-import-menu 的 choice sheet 调 runSaveAsFlow，见文件尾）。逻辑原样，只挪入口。
+  // v133 revert：从 IDB checkpoint 恢复 session 打开时的状态。
+  //   2026-08-21 按钮出栏常显（index.html 拿掉 hidden，位置=加密之后；user：「居然没接」）——
+  //   无快照时点击走下面 tm.noOpenSnapshot 的 status 兜底，无需再藏。
   els.menuRevertToOpen?.addEventListener("click", async () => {
     setMenuOpen(false);
     if (!session.name) { setStatus(t("tm.noActiveSession"), true); return; }
@@ -334,4 +310,41 @@ export function initTopbarMenu(ctx: AppContext) {
     const n = await rack.restoreBuiltins();
     setStatus(n ? t("tm.rackRestored", { count: n }) : t("br.rackRestoreFailed"), true);
   });
+}
+
+// v125 (user：「菜单加另存为（画库 + 名字冲突检查）」)
+//   "另存为" = 当前 doc 复制到新名字 session（原 session 保留）。
+//   完成后切到新 session 继续编辑（Photoshop 语义）。同名检查本地 + 云端。
+// 2026-08-21：菜单行删除，唯一入口 = 「导出与另存」hub 的「复制一份到图库」
+//   （export-import-menu 的 choice sheet 调本函数）。**逻辑从旧 menuSaveAs handler 原样搬入**
+//   （红线：session.saveAs 调用参数/语义一个字不改）；调用点在 initTopbarMenu 之后才可能触发
+//   （菜单点击），module 级 editMode/setStatus 届时已绑定。
+export async function runSaveAsFlow(): Promise<void> {
+  editMode.applyPendingTransient();
+  // 无地本地文件模式（spec §7）：另存为 = 收编入库。session.name 恒 null（双墙设计）→ 建议名用
+  //   本地文件 stem（不是「无题 副本」）；且没有「与当前名字相同」可言——文件 stem 不是 store 身份，
+  //   同名入库合法（撞已有作品由下面 nameOccupied 预检 + mode:"new" 护栏兜）。
+  const lf = session.localFile;
+  const oldName = session.name || t("nd.untitled");
+  let candidate = lf ? (lf.name.replace(/\.[^.]+$/, "") || oldName) : `${oldName} ${t("name.copySuffix")}`;
+  while (true) {
+    const input = await openInputSheet(t("tm.saveAs"), candidate, { placeholder: t("tm.newArtworkNamePlaceholder") });
+    if (input === null) return;
+    const trimmed = input.trim();
+    if (!trimmed) { setStatus(t("tm.nameEmpty"), true); candidate = ""; continue; }
+    if (!lf && trimmed === oldName) { setStatus(t("tm.nameSameAsCurrent"), true); candidate = trimmed; continue; }
+    const occ = await sessionNameConflict(trimmed);   // 统一 store.files.nameOccupied（boolean：local + 在线 remote）
+    if (occ) { setStatus(t("tm.nameExists", { name: trimmed }), true); candidate = trimmed; continue; }
+    // 极端 race（预检后到落盘间被占）→ file(name,{mode:"new"}) 的护栏抛 CloudNameCollisionError，
+    //   下面 catch 兜底循环重问。另存为 = 写新身份、旧的不动（本地存 + 云端 best-effort 推）。
+    try {
+      await session.saveAs(trimmed);   // 当前内容写新身份 + 切新名（session 编排；tryPush best-effort）
+      setStatus(t("tm.savedAsWithCloud", { name: trimmed }));
+      return;
+    } catch (e) {
+      if ((e as { name?: string })?.name === "CloudNameCollisionError") { setStatus(t("tm.cloudNameExists", { name: trimmed }), true); candidate = trimmed; continue; }
+      setStatus(t("tm.saveAsFailed", { err: String(errMsg(e)) }));
+      return;
+    }
+  }
 }

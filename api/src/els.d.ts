@@ -97,7 +97,6 @@ export declare const els: {
     tlPanelHead: HTMLElement;
     tlPanelBody: HTMLElement;
     tlPanelClose: HTMLButtonElement;
-    menuSaveAs: HTMLElement;
     menuRevertToOpen: HTMLElement;
     menuEncrypt: HTMLElement;
     menuEncryptLabel: HTMLElement;

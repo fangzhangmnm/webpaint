@@ -121,6 +121,7 @@ export declare class FloatingTransform {
     _pointInQuad(x: number, y: number): boolean;
 }
 export declare function isAffineQuad(mesh: Mesh): boolean;
+export declare function pickNearestHandle(handles: Hit[], x: number, y: number, r: number, center: Point): Hit | null;
 export declare function sourceDestQuad(rect: Rect, frame: FloatFrame, mesh: Mesh): Mesh | null;
 export declare function integerRigidOf(rect: Rect, dq: Mesh): RigidMap | null;
 export declare function integerTranslationOf(rect: Rect, dq: Mesh): {

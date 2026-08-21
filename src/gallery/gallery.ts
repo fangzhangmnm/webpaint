@@ -32,6 +32,7 @@ import { getOrFetchImageThumb } from "./image-thumbs.ts";
 import { imageThumbToken, imageTwinBareName, mimeForImageName } from "./cloud-image-model.ts";
 import { importImageAsNewDoc } from "../import-image.ts";
 import { createFrameGate } from "./frame-gate.ts";
+import { naturalCompare } from "./natural-order.ts";
 import { reportError } from "../error-badge.ts";
 // 加密（ADR-0012）：tile 锁样式 + 解锁浏览；transform/密码循环全在 store（flow.encrypt/decrypt +
 // crypt seam）。图库只做 per-app 的部分：首次设密码双输 UX、活动项预检、明文残留清理、
@@ -489,7 +490,7 @@ function makeGallery(host: GalleryHost) {
         if (folder.value) targets.push(pathFolder(folder.value));                 // 父夹（当前非根时；父可能是根 ""）
         for (const fn of data.folderNames) targets.push(pathJoin(folder.value, fn)); // 当前夹的 immediate 子夹
         const sorted = [...new Set(targets)].filter((f) => f !== cur)
-          .sort((a, b) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)));
+          .sort((a, b) => (a === "" ? -1 : b === "" ? 1 : naturalCompare(a, b)));   // 根置顶，其余自然序
         if (!sorted.length) { host.status(t("gal.st.noOtherFolder")); return; }
         const target = await host.chooseFolder(t("gal.dlg.moveTitle", { base }), t("gal.dlg.moveMsg"),
           sorted.map((f) => ({ label: f === "" ? t("gal.rootFolder") : f, value: f })));

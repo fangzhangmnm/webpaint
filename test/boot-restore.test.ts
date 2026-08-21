@@ -20,6 +20,9 @@ function ports(over: Partial<RestorePorts> = {}) {
     setRestoreAttempt: (n) => { marker = n; log.push(`marker=${n}`); },
     flushMarker: async () => { log.push("flushMarker"); },
     onCrashLoopSkipped: (n) => log.push(`crashLoopSkipped(${n})`),
+    // 双实例互认（纪律④）：默认无别的窗口持锁（= 无 Web Locks 环境的降级值，行为同旧）
+    isDocLockedElsewhere: async () => false,
+    onLockedElsewhere: (n) => log.push(`lockedElsewhere(${n})`),
     ...over,
   };
   let marker: string | null = over.getRestoreAttempt ? over.getRestoreAttempt() : null;
@@ -65,6 +68,8 @@ test("★ 打开失败 → 持久的 currentFile 必须还在（纪律②：失�
     setRestoreAttempt: (n) => { marker = n; },        // 断路标记有自己的槽 —— 同样绝不碰 persisted
     flushMarker: async () => {},
     onCrashLoopSkipped: () => {},
+    isDocLockedElsewhere: async () => false,
+    onLockedElsewhere: () => {},
   };
   eq(await restoreLastSession(p), "gallery-failed");
   eq(persisted, "X", "★ 持久名还在");
@@ -119,4 +124,50 @@ test("陈旧标记 ≠ 想开的画 → 不断路，照常开（换过文档后�
   eq(await restoreLastSession(p), "restored");
   assert(log.includes("opened(X)"), "正常打开");
   assert(log.includes("marker=X"), "标记被覆写成新目标");
+});
+
+// ── 纪律④：双实例互认（Web Locks，2026-08-21 双实例案）─────────────────────
+
+test("★ 活锁在场 → 不自动开：停图库、restore 不被调、如实报「另一窗口」而非崩溃", async () => {
+  let restoreCalled = false;
+  const { p, log, mem } = ports({
+    isDocLockedElsewhere: async () => true,
+    restore: async () => { restoreCalled = true; return true; },
+  });
+  eq(await restoreLastSession(p), "gallery-locked-elsewhere");
+  eq(restoreCalled, false, "★ 同画双开=本地字节互覆，入口就得拦住");
+  eq(mem(), null, "内存名降回 safe default（幽灵路径纪律①同款）");
+  assert(log.includes("openGallery"), "停图库");
+  assert(log.includes("lockedElsewhere(X)"), "如实告知正在另一个窗口");
+  assert(!log.some((l) => l.startsWith("crashLoopSkipped")), "不是崩溃，不报 crashLoop");
+});
+
+test("★ 活锁在场 + 崩溃标记在场 → 不判崩溃（断路器误触修复）：标记不写不清、断路器语义不被消耗", async () => {
+  // 误触序列：实例 A 冷启动写了 restoreAttempt、还在慢加载（等网络/密码）时用户开实例 B
+  //   → B 读到 A 的在途标记。旧逻辑 B 误判崩溃环；有锁互认后：A 活着（持锁）⇒ 不是崩溃。
+  let restoreCalled = false;
+  const { p, log, marker } = ports({
+    isDocLockedElsewhere: async () => true,
+    getRestoreAttempt: () => "X",
+    restore: async () => { restoreCalled = true; return true; },
+  });
+  eq(await restoreLastSession(p), "gallery-locked-elsewhere");
+  eq(restoreCalled, false);
+  assert(!log.some((l) => l.startsWith("crashLoopSkipped")), "★ 有人持锁 = 上个实例活着，不是崩溃");
+  assert(!log.some((l) => l.startsWith("marker=")), "标记不写不清——断路器语义原样保留");
+  eq(marker(), "X", "A 真死时锁自动释放（Web Locks 语义），下次 boot 无锁+标记在场照常断路");
+  assert(log.includes("lockedElsewhere(X)"), "报的是「另一窗口」，不是 crashLoop");
+});
+
+test("无锁 + 崩溃标记在场 → 原崩溃断路行为一字不变（真崩溃回归）", async () => {
+  let restoreCalled = false;
+  const { p, log, marker } = ports({
+    isDocLockedElsewhere: async () => false,   // 上个实例真死了：锁已被浏览器自动释放
+    getRestoreAttempt: () => "X",
+    restore: async () => { restoreCalled = true; return true; },
+  });
+  eq(await restoreLastSession(p), "gallery-crash-loop");
+  eq(restoreCalled, false, "断路：不再碰那张必死的画");
+  assert(log.includes("crashLoopSkipped(X)"), "照常报 crashLoop");
+  eq(marker(), "X", "标记保留语义不变");
 });

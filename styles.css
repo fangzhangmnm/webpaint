@@ -2371,6 +2371,9 @@ body[data-mode="gallery"] .board { display: none !important; }
 .gallery-trash-menu-item:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); }
 .gallery-trash-menu-item.danger { color: #c0392b; }
 .gallery-trash-menu-item.danger:hover { background: color-mix(in srgb, #c0392b 12%, transparent); }
+/* disabled 占位项（备份箱预告）：跟 .menu-item:disabled 同款淡化 */
+.gallery-trash-menu-item:disabled { opacity: 0.35; cursor: not-allowed; }
+.gallery-trash-menu-item:disabled:hover { background: transparent; }
 
 /* 全屏 block 进度（pullCloudPath 等长操作期间防误点） */
 .fullscreen-busy {

@@ -39,6 +39,7 @@ import type { GalleryItem } from "./gallery/gallery-model.ts";
 import { t } from "./i18n/index.ts";
 import { createEditorSession, type EditorSession, type StoreLike } from "./editor-session/index.ts";
 import { timelapseDetach, timelapseAdopt, timelapseForSave } from "./timelapse-session.ts";
+import { holdDocLock, releaseDocLock, isDocLockedElsewhere } from "./instance-locks.ts";
 import { commitFillNow } from "./fill-mode.ts";
 
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
@@ -90,6 +91,10 @@ const toFull = (name: string) => sessionFileName(name);
 function _setActive(name: string | null): void {
   _activeSessionName = name == null ? null : sessionBareName(name);
   setCurrentSessionName(_activeSessionName ?? "");
+  // 双实例互认（2026-08-21）：身份唯一写入口 = 锁收口点。持有 doc ⇔ 长持它的 Web Lock
+  //   （open/restore/newDoc/saveAs/adopt/rename 全从这收口；null=退图库/无地接管 → 释放。
+  //   无地**不持锁**：无 store 身份、FS handle 拿不到全路径无稳定唯一键，且已有 mtime 陈旧对表兜底）。
+  if (_activeSessionName != null) holdDocLock(_activeSessionName); else releaseDocLock();
 }
 const _file = (name: string) => _store.file(toFull(name), { isZip: true, mode: "existing" });   // WeebPaint work-file = ora-zip 容器（有 peek）
 async function _refreshEncrypted() {
@@ -616,6 +621,12 @@ async function newDoc({ name, w, h, layer0Name, layer0Pixels }: { name: string; 
 // ---- 打开图库 item ----
 async function openItem(item: GalleryItem) {
   if (item.name === _activeSessionName) { setGalleryOpen(false); return; }
+  // 双实例互认（2026-08-21）：同画双开 = 本地字节互覆（store 层的修另行处理），入口拦住。
+  //   警告 + 默认取消（openConfirmSheet 的 Esc/点背板都是取消），用户明确确认才继续。
+  //   排在 leaveLocalFile 之前：先警告再谈保存，取消时什么都没发生。
+  if (await isDocLockedElsewhere(sessionBareName(item.name))) {
+    if (!(await openConfirmSheet(t("ss.docLockedElsewhereTitle"), t("ss.docLockedElsewhereMsg", { name: item.name })))) return;
+  }
   if (!(await leaveLocalFile())) return;   // 无地且脏 → 问；取消 = 不开
   if (es.isDirty()) await saveNow();
   // 开画顺带把 4 个 settings/state collection 拉云对齐（v409，user 2026-07-14：「开画作的时候可以顺便
@@ -681,6 +692,18 @@ async function unloadItem(item: GalleryItem) {
 
 // boot：按名恢复上次 doc（file.open 内含本地/云端 + freshness + unseal）。返回是否成功装入。
 async function restoreSession(name: string): Promise<boolean> {
+  // 双实例互认（2026-08-21）：**attempt 期就占坑**——慢加载窗口（等密码/等网络）正是双实例
+  //   误判窗：此期间第二实例 query 必须看到「有人持有」，否则它读到我们在途的 restoreAttempt
+  //   标记会误判崩溃环（boot-restore 纪律④只查得到锁，锁得先在）。锁被别人持有的路
+  //   boot-restore 已在调用前挡掉（ifAvailable:true 拿不到也只是不持，无害）。
+  //   成功 → _setActive(name) 同名续持（no-op）；失败 → 统一释放（本函数只有 boot 调用，
+  //   失败时停图库，本 tab 不持有任何 doc）。
+  holdDocLock(sessionBareName(name));
+  const ok = await _restoreSessionAttempt(name);
+  if (!ok) releaseDocLock();
+  return ok;
+}
+async function _restoreSessionAttempt(name: string): Promise<boolean> {
   // 开画顺带把 4 个 settings/state collection 拉云对齐（v409，user 2026-07-14：「开画作的时候可以顺便
   //   并行 pullandreconcile 下，fire and forget 不用 await」）。**绝不 await**：对齐是锦上添花，
   //   不该让开画等网络（且离线/local-only 内部本就 no-op）。
@@ -736,6 +759,8 @@ function setName(name: string | null, opts: { persist?: boolean } = {}) {
   //   原始名塞回来，重新制造 `item.name === session.name` 的失配。
   _activeSessionName = name == null ? null : sessionBareName(name);
   if (opts.persist !== false) setCurrentSessionName(_activeSessionName as string);
+  // 双实例互认：同 _setActive——换身份=换锁（gallery 移动文件同步活动名也算换身份）。
+  if (_activeSessionName != null) holdDocLock(_activeSessionName); else releaseDocLock();
   _recomputePhase();
 }
 
@@ -767,6 +792,14 @@ export const session = {
     if (!_activeSessionName) return null;
     await saveNow();                              // 未保存编辑先落盘（seal 会在写入前包壳 → 落地即密文）
     return await _file(_activeSessionName).getEncryptedBlob();
+  },
+  /** 当前 doc 的完整 .ora 字节（**明文**；2026-08-21「导出与另存」hub 的「存为本地 .ora」用）。
+   *  与显式保存同一落盘形（_encodeCurrentOraWithPeek：meta+timelapse+mergedimage）；加密作品也出
+   *  明文——内存本就是解密态，入口 sheet 文案已说清。纯导出副本：不落库、不碰 es/_localFile 身份。 */
+  async encodeCurrentOra(): Promise<Blob> {
+    _applyPendingForExplicitSave();   // 显式导出动作：fill 预览等 pending 一并收口（同 saveAs 首行）
+    const { bytes } = await _encodeCurrentOraWithPeek();
+    return bytes;
   },
   readCheckpoint: _readSessionCheckpoint, dropCheckpoint: _dropCheckpoint,
   // （v415 删掉一批零读者的 facade 条目：current/lazyBlank/docLastSavedAt/sessionOpenedAt/

@@ -115,7 +115,7 @@ export const els = {
   tlPanelHead: byId("tlPanelHead"),
   tlPanelBody: byId("tlPanelBody"),
   tlPanelClose: byId<HTMLButtonElement>("tlPanelClose"),
-  menuSaveAs: byId("menuSaveAs"),
+  // menuSaveAs 已删（2026-08-21）：另存为并入「导出与另存」hub（export-import-menu 的 choice sheet）
   menuRevertToOpen: byId("menuRevertToOpen"),
   menuEncrypt: byId("menuEncrypt"),
   menuEncryptLabel: byId("menuEncryptLabel"),

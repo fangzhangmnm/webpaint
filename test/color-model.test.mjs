@@ -37,8 +37,16 @@ describe("color-model", () => {
     eq(normalizeHex("1b1b1b"), "#1b1b1b");
     eq(normalizeHex("#ABCDEF"), "#abcdef");
     eq(normalizeHex(" #abcdef "), "#abcdef");
-    eq(normalizeHex("#abc"), null, "3 位非法");
     eq(normalizeHex("xyz"), null, "非 hex 非法");
+  });
+
+  it("normalizeHex 3 位缩写展开（2026-08-21 拍板：三位六位都支持）", () => {
+    eq(normalizeHex("#abc"), "#aabbcc", "#abc 展开");
+    eq(normalizeHex("#ABC"), "#aabbcc", "大写也展开+小写化");
+    eq(normalizeHex("f00"), "#ff0000", "裸 3 位补 # 后展开");
+    eq(normalizeHex("#ab"), null, "2 位仍非法");
+    eq(normalizeHex("#abcd"), null, "4 位仍非法");
+    eq(normalizeHex("#aabbccdd"), null, "8 位（alpha）不收");
   });
 
   it("sameHex 大小写无关 + null 安全", () => {

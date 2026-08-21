@@ -1,5 +1,7 @@
 // 职责（单一）：汉堡菜单的「导入 / 导出 / 剪贴板」项 + 导出格式偏好（project / image / import 三组 prefs）
 // + 齿轮（🔧）配置 popup + 菜单子标签刷新。
+// 2026-08-21 起 menuExportImage 行 = 「导出与另存」hub 入口（choice sheet 三去向：导出图片 /
+// 存为本地 .ora / 复制一份到图库），见 initExportImportMenu 尾部接线。
 //
 // 旧 app.js 「菜单：导入 / 导出 / 剪贴板」区逐字搬来；app.js 短路成 import + initExportImportMenu() 装配。
 // 导入/导出偏好存 desk（per-doc desk state，见 editor-state.ts）；boot 的 _updateMenuSubLabels() 进 init。
@@ -16,6 +18,9 @@ import { els } from "./els.ts";
 import { t } from "./i18n/index.ts";
 import { setMenuOpen } from "./settings-menu.ts";
 import { session } from "./session-state.ts";
+import { openChoiceSheet } from "./sheets.ts";
+import { runSaveAsFlow } from "./topbar-menu.ts";   // hub「复制一份到图库」= 原另存为（逻辑在 topbar-menu，红线原样）
+import { supportsSaveFilePicker, pickSaveOraFile, writeHandleBlob } from "./local-file-session.ts";
 import { triggerDownload, shareOrDownloadBlob, copyImageToClipboard, readImageFromClipboard, printImageBlob, printImageInNewWindow, prefersShare } from "./session.ts";
 import { importImageAsLayer } from "./import-image.ts";
 import { desk } from "./workbench-state.ts";
@@ -53,8 +58,9 @@ function _selCropRect(): { x: number; y: number; w: number; h: number } | null {
 function _isProjectFormat(fmt: string): boolean { return (getExporter(fmt)?.kind ?? "image") === "project"; }
 
 // 导出文件名的基名（v0.9.31，QA ③）：无地本地文件模式 session.name 恒 null（双墙设计），
-//   用打开的本地文件 stem；否则用 store 裸名（自带夹前缀）。所有导出 sink 共用。
-function _exportBaseName(): string {
+//   用打开的本地文件 stem；否则用 store 裸名（自带夹前缀）。所有导出 sink 共用
+//   （含 timelapse mp4 导出——app.ts 接线 initTimelapseUi，别在那边再长一份分叉）。
+export function exportBaseName(): string {
   const lf = session.localFile;
   if (lf) return lf.name.replace(/\.[^.]+$/, "") || "export";
   return session.name ?? "export";   // name=null ∧ 非无地 不该发生；防御兜底别让文件名变 "null"
@@ -76,7 +82,7 @@ function _cloudSinkBlocked(): string | null {
 //   撞名自动后缀（mode:"new" 首存护栏仍兜底）。save 默认 best-effort push：
 //   toast 按 pushed 事实说话（在线=已上云 / 离线=已存本地待补推），不谎报。
 async function _exportBlobToCloud(blob: Blob, ext: string): Promise<void> {
-  const name = await nextFreeExportName(`${_exportBaseName()}-${stampNow()}`, ext, (n) => store.files.nameOccupied(n).then(Boolean));
+  const name = await nextFreeExportName(`${exportBaseName()}-${stampNow()}`, ext, (n) => store.files.nameOccupied(n).then(Boolean));
   const r = await store.file(name, { isZip: false, mode: "new" }).save(blob);
   setStatus(r.pushed ? t("tm.exportedCloud", { name }) : t("tm.exportedCloudLocal", { name }), true);
 }
@@ -129,8 +135,10 @@ export function initExportImportMenu(ctx: AppContext) {
   // desk 载入：换画后导入导出偏好（desk）变了 → 刷新折叠菜单 sub-label（值本身按需读，无数据问题；仅显示同步）。
   window.addEventListener("wp:applyEditorState", _updateMenuSubLabels);
 
-  els.menuExportImage.addEventListener("click", async () => {
-    setMenuOpen(false);
+  // 导出图片（hub ①）：v120 起的 sticky-config 一键导出管线——2026-08-21 从 menuExportImage 直挂
+  //   handler 原样改成本地函数，由下面 hub sheet 的「导出图片」调（唯一改动=setMenuOpen 挪到 hub 入口）。
+  //   扳手（menuExportImageConfig）的配置 popup 原样留在菜单行，config 语义零变。
+  const runConfiguredExport = async () => {
     const c = _getExpImg();
     // v0.5.20：ora/psd = 项目语义（所有图层含隐藏 · 文件），与图片路径在此分流。
     if (_isProjectFormat(c.format)) {
@@ -141,7 +149,7 @@ export function initExportImportMenu(ctx: AppContext) {
         if (session.enc.encrypted && exp.id === "ora") {
           const cipher = await session.readEncryptedBytes();   // 内部先 saveNow（否则导的是上次保存的旧内容）
           if (!cipher) { setStatus(t("tm.exportNoCipher"), true); return; }
-          triggerDownload(cipher, `${_exportBaseName()}.ora.zip`);
+          triggerDownload(cipher, `${exportBaseName()}.ora.zip`);
           setStatus(t("tm.dotExtDownloaded", { ext: "ora.zip" }));
           return;
         }
@@ -159,7 +167,7 @@ export function initExportImportMenu(ctx: AppContext) {
         // 加密 + .psd：格式不支持加密 → 出明文（user 已 consent：「导出 psd/png 就当 consent 了」）。
         if (exp.busyHint) setStatus(exp.busyHint, true);
         const blob = await exp.encode(doc);
-        triggerDownload(blob, `${_exportBaseName()}.${exp.ext}`);
+        triggerDownload(blob, `${exportBaseName()}.${exp.ext}`);
         setStatus(t("tm.dotExtDownloaded", { ext: exp.ext }));
       } catch (e) { setStatus(t("tm.exportFailed", { err: String(errMsg(e)) })); }
       return;
@@ -200,10 +208,57 @@ export function initExportImportMenu(ctx: AppContext) {
         const exp = getExporter(c.target === "print" ? (c.format === "jpg" ? "jpg" : "png") : c.format) || getExporter("png");
         if (exp.busyHint) setStatus(exp.busyHint, true);
         const blob = await exp.encode(doc, { scope: c.scope, cropRect, defringe: desk.export.defringe, bg: desk.export.bg });
-        const r = await shareOrDownloadBlob(blob, `${_exportBaseName()}-${stampNow()}.${exp.ext}`, exp.mime);
+        const r = await shareOrDownloadBlob(blob, `${exportBaseName()}-${stampNow()}.${exp.ext}`, exp.mime);
         setStatus(r.method === "share" ? t("tm.sharePanelOpened") : r.method === "cancel" ? t("tm.shareCancelled") : t("tm.extDownloadedUpper", { ext: exp.ext.toUpperCase() }));
       }
     } catch (e) { reportError(new Error(t("tm.exportFailed", { err: String(errMsg(e)) })), "warning"); }   // #34：剪贴板/分享权限被拒也走 banner，不再静默状态栏
+  };
+
+  // 存为本地 .ora（hub ②，user 2026-08-21：「导出里加两个去向：云和本地保存对话框」；无地模式也可用
+  //   =另存一份到别处）。字节 = session.encodeCurrentOra()（_encodeCurrentOraWithPeek 的完整落盘形：
+  //   meta+timelapse+mergedimage，与 Ctrl+S 同源；ora exporter 的裸 encode 不带这些，不用它）。
+  //   加密作品出**明文**（内存本就是解密态）——入口文案用 tm.hubSaveLocalOraPlain + sheet message 说清。
+  //   顺序纪律：先开 OS 保存框再 encode——showSaveFilePicker 要吃 user-gesture 活化，
+  //   encode 的 await（大画可能秒级）不能排在 picker 前面耗活化窗口。
+  const saveLocalOraCopy = async () => {
+    try {
+      const base = exportBaseName();
+      if (supportsSaveFilePicker()) {
+        const h = await pickSaveOraFile(`${base}.ora`);
+        if (!h) return;   // 用户取消 OS 保存框（AbortError → null，不是错误）
+        const bytes = await session.encodeCurrentOra();
+        await writeHandleBlob(h, bytes);
+        setStatus(t("tm.localOraSaved", { name: h.name }));
+      } else {
+        // Safari/Firefox 无 showSaveFilePicker → blob 下载兜底（落默认下载目录）
+        const bytes = await session.encodeCurrentOra();
+        triggerDownload(bytes, `${base}.ora`);
+        setStatus(t("tm.dotExtDownloaded", { ext: "ora" }));
+      }
+    } catch (e) { setStatus(t("tm.localOraSaveFailed", { err: String(errMsg(e)) }), true); }
+  };
+
+  // 2026-08-21 导出与另存 hub（user：「复制一份就是导出的语义——如果没有这个功能，用户会自己用导出
+  //   多步实现，所以放导出里」）：菜单行 = hub 入口，点开 in-app choice sheet（openChoiceSheet：
+  //   点任一去向或取消/点背板都关 sheet，动作在 sheet 关闭后执行——后续各自的 sheet/OS 框/busy 遮罩
+  //   互不叠）。三去向：① 导出图片（按当前扳手配置一键执行，label 带配置摘要） ② 存为本地 .ora
+  //   ③ 复制一份到图库（原「另存为」语义原样 = topbar-menu.runSaveAsFlow；无地 = 收编入库）。
+  els.menuExportImage.addEventListener("click", async () => {
+    setMenuOpen(false);
+    const cfg = document.getElementById("menuExportImageSub")?.textContent || desk.export.format.toUpperCase();
+    const enc = session.enc.encrypted;
+    const choice = await openChoiceSheet<"image" | "local" | "gallery">(
+      t("tm.hubTitle"),
+      enc ? t("tm.hubEncryptedPlainNote") : "",
+      [
+        { label: t("tm.hubExportImage", { cfg }), value: "image", primary: true },
+        { label: enc ? t("tm.hubSaveLocalOraPlain") : t("tm.hubSaveLocalOra"), value: "local" },
+        { label: t("tm.hubCopyToGallery"), value: "gallery" },
+      ],
+    );
+    if (choice === "image") await runConfiguredExport();
+    else if (choice === "local") await saveLocalOraCopy();
+    else if (choice === "gallery") await runSaveAsFlow();
   });
   // v0.5.19（user）：「导入图片」出主菜单——导入文件/剪贴板收进图层窗口 + 菜单（import-image.ts 接线）。
 

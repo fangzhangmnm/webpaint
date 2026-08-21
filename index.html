@@ -495,6 +495,8 @@
             <!-- data-i18n 必须挂在内层 span：桥是 el.textContent = t(…)，挂在按钮上会连图标一起清掉 -->
             <button class="gallery-trash-menu-item danger menu-item-with-icon" id="galleryEmptyTrashLocalBtn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#database"/></svg><span data-i18n="gal.chrome.emptyLocal">清空本地回收站</span></button>
             <button class="gallery-trash-menu-item danger menu-item-with-icon" id="galleryEmptyTrashCloudBtn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#cloud"/></svg><span data-i18n="gal.chrome.emptyCloud">清空云端回收站</span></button>
+            <!-- 备份箱预告（2026-08-21）：disabled 占位，备份箱管理 UI 落地后启用（图标暂复用 floppy-disk，同形多 id 惯例） -->
+            <button class="gallery-trash-menu-item menu-item-with-icon" id="galleryBackupBoxBtn" type="button" role="menuitem" disabled aria-disabled="true"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#floppy-disk"/></svg><span data-i18n="gal.chrome.backupBox">备份箱管理（即将推出）</span></button>
           </div>
         </div>
       </div>
@@ -1287,29 +1289,31 @@
         <button class="menu-item menu-item-with-icon hidden" id="menuSignIn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#cloud"/></svg>
         <span class="menu-item-label" data-i18n="gal.menu.signIn">登录 OneDrive</span>
       </button>
+        <!-- 2026-08-21 导出与另存 hub（user 拍板）：原「导出」+「另存为」合并成一个 in-app sheet
+             （①导出图片=既有 sticky-config 管线 ②存为本地 .ora ③复制一份到图库=原另存为语义）。
+             扳手配置原样留在本行（sub-label 仍显示当前导出配置）。 -->
         <div class="menu-item-row">
           <button class="menu-item menu-item-main menu-item-with-icon" id="menuExportImage" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#export"/></svg>
-          <span class="menu-item-label" data-i18n="menu.exportImage">导出</span>
+          <span class="menu-item-label" data-i18n="menu.exportHub">导出与另存…</span>
           <span class="menu-item-sub" id="menuExportImageSub">PNG · 文件</span>
         </button>
           <button class="menu-item-wrench" id="menuExportImageConfig" type="button" data-i18n-title="menu.config.exportImage" data-i18n-aria="menu.config.exportImage"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#wrench"/></svg></button>
         </div>
+        <button class="menu-item menu-item-with-icon" id="menuRename" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#rename"/></svg>
+        <span class="menu-item-label" data-i18n="menu.rename">重命名当前画作…</span>
+      </button>
+        <button class="menu-item menu-item-with-icon" id="menuEncrypt" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#lock"/></svg>
+        <span class="menu-item-label" id="menuEncryptLabel">加密保护…</span>
+      </button>
+        <!-- v133 revert；2026-08-21 接活出栏（handler 早就在 topbar-menu，按钮一直 hidden——user：「居然没接」）。
+             常显：无快照时点击走「没找到快照」status 兜底 -->
+        <button class="menu-item menu-item-with-icon" id="menuRevertToOpen" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#arrow-undo"/></svg>
+        <span class="menu-item-label" data-i18n="menu.revert">回到打开时的版本…</span>
+      </button>
         <!-- timelapse 过程录像（宣发轮 2026-08-19；opt-in per-doc，spec=ai-docs/20260819-timelapse-spec.md） -->
         <button class="menu-item menu-item-with-icon" id="menuTimelapse" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#timelapse-record"/></svg>
         <span class="menu-item-label" data-i18n="menu.timelapse">过程录像…</span>
         <span class="menu-item-state" id="menuTimelapseState"></span>
-      </button>
-        <button class="menu-item menu-item-with-icon" id="menuRename" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#rename"/></svg>
-        <span class="menu-item-label" data-i18n="menu.rename">重命名当前画作…</span>
-      </button>
-        <button class="menu-item menu-item-with-icon" id="menuSaveAs" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#save-as"/></svg>
-        <span class="menu-item-label" data-i18n="menu.saveAs">另存为…</span>
-      </button>
-        <button class="menu-item menu-item-with-icon" id="menuRevertToOpen" type="button" role="menuitem" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#arrow-undo"/></svg>
-        <span class="menu-item-label" data-i18n="menu.revert">撤销修改…</span>
-      </button>
-        <button class="menu-item menu-item-with-icon" id="menuEncrypt" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#lock"/></svg>
-        <span class="menu-item-label" id="menuEncryptLabel">加密保护…</span>
       </button>
       </div>
       <div class="menu-page hidden" data-menu-page="canvas">
