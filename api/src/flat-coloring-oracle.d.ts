@@ -16,6 +16,10 @@ export declare class FlatColoringOracle {
         width: number;
         height: number;
     }, sourceLayer: OracleSourceLayer | null, x: number, y: number): Selection | null;
+    /** 稠密源提示（一次性消费）：动态档分派到 otsu = 参考层不像线稿（带填色/扫描白底），
+     *  UI 借此提示「建议换 classic 魔棒」。每次分区重建至多置一次；读走即清。 */
+    takeDenseSourceHint(): boolean;
+    private _denseHint;
     /** 分区是否已就绪（UI 可据此决定首次 tap 前要不要提示「分析中」）。 */
     isReady(doc: {
         width: number;
@@ -26,9 +30,11 @@ export declare class FlatColoringOracle {
     /** 闭合距离 dmax（px，8..256）；补段上限 smax 跟随 = 0.75·dmax（一个旋钮管两种闭合笔画）。 */
     setCloseDist(px: number): void;
     getCloseDist(): number;
-    /** 墨线判定（0..100%）：白底合成亮度 ≤ pct·2.55 判为笔画。浅色线稿往上调。 */
+    /** 墨线判定：-1 = 动态档（默认，v0.10.11 user 拍板——分派见 resolveInkBinarization）；
+     *  0..100 = 手动档，白底合成亮度 ≤ pct·2.55 判为笔画（浅色线稿往上调）。 */
     setInkThreshold(pct: number): void;
     getInkThreshold(): number;
+    private _inkPct;
     /** 碎区下限（0..128px）：闭合笔画不许切出比这小的背景碎片区；0 = 关守卫。 */
     setMinRegion(px: number): void;
     getMinRegion(): number;

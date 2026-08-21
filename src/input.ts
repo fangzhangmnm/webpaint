@@ -1071,6 +1071,7 @@ export class InputController {
       try {
         const entry = this.lasso.magicDragEnd();
         if (entry) { this._pushSelEntry(entry); this.board.invalidateAll(); }
+        this._flushLineartHint();
       } catch (e) {
         reportError(new Error("[magic-drag end] " + String(e)), "log");
         this.status(t("st.magicWandErr", { msg: String((e as { message?: unknown })?.message || e) }));
@@ -1089,6 +1090,7 @@ export class InputController {
           this.lasso.cancelDrawing();
           this.status(t("st.selAllOutside"));
         }
+        this._flushLineartHint();
       } catch (e) {
         reportError(new Error("[lasso end] " + String(e)), "log");
         this.status(t("st.selOpErr", { msg: String((e as { message?: unknown })?.message || e) }));
@@ -1111,6 +1113,7 @@ export class InputController {
           } else {
             this.status(t("st.magicWandMiss"));
           }
+          this._flushLineartHint();
         } catch (e) {
           reportError(new Error("[magic-wand] " + String(e)), "log");
           this.status(t("st.magicWandErr", { msg: String((e as { message?: unknown })?.message || e) }));
@@ -1126,6 +1129,12 @@ export class InputController {
       }
     }
   }
+  // 稠密源提示（v0.10.11）：动态墨线判定分派到 otsu = 参考层不像线稿（带填色/白底扫描）。
+  //   oracle 每次分区重建置一次、读走即清——不会每 tap 刷屏；晚于 miss/err status 调用 = 后者让位。
+  _flushLineartHint() {
+    if (this.lasso.takeLineartDenseSourceHint()) this.status(t("st.lineartDenseSrc"));
+  }
+
   // 多边形套索（v0.6.19）：up = 落顶点；≥3 顶点后收笔点距起点 ≤14 screen px = 闭合。
   //   tap 在 polygon 下不再是「清选区」（落点语义优先；清选区走 Esc/Ctrl+D/去选钮）。
   _polygonUp(rec: PointerRec) {

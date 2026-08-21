@@ -58,7 +58,7 @@ declare function freshGroups(): {
         fillGap: boolean;
         fillGapPx: number;
         lineartCloseDist: number;
-        lineartInk: number;
+        lineartInkTh: number;
         lineartMinRegion: number;
         lineartTipSens: number;
         lineartBleed: number;

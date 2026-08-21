@@ -7,9 +7,10 @@
 //   query（贱）：tap → label 查表 → tight-bbox mask → Selection。
 // 该文件不懂论文数学（全在 src/flat-coloring/），也不懂指针/UI；供 LassoEngine 调用。
 import {
-  buildFlatColoringPartition, regionMaskAt, attachInkDepth, binarizeLuma, DEFAULT_FLAT_COLORING_PARAMS,
+  buildPartitionFromBinary, regionMaskAt, attachInkDepth, binarizeLuma, binarizeAlpha,
+  resolveInkBinarization, DEFAULT_FLAT_COLORING_PARAMS,
 } from "./backend/algorithms/flat-coloring/partition.ts";
-import type { FlatColoringPartition, FlatColoringParams } from "./backend/algorithms/flat-coloring/partition.ts";
+import type { FlatColoringPartition, FlatColoringParams, InkResolution } from "./backend/algorithms/flat-coloring/partition.ts";
 import { Selection } from "./backend/selection.ts";
 
 /** 结构化最小依赖（≈ floodSelectFrom 的 mock 面）：node 直测不拖 doc.ts */
@@ -22,6 +23,8 @@ export interface OracleSourceLayer {
 export class FlatColoringOracle {
   private _cache: {
     layerId: number; rev: number; w: number; h: number; part: FlatColoringPartition;
+    /** 本次分区实际用的墨线判定（动态档的分派结果；attachInkDepth 必须同源二值化） */
+    ink: { mode: InkResolution["mode"]; thresholdLuma: number | null };
   } | null = null;
   private _params: FlatColoringParams = DEFAULT_FLAT_COLORING_PARAMS;
 
@@ -38,12 +41,24 @@ export class FlatColoringOracle {
       const rgba: Uint8ClampedArray = sourceLayer
         ? sourceLayer.getImageData(0, 0, doc.width, doc.height).data
         : new Uint8ClampedArray(doc.width * doc.height * 4);
-      attachInkDepth(part, binarizeLuma(rgba, doc.width, doc.height, this._params.binarizeThreshold));
+      const ink = this._cache!.ink;
+      attachInkDepth(part, ink.mode === "alpha"
+        ? binarizeAlpha(rgba, doc.width, doc.height)
+        : binarizeLuma(rgba, doc.width, doc.height, ink.thresholdLuma ?? 128));
     }
     const rm = regionMaskAt(part, x, y, this._bleed);
     if (!rm) return null;
     return Selection.fromGray8Region(rm.x, rm.y, rm.w, rm.h, rm.mask);
   }
+
+  /** 稠密源提示（一次性消费）：动态档分派到 otsu = 参考层不像线稿（带填色/扫描白底），
+   *  UI 借此提示「建议换 classic 魔棒」。每次分区重建至多置一次；读走即清。 */
+  takeDenseSourceHint(): boolean {
+    const h = this._denseHint;
+    this._denseHint = false;
+    return h;
+  }
+  private _denseHint = false;
 
   /** 分区是否已就绪（UI 可据此决定首次 tap 前要不要提示「分析中」）。 */
   isReady(doc: { width: number; height: number }, sourceLayer: OracleSourceLayer | null): boolean {
@@ -56,7 +71,8 @@ export class FlatColoringOracle {
   /** 换文档 / 明确要丢缓存时调（16MB 级 label map，别赖着）。 */
   invalidate(): void { this._cache = null; }
 
-  // ---- 可调 knob（v0.7.2 扳手弹出；RAM-only）。改了就丢缓存，下次 tap 重建。 ----
+  // ---- 可调 knob（v0.7.2 扳手弹出；v0.7.17 起全部 knob per-doc 跟文件走——desk.magicWand
+  //      序列化进 ora 的 editor-state，别再写"RAM-only"）。改了就丢缓存，下次 tap 重建。 ----
   /** 闭合距离 dmax（px，8..256）；补段上限 smax 跟随 = 0.75·dmax（一个旋钮管两种闭合笔画）。 */
   setCloseDist(px: number): void {
     const v = Math.max(8, Math.min(256, Math.round(px) || 0));
@@ -65,14 +81,17 @@ export class FlatColoringOracle {
     this.invalidate();
   }
   getCloseDist(): number { return this._params.dmax; }
-  /** 墨线判定（0..100%）：白底合成亮度 ≤ pct·2.55 判为笔画。浅色线稿往上调。 */
+  /** 墨线判定：-1 = 动态档（默认，v0.10.11 user 拍板——分派见 resolveInkBinarization）；
+   *  0..100 = 手动档，白底合成亮度 ≤ pct·2.55 判为笔画（浅色线稿往上调）。 */
   setInkThreshold(pct: number): void {
-    const v = Math.max(0, Math.min(100, Math.round(pct) || 0));
-    if (v === Math.round(this._params.binarizeThreshold / 2.55)) return;
-    this._params = { ...this._params, binarizeThreshold: v * 2.55 };
+    const r = Math.round(pct);
+    const v = Number.isFinite(r) ? Math.max(-1, Math.min(100, r)) : -1;
+    if (v === this._inkPct) return;
+    this._inkPct = v;
     this.invalidate();
   }
-  getInkThreshold(): number { return Math.round(this._params.binarizeThreshold / 2.55); }
+  getInkThreshold(): number { return this._inkPct; }
+  private _inkPct = -1;
   /** 碎区下限（0..128px）：闭合笔画不许切出比这小的背景碎片区；0 = 关守卫。 */
   setMinRegion(px: number): void {
     const v = Math.max(0, Math.min(128, Math.round(px) || 0));
@@ -124,8 +143,13 @@ export class FlatColoringOracle {
     const rgba: Uint8ClampedArray = sourceLayer
       ? sourceLayer.getImageData(0, 0, doc.width, doc.height).data
       : new Uint8ClampedArray(doc.width * doc.height * 4);
-    const part = buildFlatColoringPartition(rgba, doc.width, doc.height, this._params);
-    this._cache = { layerId: id, rev, w: doc.width, h: doc.height, part };
+    const res = resolveInkBinarization(rgba, doc.width, doc.height, this._inkPct);
+    if (res.mode === "otsu") this._denseHint = true;   // 动态档撞上稠密源 → UI 提示换 classic
+    const part = buildPartitionFromBinary(res.Ib, doc.width, doc.height, this._params);
+    this._cache = {
+      layerId: id, rev, w: doc.width, h: doc.height, part,
+      ink: { mode: res.mode, thresholdLuma: res.thresholdLuma },
+    };
     return part;
   }
 }

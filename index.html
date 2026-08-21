@@ -796,8 +796,10 @@
       </div>
       <div class="algo-cfg-row algo-cfg-lineart">
         <span data-i18n="la.inkThreshold">墨线判定</span>
-        <input type="range" id="lassoInkThreshold" min="0" max="100" step="1" value="50" style="width:88px;" data-i18n-aria="la.inkThreshold" />
-        <span id="lassoInkThresholdVal" class="lasso-popup-val">50</span>
+        <!-- v0.10.11 动态档（默认）：alpha/Otsu 自动分派；拖 slider = 落手动档 -->
+        <button class="lasso-tool-btn" id="lassoInkAuto" type="button" data-i18n="la.inkAuto" data-i18n-title="la.inkAuto" aria-pressed="true">动态</button>
+        <input type="range" id="lassoInkThreshold" min="0" max="100" step="1" value="50" style="width:64px;" data-i18n-aria="la.inkThreshold" />
+        <span id="lassoInkThresholdVal" class="lasso-popup-val">动态</span>
       </div>
       <!-- v0.7.4 追加两旋钮 + 调试视图（user 2026-07-30：加 high 手感价值的两个 + 调试视图定案漏网原因） -->
       <div class="algo-cfg-row algo-cfg-lineart">

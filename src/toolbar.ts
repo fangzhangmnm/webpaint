@@ -257,7 +257,12 @@ export function updateLassoToolbar() {
     const dv = document.getElementById("lassoDmaxVal");
     if (dv) dv.textContent = String(input.lasso.getLineartCloseDist());
     const iv = document.getElementById("lassoInkThresholdVal");
-    if (iv) iv.textContent = String(input.lasso.getLineartInkThreshold());
+    if (iv) {
+      const ink = input.lasso.getLineartInkThreshold();
+      iv.textContent = ink < 0 ? t("la.inkAuto") : String(ink);
+    }
+    document.getElementById("lassoInkAuto")?.setAttribute(
+      "aria-pressed", input.lasso.getLineartInkThreshold() < 0 ? "true" : "false");
     const av = document.getElementById("lassoAminVal");
     if (av) av.textContent = String(input.lasso.getLineartMinRegion());
     const sv = document.getElementById("lassoTipSensVal");
@@ -544,14 +549,28 @@ function initSelEditUI() {
     };
     document.getElementById("lassoDmaxMinus")?.addEventListener("click", () => stepDmax(-16));
     document.getElementById("lassoDmaxPlus")?.addEventListener("click", () => stepDmax(+16));
-    // 墨线判定 slider（浅色线稿往上调）
+    // 墨线判定（v0.10.11 动态档默认）：动态钮 = alpha/Otsu 自动分派；拖 slider = 落手动档（浅色线稿往上调）
     const inkInp = document.getElementById("lassoInkThreshold") as HTMLInputElement | null;
     const inkVal = document.getElementById("lassoInkThresholdVal");
+    const inkAutoBtn = document.getElementById("lassoInkAuto");
+    const syncInkUI = () => {
+      const v = input.lasso.getLineartInkThreshold();
+      if (inkInp && v >= 0) inkInp.value = String(v);
+      if (inkVal) inkVal.textContent = v < 0 ? t("la.inkAuto") : String(v);
+      inkAutoBtn?.setAttribute("aria-pressed", v < 0 ? "true" : "false");
+    };
     inkInp?.addEventListener("input", () => {
       const v = Math.max(0, Math.min(100, parseInt(inkInp.value, 10) || 0));
       input.lasso.setLineartInkThreshold(v);
       desk.magicWand.lineartInk = v;
-      if (inkVal) inkVal.textContent = String(v);
+      syncInkUI();
+    });
+    inkAutoBtn?.addEventListener("click", () => {
+      const cur = input.lasso.getLineartInkThreshold();
+      const next = cur < 0 ? Math.max(0, Math.min(100, parseInt(inkInp?.value ?? "50", 10) || 50)) : -1;
+      input.lasso.setLineartInkThreshold(next);
+      desk.magicWand.lineartInk = next;
+      syncInkUI();
     });
     // v0.7.4 碎区下限 stepper（±8；0=关守卫）
     const aminVal = document.getElementById("lassoAminVal");
@@ -595,8 +614,7 @@ function initSelEditUI() {
       input.lasso.setLineartTipSensitivity(mw.lineartTipSens);
       input.lasso.setLineartBleed(mw.lineartBleed);
       if (dmaxVal) dmaxVal.textContent = String(input.lasso.getLineartCloseDist());
-      if (inkInp) inkInp.value = String(input.lasso.getLineartInkThreshold());
-      if (inkVal) inkVal.textContent = String(input.lasso.getLineartInkThreshold());
+      syncInkUI();
       if (aminVal) aminVal.textContent = String(input.lasso.getLineartMinRegion());
       if (sensInp) sensInp.value = String(input.lasso.getLineartTipSensitivity());
       if (sensVal) sensVal.textContent = String(input.lasso.getLineartTipSensitivity());

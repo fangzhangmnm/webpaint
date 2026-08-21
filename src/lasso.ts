@@ -168,6 +168,8 @@ export class LassoEngine {
   getLineartCloseDist() { return this._flatColoringOracle.getCloseDist(); }
   setLineartInkThreshold(pct: number) { this._flatColoringOracle.setInkThreshold(pct); }
   getLineartInkThreshold() { return this._flatColoringOracle.getInkThreshold(); }
+  /** 稠密源提示透传（一次性消费；input.ts 在魔棒收笔点 flush 到状态栏）。 */
+  takeLineartDenseSourceHint() { return this._flatColoringOracle.takeDenseSourceHint(); }
   setLineartMinRegion(px: number) { this._flatColoringOracle.setMinRegion(px); }
   getLineartMinRegion() { return this._flatColoringOracle.getMinRegion(); }
   setLineartTipSensitivity(pct: number) { this._flatColoringOracle.setTipSensitivity(pct); }

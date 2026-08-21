@@ -93,7 +93,7 @@ describe("flat-coloring-oracle · tap→Selection + contentRev 缓存", () => {
     o.selectAt(doc, L, 32, 32).dispose();
     eq(L.calls, 2, "重建");
     eq(o.getCloseDist(), 128, "读回新值");
-    o.setInkThreshold(50);   // ≈ 默认 128/2.55
+    o.setInkThreshold(-1);   // = 默认（v0.10.11 起动态档）
     eq(o.isReady(doc, L), true, "同值不失效");
     o.setInkThreshold(80);
     eq(o.isReady(doc, L), false, "墨线判定变 → 失效");
@@ -141,5 +141,74 @@ describe("flat-coloring-oracle · tap→Selection + contentRev 缓存", () => {
     eq(o.getBleed(), 0, "读回");
     o.setBleed(-5);
     eq(o.getBleed(), -1, "clamp 下限 -1（自动）");
+  });
+});
+
+describe("flat-coloring-oracle · 动态墨线判定（v0.10.11）", () => {
+  const w = 64, h = 64;
+  const doc = { width: w, height: h };
+  /** 淡粉线（白底亮度 ≈190）3px 厚闭合方框，透明底——旧默认手动 50% 下全图漏成一区 */
+  function lightBoxRgba() {
+    const rgba = new Uint8ClampedArray(w * h * 4);
+    const put = (x, y) => {
+      const o = (y * w + x) * 4;
+      rgba[o] = 230; rgba[o + 1] = 180; rgba[o + 2] = 180; rgba[o + 3] = 255;
+    };
+    for (let x = 8; x <= 55; x++) for (let t = 0; t < 3; t++) { put(x, 8 + t); put(x, 53 + t); }
+    for (let y = 8; y <= 55; y++) for (let t = 0; t < 3; t++) { put(8 + t, y); put(53 + t, y); }
+    return rgba;
+  }
+  it("默认动态档：淡线稿 tap 内 → 有界选区（不再全图）；稀疏源无稠密提示", () => {
+    const L = fakeLayer(lightBoxRgba(), w, h);
+    const o = new FlatColoringOracle();
+    eq(o.getInkThreshold(), -1, "默认 -1 = 动态");
+    const sel = o.selectAt(doc, L, 32, 32);
+    assert(sel, "应有选区");
+    assert(sel.bboxW < w && sel.bboxH < h, `有界不是整图（实得 ${sel.bboxW}×${sel.bboxH}）`);
+    sel.dispose();
+    eq(o.takeDenseSourceHint(), false, "稀疏源（alpha 档）不提示");
+  });
+  it("手动档设回 50：同一淡线稿全图漏（对照）；-1 恢复动态", () => {
+    const L = fakeLayer(lightBoxRgba(), w, h);
+    const o = new FlatColoringOracle();
+    o.setInkThreshold(50);
+    eq(o.getInkThreshold(), 50, "手动读回");
+    const sel = o.selectAt(doc, L, 32, 32);
+    assert(sel && sel.bboxW === w && sel.bboxH === h, "手动 50% 看不见淡线 → 整图一区（事故重演）");
+    sel.dispose();
+    o.setInkThreshold(-1);
+    eq(o.getInkThreshold(), -1, "拨回动态");
+    eq(o.isReady(doc, L), false, "换档丢缓存");
+  });
+  it("稠密源（不透明白底）→ 提示一次、读走即清、缓存命中不再置位", () => {
+    const rgba = lightBoxRgba();
+    // 压成不透明白底 + 深灰线（覆盖率 100% → Otsu 档）
+    for (let i = 0; i < w * h; i++) {
+      const o4 = i * 4;
+      if (rgba[o4 + 3] === 0) { rgba[o4] = 255; rgba[o4 + 1] = 255; rgba[o4 + 2] = 255; }
+      else { rgba[o4] = 40; rgba[o4 + 1] = 40; rgba[o4 + 2] = 40; }
+      rgba[o4 + 3] = 255;
+    }
+    const L = fakeLayer(rgba, w, h);
+    const o = new FlatColoringOracle();
+    const sel = o.selectAt(doc, L, 32, 32);
+    assert(sel && sel.bboxW < w, "Otsu 档抓住深线 → 有界选区");
+    sel.dispose();
+    eq(o.takeDenseSourceHint(), true, "稠密源置位");
+    eq(o.takeDenseSourceHint(), false, "读走即清");
+    o.selectAt(doc, L, 2, 2).dispose();
+    eq(o.takeDenseSourceHint(), false, "缓存命中不重建 → 不再置位");
+  });
+  it("bleed=0 像素画模式与动态档同源二值化：alpha 档下淡线一个不碰", () => {
+    const L = fakeLayer(lightBoxRgba(), w, h);
+    const o = new FlatColoringOracle();
+    o.setBleed(0);
+    const sel = o.selectAt(doc, L, 32, 32);
+    assert(sel, "应有选区");
+    // 方框线体 8..10 / 53..55；mask 不吃线 → tight bbox 落在纯内部 11..52
+    assert(sel.bboxX >= 11 && sel.bboxY >= 11 &&
+      sel.bboxX + sel.bboxW - 1 <= 52 && sel.bboxY + sel.bboxH - 1 <= 52,
+      `墨深按 alpha 同源二值化，淡线不被蔓延吃到（实得 bbox ${sel.bboxX},${sel.bboxY} ${sel.bboxW}×${sel.bboxH}）`);
+    sel.dispose();
   });
 });

@@ -142,6 +142,7 @@ export declare class InputController {
     _beginFilterBrush(rec: PointerRec): void;
     _beginLasso(rec: PointerRec, e?: PointerEvent): void;
     _endLasso(rec: PointerRec): void;
+    _flushLineartHint(): void;
     _polygonUp(rec: PointerRec): void;
     _polygonClose(): void;
     _commitLasso(): void;

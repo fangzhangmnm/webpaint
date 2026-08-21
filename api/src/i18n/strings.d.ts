@@ -2904,6 +2904,12 @@ export declare const S: {
         readonly ja: "自動";
         readonly tok: "nasin ilo";
     };
+    readonly "la.inkAuto": {
+        readonly zh: "动态";
+        readonly en: "Auto";
+        readonly ja: "自動";
+        readonly tok: "nasin ilo";
+    };
     readonly "la.algoClassic": {
         readonly zh: "像素精确";
         readonly en: "Pixel-perfect flood";
@@ -6215,6 +6221,11 @@ export declare const S: {
         readonly zh: "魔术棒：tap 在线 / 边界上，没选到";
         readonly en: "Magic wand: tapped on a line/border — nothing selected";
         readonly ja: "自動選択：線・境界上のため選択できません";
+    };
+    readonly "st.lineartDenseSrc": {
+        readonly zh: "参考层不像线稿（大面积填色/白底）——线稿闭合按明暗划区，建议改用像素精确算法";
+        readonly en: "Source layer doesn't look like line art (large fills / opaque background) — line-art closing splits by darkness; consider the pixel-perfect algorithm";
+        readonly ja: "参照レイヤーが線画ではないようです（大面積の塗り/白背景）——線画クロージングは明暗で分割します。ピクセル精確アルゴリズムをお勧めします";
     };
     readonly "st.selCancelled": {
         readonly zh: "已取消选区";

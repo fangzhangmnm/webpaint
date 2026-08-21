@@ -84,6 +84,8 @@ export declare class LassoEngine {
     getLineartCloseDist(): number;
     setLineartInkThreshold(pct: number): void;
     getLineartInkThreshold(): number;
+    /** 稠密源提示透传（一次性消费；input.ts 在魔棒收笔点 flush 到状态栏）。 */
+    takeLineartDenseSourceHint(): boolean;
     setLineartMinRegion(px: number): void;
     getLineartMinRegion(): number;
     setLineartTipSensitivity(pct: number): void;

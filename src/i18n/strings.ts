@@ -550,6 +550,7 @@ export const S = {
   "la.lineartDebug": { zh: "调试视图", en: "Debug view", ja: "デバッグ表示", tok: "lukin sona" },
   "la.underLine":    { zh: "填到线下", en: "Under-line bleed", ja: "線下への塗り込み", tok: "kule anpa linja" },
   "la.bleedAuto":    { zh: "自动", en: "Auto", ja: "自動", tok: "nasin ilo" },
+  "la.inkAuto":      { zh: "动态", en: "Auto", ja: "自動", tok: "nasin ilo" },
   "la.algoClassic":  { zh: "像素精确", en: "Pixel-perfect flood", ja: "ピクセル精確", tok: "nasin pi kule sama" },
   "la.lineartAlgo":  { zh: "线稿闭合", en: "Line-art closing", ja: "線画クロージング", tok: "nasin pi linja pini" },
   "la.algoSimilar":  { zh: "全图同色", en: "Similar color (global)", ja: "全域同色", tok: "nasin pi kule sama lon ale" },
@@ -1140,6 +1141,7 @@ export const S = {
   "st.selPenNeedLayer": { zh: "请先选中一个图层（选区笔预览需要锚点）", en: "Select a layer first (the selection pen preview needs an anchor)", ja: "先にレイヤーを選んでください（選択ペンのプレビューに必要）" },
   "st.selAllOutside":   { zh: "选区全在画布外，已取消", en: "Selection is entirely outside the canvas — cancelled", ja: "選択範囲が全てキャンバス外のため取り消しました" },
   "st.magicWandMiss":   { zh: "魔术棒：tap 在线 / 边界上，没选到", en: "Magic wand: tapped on a line/border — nothing selected", ja: "自動選択：線・境界上のため選択できません" },
+  "st.lineartDenseSrc": { zh: "参考层不像线稿（大面积填色/白底）——线稿闭合按明暗划区，建议改用像素精确算法", en: "Source layer doesn't look like line art (large fills / opaque background) — line-art closing splits by darkness; consider the pixel-perfect algorithm", ja: "参照レイヤーが線画ではないようです（大面積の塗り/白背景）——線画クロージングは明暗で分割します。ピクセル精確アルゴリズムをお勧めします" },
   "st.selCancelled":    { zh: "已取消选区", en: "Selection cancelled", ja: "選択を解除しました" },
   "st.polyInvalid":     { zh: "多边形选区无效（不足三点 / 全在画布外），已取消", en: "Polygon selection invalid (fewer than 3 points / all outside) — cancelled", ja: "多角形選択が無効（3点未満 / 全て外側）のため取り消しました" },
   // 可写叶谓词标准文案（editable-leaf.ts）

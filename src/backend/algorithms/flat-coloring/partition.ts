@@ -98,36 +98,103 @@ export function binarizeLuma(
   return out;
 }
 
-/** 笔画半宽估计：每个 8-连通笔画组件取「到背景距离」最大值，全体取中位数（§3）。 */
+/** alpha 二值化：落了笔（alpha ≥ minAlpha）即墨线，亮度无关——透明底线稿层的正解
+ *  （淡色线稿在亮度判定下只剩最深的芯，整张成虚线；见 resolveInkBinarization）。 */
+export function binarizeAlpha(
+  rgba: Uint8Array | Uint8ClampedArray, w: number, h: number, minAlpha = 26,
+): Uint8Array {
+  const out = new Uint8Array(w * h);
+  for (let i = 0, o = 3; i < out.length; i++, o += 4) {
+    if (rgba[o] >= minAlpha) out[i] = 1;
+  }
+  return out;
+}
+
+/** 动态墨线判定的分派结果：mode 供 UI 提示/诊断；thresholdLuma 仅 luma 系模式有值。 */
+export interface InkResolution {
+  /** alpha=透明底线稿层；otsu=稠密图（扫描/带填色）自动定阈；manual=手动百分比 */
+  mode: "alpha" | "otsu" | "manual";
+  /** 白底合成亮度阈值（0..255）；alpha 模式 = null */
+  thresholdLuma: number | null;
+  /** 落笔（alpha≥10%）覆盖率 0..1，稀疏/稠密分派依据 */
+  coverage: number;
+  Ib: Uint8Array;
+}
+
+/** 墨线判定分派（v0.10.11 动态档，user 2026-08-20 拍板动态为默认）：
+ *  inkPct ≥ 0 → 手动档，白底亮度 ≤ pct·2.55（原有行为）。
+ *  inkPct < 0 → 动态档：落笔覆盖率 ≤25% 判为透明底线稿层 → alpha 档（落笔即墨线，
+ *    淡线稿救星——实案：亮度中位数 190 的线稿在默认 50% 手动档下只剩 13% 笔迹，全图漏成一区）；
+ *  覆盖率 >25%（白底扫描/带填色）→ 白底亮度 Otsu 自动定阈，夹在 [30%,90%]·2.55。
+ *  注意带填色图的固有语义：浅色填充=可穿背景、深色填充=墙——lineart 算法契约是线稿参考层，
+ *  稠密源由 oracle 出 UI 提示引导换 classic 魔棒。 */
+export function resolveInkBinarization(
+  rgba: Uint8Array | Uint8ClampedArray, w: number, h: number, inkPct: number,
+): InkResolution {
+  const n = w * h;
+  if (inkPct >= 0) {
+    const th = Math.max(0, Math.min(100, inkPct)) * 2.55;
+    return { mode: "manual", thresholdLuma: th, coverage: -1, Ib: binarizeLuma(rgba, w, h, th) };
+  }
+  let drawn = 0;
+  for (let i = 0, o = 3; i < n; i++, o += 4) if (rgba[o] >= 26) drawn++;
+  const coverage = drawn / n;
+  if (coverage <= 0.25) {
+    return { mode: "alpha", thresholdLuma: null, coverage, Ib: binarizeAlpha(rgba, w, h) };
+  }
+  // 白底合成亮度直方图 → Otsu（类间方差最大）
+  const hist = new Float64Array(256);
+  for (let i = 0, o = 0; i < n; i++, o += 4) {
+    const a = rgba[o + 3] / 255;
+    const gray = 0.2126 * rgba[o] + 0.7152 * rgba[o + 1] + 0.0722 * rgba[o + 2];
+    const lum = Math.round(255 + (gray - 255) * a);
+    hist[lum < 0 ? 0 : lum > 255 ? 255 : lum]++;
+  }
+  let sumAll = 0;
+  for (let t = 0; t < 256; t++) sumAll += t * hist[t];
+  let sumB = 0, wB = 0, best = -1, bestT = 128;
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t];
+    if (wB === 0) continue;
+    const wF = n - wB;
+    if (wF === 0) break;
+    sumB += t * hist[t];
+    const mB = sumB / wB, mF = (sumAll - sumB) / wF;
+    const between = wB * wF * (mB - mF) * (mB - mF);
+    if (between > best) { best = between; bestT = t; }
+  }
+  const th = Math.max(30 * 2.55, Math.min(90 * 2.55, bestT));
+  return { mode: "otsu", thresholdLuma: th, coverage, Ib: binarizeLuma(rgba, w, h, th) };
+}
+
+/** 笔画半宽估计：EDT 脊线（距离场 8-邻域局部极大）像素取「到背景距离」的中位数。
+ *
+ *  论文 §3 原式是「每个 8-连通组件取最大距离，跨组件取中位数」——它假设笔画散成许多独立
+ *  组件。全连通线稿（粗线互相勾连成 1 个组件）会把中位数退化成全局最大值：组件里只要有
+ *  一坨实心填充（如铅笔笔尖），估出的"半宽"= 那坨的内切半径，腐蚀随即把真实 2-3px 的线条
+ *  整张蒸发（2026-08-20 铅笔图标实案：估 10、实 2，6747px 腐蚀余 266px → 全图一区）。
+ *  脊线中位数按「骨架长度」加权采样：长线条贡献海量脊点、实心坨只贡献中心几点，对两种
+ *  病态（全连通、实心块）都稳健；纯粗笔图（如厚 8 圆环）脊线距离 ≈ 真半宽，行为不变。 */
 export function strokeHalfWidthMedian(Ib: Uint8Array, w: number, h: number, distSq: Int32Array): number {
-  const seen = new Uint8Array(w * h);
-  const maxima: number[] = [];
-  const stack: number[] = [];
-  for (let p0 = 0; p0 < Ib.length; p0++) {
-    if (!Ib[p0] || seen[p0]) continue;
-    let maxD = 0;
-    stack.length = 0;
-    stack.push(p0);
-    seen[p0] = 1;
-    while (stack.length) {
-      const p = stack.pop()!;
-      if (distSq[p] > maxD) maxD = distSq[p];
-      const px = p % w, py = (p / w) | 0;
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          if (!dx && !dy) continue;
-          const qx = px + dx, qy = py + dy;
-          if (qx < 0 || qx >= w || qy < 0 || qy >= h) continue;
-          const q = qy * w + qx;
-          if (Ib[q] && !seen[q]) { seen[q] = 1; stack.push(q); }
-        }
+  const ridge: number[] = [];
+  for (let p = 0; p < Ib.length; p++) {
+    if (!Ib[p]) continue;
+    const d = distSq[p];
+    const px = p % w, py = (p / w) | 0;
+    let isMax = true;
+    for (let dy = -1; dy <= 1 && isMax; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        const qx = px + dx, qy = py + dy;
+        if (qx < 0 || qx >= w || qy < 0 || qy >= h) continue;
+        if (distSq[qy * w + qx] > d) { isMax = false; break; }
       }
     }
-    maxima.push(Math.sqrt(maxD));
+    if (isMax) ridge.push(Math.sqrt(d));
   }
-  if (maxima.length === 0) return 0;
-  maxima.sort((a, b) => a - b);
-  return maxima[maxima.length >> 1];
+  if (ridge.length === 0) return 0;
+  ridge.sort((a, b) => a - b);
+  return ridge[ridge.length >> 1];
 }
 
 /** 背景（Ic==0）4-连通区 label，1 起编号；顺带记 tight bbox。 */
@@ -205,8 +272,16 @@ export function buildPartitionFromBinary(
       const r = Math.min(Math.floor(halfW) - 2, 4);
       const rSq = r * r;
       const eroded = new Uint8Array(w * h);
-      for (let i = 0; i < Ib.length; i++) if (Ib[i] && distSq[i] > rSq) eroded[i] = 1;
-      Ib = eroded;
+      let before = 0, after = 0;
+      for (let i = 0; i < Ib.length; i++) {
+        if (!Ib[i]) continue;
+        before++;
+        if (distSq[i] > rSq) { eroded[i] = 1; after++; }
+      }
+      // 存活率护栏：细化 ≠ 歼灭。合法腐蚀（半宽 5..10+ 的真粗笔，r≤4）至少留 ~1/3 截面核；
+      //   掉到 1/4 以下只能是半宽估计被骗（细线图被重腐蚀）→ 放弃腐蚀按原图分析。
+      //   脊线估计下几乎不可能触发（细线一多中位数自稳），纯 backstop——腐蚀只是优化，跳过恒安全。
+      if (after * 4 >= before) Ib = eroded;
     }
   }
 

@@ -8,6 +8,7 @@ const { traceBorderCycles, keypointsFromBinary } = await import("../src/backend/
 const { digitizeSpline, transitionCount, areaGuardOk } = await import("../src/backend/algorithms/flat-coloring/closing.ts");
 const {
   binarizeLuma, buildPartitionFromBinary, regionMaskAt, attachInkDepth, DEFAULT_FLAT_COLORING_PARAMS,
+  resolveInkBinarization,
 } = await import("../src/backend/algorithms/flat-coloring/partition.ts");
 
 // ---- 合成图形 helpers ----
@@ -268,6 +269,66 @@ describe("lineart · 线下 label 瓜分与 mask 查询", () => {
     eq(regionMaskAt(part, -1, 0), null, "出界 null");
     const rm = regionMaskAt(part, 4, 4);
     eq(rm.w * rm.h, 64, "全图 mask");
+  });
+});
+
+describe("lineart · 半宽估计毒化回归（v0.10.11 脊线中位数）", () => {
+  it("全连通线稿+实心块：估计不被毒化、细线不被腐蚀蒸发（2026-08-20 铅笔图标实案缩影）", () => {
+    // 3px 宽矩形轮廓 + 实心圆盘压在角上连成**一个组件**。
+    // 旧估计器（每组件取最大、跨组件中位数）：单组件 → 中位数=圆盘内切半径 8 → erode r=4
+    // → 3px 线全灭 → 内外漏成一区。脊线中位数：线条脊点海量（dist≈1.5）压住圆盘中心几点。
+    const w = 64, h = 64;
+    const Ib = blank(w, h);
+    fillRect(Ib, w, 8, 8, 55, 10); fillRect(Ib, w, 8, 53, 55, 55);
+    fillRect(Ib, w, 8, 8, 10, 55); fillRect(Ib, w, 53, 8, 55, 55);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      if (Math.hypot(x - 10, y - 10) <= 8) Ib[y * w + x] = 1;
+    }
+    const part = buildPartitionFromBinary(Ib, w, h);
+    assert(part.strokeHalfWidth <= 3, `脊线估计不被实心块顶爆（实得 ${part.strokeHalfWidth.toFixed(1)}）`);
+    assert(labelAt(part, 32, 32) !== labelAt(part, 2, 32), "矩形内外仍分区（线没被蒸发）");
+  });
+});
+
+describe("lineart · 动态墨线判定（v0.10.11 resolveInkBinarization）", () => {
+  /** 淡粉线（白底亮度 ≈190 > 默认手动 128）闭合方框，透明底 */
+  function lightBoxRgba(w, h) {
+    const rgba = new Uint8ClampedArray(w * h * 4);
+    const put = (x, y) => {
+      const o = (y * w + x) * 4;
+      rgba[o] = 230; rgba[o + 1] = 180; rgba[o + 2] = 180; rgba[o + 3] = 255;
+    };
+    for (let x = 8; x <= 55; x++) { put(x, 8); put(x, 55); }
+    for (let y = 8; y <= 55; y++) { put(8, y); put(55, y); }
+    return rgba;   // 落笔像素恰 188 个（周长去重）
+  }
+  it("手动档：pct 就是原亮度行为", () => {
+    const w = 64, h = 64;
+    const r = resolveInkBinarization(lightBoxRgba(w, h), w, h, 50);
+    eq(r.mode, "manual", "≥0 = 手动");
+    let ink = 0; for (const v of r.Ib) ink += v;
+    eq(ink, 0, "亮度 190 > 50%·2.55 → 手动档全漏（这正是淡线稿事故）");
+  });
+  it("动态档·稀疏透明底 → alpha 档全捕获", () => {
+    const w = 64, h = 64;
+    const r = resolveInkBinarization(lightBoxRgba(w, h), w, h, -1);
+    eq(r.mode, "alpha", "覆盖率 ≪25% → alpha 档");
+    let ink = 0; for (const v of r.Ib) ink += v;
+    eq(ink, 188, "落笔像素全数是墨线，亮度无关");
+  });
+  it("动态档·稠密不透明 → Otsu 档：深线是墨、白底不是、阈值夹在 [30%,90%]", () => {
+    const w = 64, h = 64;
+    const rgba = new Uint8ClampedArray(w * h * 4).fill(255);
+    for (let x = 8; x <= 55; x++) {
+      const o = (20 * w + x) * 4;
+      rgba[o] = 40; rgba[o + 1] = 40; rgba[o + 2] = 40;
+    }
+    const r = resolveInkBinarization(rgba, w, h, -1);
+    eq(r.mode, "otsu", "覆盖率 100% → Otsu 档");
+    assert(r.thresholdLuma >= 30 * 2.55 && r.thresholdLuma <= 90 * 2.55,
+      `阈值夹限（实得 ${r.thresholdLuma}）`);
+    eq(r.Ib[20 * w + 30], 1, "深线是墨");
+    eq(r.Ib[5 * w + 5], 0, "白底不是墨");
   });
 });
 

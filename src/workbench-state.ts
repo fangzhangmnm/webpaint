@@ -151,9 +151,13 @@ function freshGroups() {
     // v0.7.21（user 2026-07-30 拍板）：similarThreshold=同色全图容差（与 classic 分开存）；
     //   metric=颜色度量 "oklab"|"rgb"（classic/similar 共用，统一默认 OKLab；lineart 不吃）
     // v0.7.24：fillGap=容隙 toggle + fillGapPx=可封缺口宽（classic 专属，与 auto-expand 两个独立 knob）
+    // v0.10.11 墨线判定动态档（user 2026-08-20 拍板动态为默认）：键 lineartInk→lineartInkTh、
+    //   默认 -1=动态（alpha/Otsu 自动分派，见 resolveInkBinarization）；0..100=手动亮度百分比。
+    //   键改名 = 存量 doc 的旧 lineartInk（几乎全是老默认 50，在淡线稿上必全图漏）被 mergeInto
+    //   静默忽略、统一升级到动态——precedent 同 v0.7.40 showAnts 组退役。
     magicWand:     { threshold: 20, expand: false, expandPx: 1, similarThreshold: 20, metric: "oklab" as string,
                      fillGap: false, fillGapPx: 4,
-                     lineartCloseDist: 64, lineartInk: 50, lineartMinRegion: 32, lineartTipSens: 25, lineartBleed: -1 },
+                     lineartCloseDist: 64, lineartInkTh: -1, lineartMinRegion: 32, lineartTipSens: 25, lineartBleed: -1 },
     // v0.6.24 fill/lasso 分家（user 拍板：mental model 两个不互通的工具、实现一条路）：
     //   子工具/布尔/1:1 per-tool 持久化（v0.5.16 共享一份 RAM 记忆 _selMem 作废）。
     //   fill 默认魔棒+并（赛璐璐点色工作流）；selection 默认套索+新建（v0.6.55，user 2026-07-30：原默认矩形）。
@@ -311,7 +315,7 @@ export const desk = {
     get fillGap(): boolean { return S.g.magicWand.fillGap; }, set fillGap(v: boolean) { S.g.magicWand.fillGap = v; },
     get fillGapPx(): number { return S.g.magicWand.fillGapPx; }, set fillGapPx(v: number) { S.g.magicWand.fillGapPx = v; },
     get lineartCloseDist(): number { return S.g.magicWand.lineartCloseDist; }, set lineartCloseDist(v: number) { S.g.magicWand.lineartCloseDist = v; },
-    get lineartInk(): number { return S.g.magicWand.lineartInk; }, set lineartInk(v: number) { S.g.magicWand.lineartInk = v; },
+    get lineartInk(): number { return S.g.magicWand.lineartInkTh; }, set lineartInk(v: number) { S.g.magicWand.lineartInkTh = v; },
     get lineartMinRegion(): number { return S.g.magicWand.lineartMinRegion; }, set lineartMinRegion(v: number) { S.g.magicWand.lineartMinRegion = v; },
     get lineartTipSens(): number { return S.g.magicWand.lineartTipSens; }, set lineartTipSens(v: number) { S.g.magicWand.lineartTipSens = v; },
     get lineartBleed(): number { return S.g.magicWand.lineartBleed; }, set lineartBleed(v: number) { S.g.magicWand.lineartBleed = v; },
