@@ -54,7 +54,6 @@ import { initFillMode } from "./fill-mode.ts";
 import { initPerspEdit } from "./persp-edit.ts";
 import { updateSaveStatus, updateNewerBanner } from "./save-status.ts";
 import { initErrorBadge, reportError } from "./error-badge.ts";
-import { ensureStoragePersistence } from "./storage-persist.ts";   // 申请持久化存储（防浏览器整源驱逐）
 import { initTransientPanels, _suppressTransientPanels, _restoreTransientPanels, _bringPanelTop, _commitTransform, _cancelTransform } from "./transient-panels.ts";
 import { initImportImage, importImageAsLayer } from "./import-image.ts";   // importImageAsNewDoc/setAddImportAsNewDoc 仅 gallery-shell/export-menu 用
 import { initExportImportMenu, exportBaseName } from "./export-import-menu.ts";
@@ -121,11 +120,7 @@ initI18n();   // 本地化 boot：设 <html lang> + 填静态 HTML data-i18n（�
 // 组合根不再自装配 history/wp2/view/layers——WeebPaintBackend 是唯一装配根（headless/MCP 同一套件，
 // undo 配额也归它）。壳编排（error banner/面板刷新/wp:histchange/状态栏）经 inject.hooks 注入；
 // 换文档仍走 wp2.load（进程内协作面；tab 管理器「弃旧建新」= embedding 纪元的事）。
-// 出生画布 1024²（2026-08-21 对齐）：这不再只是「图库背后的占位」——云关时它**就是用户落脚的那张画**
-//   （boot 的 openBlankCanvas → beginFileFirstDoc 把它变成未命名的本地文档）。所以尺寸得跟
-//   新建对话框的默认预设一致：gallery-shell 的 DEFAULT_PRESET = "screen-1024sq"，
-//   注释记着 user 2026-08-19「2048 默认护栏没意义，每次都手动改回 1024」。别再让两处分叉。
-const backend = WeebPaintBackend.blank({ width: 1024, height: 1024 }, {
+const backend = WeebPaintBackend.blank({ width: 2048, height: 2048 }, {
   appVersion: WEEBPAINT_VERSION,
   // per-tenant 合成注入（C7）：本 backend 的 merged 合成面走 board GL（thunk——board 在下方 const，
   // 调用恒在 boot 后）。doc-render 全局接缝仍在（psd/session 等壳模块单租户消费，见下方 setDocCompositor*）。
@@ -386,11 +381,6 @@ function setStatus(text: string, persist = false) {
 }
 // 统一 error banner：注入状态栏 sink（info 级走这）+ 接管内联 __errBar 的 fatal handler（往后走 severity）。
 initErrorBadge({ status: setStatus });
-// 申请持久化存储（best-effort → persistent）：不申请的话浏览器有权在存储压力下**整源驱逐** IndexedDB，
-//   把用户所有本地作品一次清空，且绕过 app 的一切逻辑。每次 app 打开问一次（Safari 疑似不跨打开保留）。
-//   fire-and-forget：模块自己吞异常、不弹 UI；结果经 getStoragePersistence() 供数据安全文案消费。
-//   详 ai-docs/20260821-storage-eviction-investigation.md
-void ensureStoragePersistence();
 // 文档版本 newer banner + save 按钮 4 态渲染 = save-status.ts。
 // hook board render 更新 HUD
 const origRender = board.render.bind(board);

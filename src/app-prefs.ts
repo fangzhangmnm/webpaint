@@ -18,10 +18,7 @@ export const PREF_DEFAULTS = {
   "menu-tab": "file" as string,             // ☰ 停留页（v0.5.27；设备本地——同主题，视觉习惯不跨设备）
   // 云端功能开关（2026-08-21 拍板，接缝=cloud-capability.ts）。**必须设备本地**：若进 synced
   //   collection，别的设备一关就把这台也关了（还得靠云同步传播「关云」本身，自相矛盾）。
-  // **默认关**（user 2026-08-21 拍板 C2：CPP 未过审 → 陌生人默认不碰云）。
-  //   ⇒ 全新用户的**主路径**就是 Blockbench 模式：作品不进库，保存 = 存成自己的 .ora 文件。
-  //   落脚点 = boot 的 1024² 未命名文档（app.ts 的 backend.blank / boot.ts 的 openBlankCanvas）。
-  "cloud-enabled": false as boolean,
+  "cloud-enabled": true as boolean,
   // 跨设备（synced-user-preference）：跟人/identity 走
   "lang": null as string | null,            // 界面语言（null=跟系统）
   "long-press-pick": true as boolean,       // 长按吸色手势（spec 表默认 true）

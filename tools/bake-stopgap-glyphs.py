@@ -50,8 +50,6 @@ SPECS = [
     # 2026-08-21 图标收货：cut（剪刀 CCW145）/copy-picture（copy+画片，原登记名 copy-merged 甲方定名改之）
     # 两枚真图入库（库仓 5976d20），stopgap 再度**清零**。历史见 git。
     # 注意：收货同时 index.html 的 <use href="#copy-merged"> 已改 #copy-picture（id 随甲方定名走）。
-    # 2026-08-21 图标收货（第二轮）：add-to-home-screen 真图入库（库仓 b62c33a，甲方拍板候选 1 号
-    # = iOS 原味：圆角方框 16 见方 rx4.6 + 居中加号 7.2）。中文「装」stopgap 撤除，stopgap 再度清零。
 ]
 syms = []
 for sid, text, box, note in SPECS:

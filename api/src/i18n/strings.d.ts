@@ -97,10 +97,10 @@ export declare const S: {
         readonly tok: "o tawa tomo sitelen";
     };
     readonly "menu.newArtwork": {
-        readonly zh: "新建 / 打开…";
-        readonly en: "New / Open…";
-        readonly ja: "新規 / 開く…";
-        readonly tok: "sitelen sin / open…";
+        readonly zh: "新建…";
+        readonly en: "New…";
+        readonly ja: "新規…";
+        readonly tok: "sitelen sin…";
     };
     readonly "menu.openLocalFile": {
         readonly zh: "打开本地文件…";
@@ -728,7 +728,7 @@ export declare const S: {
     };
     readonly "menu.exportHub": {
         readonly zh: "导出与另存…";
-        readonly en: "Export & save…";
+        readonly en: "Export & save a copy…";
         readonly ja: "書き出しと別名保存…";
         readonly tok: "pana en awen…";
     };
@@ -3780,96 +3780,6 @@ export declare const S: {
         readonly ja: "変更を破棄";
         readonly tok: "o weka e ante";
     };
-    readonly "menu.addToHomeScreen": {
-        readonly zh: "添加到主屏幕";
-        readonly en: "Add to Home Screen";
-        readonly ja: "ホーム画面に追加";
-        readonly tok: "o pana e ilo ni tawa lipu open";
-    };
-    readonly "install.stateInstalled": {
-        readonly zh: "已安装";
-        readonly en: "Installed";
-        readonly ja: "インストール済み";
-        readonly tok: "lon";
-    };
-    readonly "install.stateAvailable": {
-        readonly zh: "可安装";
-        readonly en: "Available";
-        readonly ja: "可能";
-        readonly tok: "ken";
-    };
-    readonly "install.stateManual": {
-        readonly zh: "手动";
-        readonly en: "Manual";
-        readonly ja: "手動";
-        readonly tok: "kepeken luka";
-    };
-    readonly "install.title": {
-        readonly zh: "把 WeebPaint 装到主屏";
-        readonly en: "Add WeebPaint to your Home Screen";
-        readonly ja: "WeebPaint をホーム画面に追加";
-        readonly tok: "o pana e ilo WeebPaint tawa lipu open sina";
-    };
-    readonly "install.whyStorage": {
-        readonly zh: "装到主屏之后，浏览器更可能把你的作品当成「持久化存储」保存，也就不容易在设备空间紧张时被清掉。\n\n但这不是保险箱：浏览器存储随时可能被清空。重要的作品请用「存为本地 .ora」另存一份到你自己的文件里。";
-        readonly en: "Once it runs from your Home Screen, the browser is more likely to treat your artwork as persistent storage, so it is less likely to be cleared when the device runs low on space.\n\nThis is not a safe: browser storage can still be wiped. For anything you care about, use “Save as local .ora” and keep your own file.";
-        readonly ja: "ホーム画面から起動すると、ブラウザが作品を「永続ストレージ」として扱う可能性が高くなり、端末の空き容量が減ったときに消されにくくなります。\n\nただし金庫ではありません：ブラウザのストレージはいつ消えてもおかしくありません。大切な作品は「ローカル .ora として保存」で自分のファイルとして残してください。";
-        readonly tok: "sina open e ilo tan lipu open la ilo lukin li awen e sitelen sina kepeken wawa mute. taso ni li poki awen ala — o awen e sitelen suli kepeken lipu .ora pi sina taso.";
-    };
-    readonly "install.howIOS": {
-        readonly zh: "在 Safari 底部点「分享」按钮 → 往下找「添加到主屏幕」。";
-        readonly en: "In Safari, tap the Share button, then choose “Add to Home Screen”.";
-        readonly ja: "Safari の「共有」ボタンをタップし、「ホーム画面に追加」を選んでください。";
-        readonly tok: "lon ilo Safari la o luka e nena pana, o alasa e “Add to Home Screen”.";
-    };
-    readonly "install.howGeneric": {
-        readonly zh: "在浏览器菜单里找「安装」或「添加到主屏幕」。";
-        readonly en: "Look for “Install” or “Add to Home Screen” in your browser menu.";
-        readonly ja: "ブラウザのメニューから「インストール」または「ホーム画面に追加」を探してください。";
-        readonly tok: "lon lipu pi ilo lukin la o alasa e nimi “Install” anu “Add to Home Screen”.";
-    };
-    readonly "install.alreadyInstalled": {
-        readonly zh: "已经在主屏上运行了";
-        readonly en: "Already running from your Home Screen";
-        readonly ja: "すでにホーム画面から起動しています";
-        readonly tok: "ilo ni li lon lipu open sina.";
-    };
-    readonly "install.done": {
-        readonly zh: "已添加到主屏幕";
-        readonly en: "Added to your Home Screen";
-        readonly ja: "ホーム画面に追加しました";
-        readonly tok: "ona li kama lon lipu open sina.";
-    };
-    readonly "install.dismissed": {
-        readonly zh: "没有安装 —— 之后可以随时回设置里再来";
-        readonly en: "Not installed — you can come back to Settings any time";
-        readonly ja: "インストールされていません —— いつでも設定から実行できます";
-        readonly tok: "ona li kama ala. tenpo ale la sina ken kama lon lipu lawa.";
-    };
-    readonly "status.cloudOffDetachedSynced": {
-        readonly zh: "「{name}」已同步到云端并留在图库。当前这份已变成新文档 —— 保存 = 存成你自己的 .ora 文件。";
-        readonly en: "“{name}” is synced to the cloud and stays in your gallery. What you have open is now a new document — saving writes your own .ora file.";
-        readonly ja: "「{name}」はクラウドに同期され、ギャラリーに残ります。いま開いているものは新規ドキュメントになりました —— 保存すると自分の .ora ファイルに書き出されます。";
-        readonly tok: "sitelen {name} li awen lon poki sewi en tomo sitelen. sitelen lon lukin sina la ona li sitelen sin — sina awen la ona li kama lipu .ora pi sina taso.";
-    };
-    readonly "status.cloudOffDetachedLocal": {
-        readonly zh: "「{name}」已存进图库（未登录，没有上云）。当前这份已变成新文档 —— 保存 = 存成你自己的 .ora 文件。";
-        readonly en: "“{name}” was saved to your gallery (not signed in, so nothing went to the cloud). What you have open is now a new document — saving writes your own .ora file.";
-        readonly ja: "「{name}」はギャラリーに保存されました（未サインインのためクラウドには送られていません）。いま開いているものは新規ドキュメントになりました —— 保存すると自分の .ora ファイルに書き出されます。";
-        readonly tok: "sitelen {name} li awen lon tomo sitelen (sina lon ala poki sewi la ona li tawa ala sewi). sitelen lon lukin sina la ona li sitelen sin — sina awen la ona li kama lipu .ora pi sina taso.";
-    };
-    readonly "lf.downloadedNoHandle": {
-        readonly zh: "已下载 {name} —— 这份文件就是你的作品，请妥善保存。本浏览器不支持原地覆盖，下次保存会再下载一份新的。";
-        readonly en: "Downloaded {name} — that file is your artwork, keep it safe. This browser cannot overwrite files in place, so the next save downloads a new copy.";
-        readonly ja: "{name} をダウンロードしました —— このファイルがあなたの作品です。大切に保管してください。このブラウザは上書き保存に対応していないため、次回の保存では新しいファイルが再度ダウンロードされます。";
-        readonly tok: "sitelen sina li kama tawa ilo sina ({name}). o awen e ona! ilo lukin ni li ken ala ante e lipu pini — tenpo kama la sina awen e sitelen la ona li pana e lipu sin.";
-    };
-    readonly "lf.fileFirstNew": {
-        readonly zh: "云同步已关：作品不进图库，保存 = 存成你自己的 .ora 文件";
-        readonly en: "Cloud sync is off: artwork is not kept in the gallery — saving writes your own .ora file";
-        readonly ja: "クラウド同期はオフです：作品はギャラリーに保存されません。保存すると自分の .ora ファイルに書き出されます";
-        readonly tok: "poki sewi li lape. sitelen li awen ala lon tomo sitelen — sina awen la ona li kama lipu .ora pi sina taso.";
-    };
     readonly "lf.renameNotSupported": {
         readonly zh: "本地文件模式不支持重命名（可用「另存为」存入图库）";
         readonly en: "Rename is not supported in local-file mode (use Save As to add it to the gallery)";
@@ -4249,10 +4159,10 @@ export declare const S: {
         readonly tok: "mi weka e {name} tan ilo ni…";
     };
     readonly "ss.unloaded": {
-        readonly zh: "已卸载本地副本：{name} · 云端保留；下次打开需要联网";
-        readonly en: "Local copy unloaded: {name} · kept in the cloud; you will need to be online to open it again";
-        readonly ja: "ローカルコピーを解放しました：{name} · クラウドには残っています。次に開くにはオンラインである必要があります";
-        readonly tok: "lipu lon ilo ni li weka. ({name}) ona li awen lon poki sewi. o lon linja la sina ken open e ona.";
+        readonly zh: "已卸载本地：{name}（修改在本地回收站，云端保留）";
+        readonly en: "Unloaded local: {name} (changes are in the local trash; the cloud is kept)";
+        readonly ja: "ローカルをアンロードしました：{name}（変更はローカルのゴミ箱にあり、クラウドは保持されます）";
+        readonly tok: "weka tan ilo ni li pini: {name}. ante li lon poki jaki pi ilo ni. poki sewi li awen jo.";
     };
     readonly "ss.unloadFailed": {
         readonly zh: "卸载失败：{error}";
@@ -5070,96 +4980,6 @@ export declare const S: {
         readonly ja: "正方 2048²";
         readonly tok: "leko 2048²";
     };
-    readonly "gs.footUsageAll": {
-        readonly zh: "本机占用：约 {size}";
-        readonly en: "On this device: ~{size}";
-        readonly ja: "この端末の使用量：約 {size}";
-        readonly tok: "ilo ni li jo e {size} (poka)";
-    };
-    readonly "gs.usageBreakdownTitle": {
-        readonly zh: "本机占用明细（估算）";
-        readonly en: "What is stored on this device (estimated)";
-        readonly ja: "この端末に保存されている内容（推定）";
-        readonly tok: "ijo lon ilo ni (nanpa poka)";
-    };
-    readonly "gs.bucket.works": {
-        readonly zh: "作品";
-        readonly en: "Artwork";
-        readonly ja: "作品";
-        readonly tok: "sitelen";
-    };
-    readonly "gs.bucket.trash": {
-        readonly zh: "回收站";
-        readonly en: "Trash";
-        readonly ja: "ゴミ箱";
-        readonly tok: "poki weka";
-    };
-    readonly "gs.bucket.backup": {
-        readonly zh: "备份";
-        readonly en: "Backups";
-        readonly ja: "バックアップ";
-        readonly tok: "poki awen";
-    };
-    readonly "gs.bucket.settings": {
-        readonly zh: "设置与笔架";
-        readonly en: "Settings and brushes";
-        readonly ja: "設定とブラシ";
-        readonly tok: "nasin en ilo sitelen";
-    };
-    readonly "gs.bucket.storeMisc": {
-        readonly zh: "同步缓存";
-        readonly en: "Sync cache";
-        readonly ja: "同期キャッシュ";
-        readonly tok: "poki pi tenpo lili";
-    };
-    readonly "gs.bucket.checkpoints": {
-        readonly zh: "撤销快照";
-        readonly en: "Revert snapshots";
-        readonly ja: "取り消し用スナップショット";
-        readonly tok: "sitelen pi tenpo open";
-    };
-    readonly "gs.bucket.thumbs": {
-        readonly zh: "缩略图";
-        readonly en: "Thumbnails";
-        readonly ja: "サムネイル";
-        readonly tok: "sitelen lili";
-    };
-    readonly "gs.clearHintGalleryTrash": {
-        readonly zh: "图库回收站可清空";
-        readonly en: "can be emptied from the gallery trash";
-        readonly ja: "ギャラリーのゴミ箱から空にできます";
-        readonly tok: "sina ken weka e ona lon poki weka";
-    };
-    readonly "gs.clearHintNoUi": {
-        readonly zh: "⚠ 暂无清理入口";
-        readonly en: "⚠ no way to clear this yet";
-        readonly ja: "⚠ まだ削除する手段がありません";
-        readonly tok: "⚠ sina ken ala weka e ona";
-    };
-    readonly "gs.usageOriginLine": {
-        readonly zh: "浏览器统计：{used} / 上限约 {quota}（{pct}%）";
-        readonly en: "Browser reports: {used} / ~{quota} cap ({pct}%)";
-        readonly ja: "ブラウザの集計：{used} / 上限約 {quota}（{pct}%）";
-        readonly tok: "ilo lukin li toki e ni: {used} / {quota} ({pct}%)";
-    };
-    readonly "gs.usageUnaccounted": {
-        readonly zh: "未计入：约 {size}（离线缓存等）";
-        readonly en: "Not itemised: ~{size} (offline cache and similar)";
-        readonly ja: "内訳外：約 {size}（オフラインキャッシュなど）";
-        readonly tok: "mi sona ala e ni: {size} (poki pi lon ala linja)";
-    };
-    readonly "gs.usageEvictable": {
-        readonly zh: "⚠ 本地存储可能被浏览器清除 —— 重要作品请「存为本地 .ora」";
-        readonly en: "⚠ The browser may clear this storage — keep anything important as a local .ora file";
-        readonly ja: "⚠ このストレージはブラウザに消される可能性があります — 大切な作品は「ローカル .ora として保存」してください";
-        readonly tok: "⚠ ilo lukin li ken weka e ijo ni. o awen e sitelen suli kepeken lipu .ora.";
-    };
-    readonly "gs.usagePersisted": {
-        readonly zh: "本地存储已获持久化（浏览器不会主动清除）";
-        readonly en: "Storage is persistent (the browser will not clear it on its own)";
-        readonly ja: "ストレージは永続化されています（ブラウザが自動的に消すことはありません）";
-        readonly tok: "ijo ni li awen. ilo lukin li weka ala e ona.";
-    };
     readonly "gs.footUsage": {
         readonly zh: "作品占用：{size}（{count} 件）";
         readonly en: "Artwork usage: {size} ({count} items)";
@@ -5183,12 +5003,6 @@ export declare const S: {
         readonly en: "Usage: unknown";
         readonly ja: "使用量：不明";
         readonly tok: "suli awen: mi sona ala";
-    };
-    readonly "gs.cloudDisabledNoGallery": {
-        readonly zh: "云端功能已停用，图库不可用（可在设置里重新开启）";
-        readonly en: "Cloud features are disabled; the gallery is unavailable (re-enable in settings)";
-        readonly ja: "クラウド機能が無効のため、ギャラリーは利用できません（設定で再度有効化できます）";
-        readonly tok: "ilo sewi li lape la, poki sitelen li ken ala. (o open e ona lon lawa)";
     };
     readonly "gs.quotaCritical": {
         readonly zh: "本地存储 {pct}% 已满 — 立即去图库卸载不常用的作品";

@@ -14,7 +14,7 @@ import { reactive } from "../vendor/vue/vue.esm-browser.prod.js";
 import { WEEBPAINT_VERSION } from "./version.ts";
 import { reportError } from "./error-badge.ts";
 import { setBrushColor } from "./color-panel.ts";
-import { thumbBlobFromBytes, setCurrentSessionName, triggerDownload } from "./session.ts";
+import { thumbBlobFromBytes, setCurrentSessionName } from "./session.ts";
 import { renderNodesToBytes } from "./backend/doc-render.ts";
 import { encodeDocToOra, decodeOraToPainting, paintingDataToEncodeDoc, parseAppVersion, type DecodedPainting } from "./backend/ora.ts";
 import { ORA_FORMAT_VERSION } from "./backend/ora-stack-xml.ts";
@@ -23,7 +23,7 @@ import { tLatin } from "./i18n/index.ts";
 import { isSignedIn, store as _store } from "./app-store.ts";
 import type { EncryptedBlob } from "./app-store.ts";   // 密文 at-rest 字节（branded）；B2：类型经接缝转口
 import { openInputSheet, openConfirmSheet, openChoiceSheet, lockSyncGate } from "./sheets.ts";
-import { readHandleFile, writeHandleBlob, handleMtime, hasWeebPaintTraces, pickSaveOraFile, supportsSaveFilePicker, type LocalFileHandle } from "./local-file-session.ts";
+import { readHandleFile, writeHandleBlob, handleMtime, hasWeebPaintTraces, type LocalFileHandle } from "./local-file-session.ts";
 import { pathFolder } from "./gallery/gallery-path.ts";
 import { invalidateCachedThumb } from "./gallery/cloud-thumb-cache.ts";
 import { sessionFileName, sessionBareName, stripSessionExt } from "./config.ts";
@@ -40,7 +40,6 @@ import { t } from "./i18n/index.ts";
 import { createEditorSession, type EditorSession, type StoreLike } from "./editor-session/index.ts";
 import { timelapseDetach, timelapseAdopt, timelapseForSave } from "./timelapse-session.ts";
 import { holdDocLock, releaseDocLock, isDocLockedElsewhere } from "./instance-locks.ts";
-import { isCloudEnabled } from "./cloud-capability.ts";   // Blockbench 模式判据（云关 = 作品不进库）
 import { commitFillNow, gateFillOnDocSwitch } from "./fill-mode.ts";
 
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
@@ -115,10 +114,7 @@ async function _refreshEncrypted() {
 //       （openItem/newDoc/adopt/saveAs/restore 任一成功）之前 es 仍不许标脏。
 // Windows 对齐（拍板）：无自动保存、blur/pagehide 不落盘（es 干净 = persist 天然 no-op）、
 // Ctrl+S 显式写回 + mtime 陈旧对表；beforeunload 的偷存在无地降级为 no-op（静默写用户文件违背文件语义）。
-// handle **可以是 null** —— 那是「未命名的本地文档」（Blockbench 模式下新建/导入出来、还没选保存位置的 doc）。
-//   把它表示成一个 handle 缺席的无地文档，是为了**原样复用**已有的全部无地墙：本地脏轨、
-//   离开时的挽留门、beforeunload、autosave 在无地降级为 no-op —— 不新造一条平行状态（那才会漏墙）。
-let _localFile: { handle: LocalFileHandle | null; fileName: string; lastModified: number; dirty: boolean } | null = null;
+let _localFile: { handle: LocalFileHandle; fileName: string; lastModified: number; dirty: boolean } | null = null;
 let _esMuted = false;
 
 function _markLocalDirty() {
@@ -126,21 +122,6 @@ function _markLocalDirty() {
 }
 /** es 重新绑定 store 身份（open/adopt/新建/另存成功）→ 解除残影墙。 */
 function _esRebound() { _esMuted = false; }
-
-/** 进入「未命名的本地文档」态 —— Blockbench 模式（云关）的落点。
- *  user 2026-08-21 拍板：「禁用云的时候应该所有用户路线都走 blockbench 模式」。
- *  语义 = doc 的家在用户磁盘上，只是**还没选位置**；作品字节一个都不进库。
- *  保存时由 saveLocalFileNow 现场认领句柄（桌面）或下载一份（Safari，拿不到句柄 → 仍未命名）。 */
-function beginUntitledLocalDoc(suggestedName?: string): void {
-  _esMuted = true;              // 墙②先立：画布内容已不是 es._name 的了，es 在重绑身份前不许标脏
-  _setActive(null);             // 无 store 身份 → 所有 store 路径被既有守卫短路
-  _isLazyBlankSession = false;
-  _enc.encrypted = false;
-  const base = (suggestedName && suggestedName.trim()) || t("nd.untitled");
-  _localFile = { handle: null, fileName: `${stripSessionExt(base)}.ora`, lastModified: 0, dirty: false };
-  _recomputePhase();
-  updateSaveStatus();
-}
 
 /** 打开本地 .ora：明文 + 有 WeebPaint 痕迹 → 原位打开（返回 null）；
  *  加密容器 / 外来 ora → 不原位，把 File 还给调用方走导入路径（返回 File）。 */
@@ -173,69 +154,22 @@ async function saveLocalFileNow(): Promise<boolean> {
     if (!ok) { setStatus(t("ss.saveCancelled")); return false; }
     _loadedDocNewerConfirmed = true; updateNewerBanner();
   }
-  // ★ 还没有家（Blockbench 模式的未命名文档）→ 先让用户选保存位置，成功即认领句柄。
-  //   顺序纪律：**picker 必须排在 encode 之前** —— showSaveFilePicker 吃 user-gesture 活化，
-  //   而大画 encode 是秒级 await，排在前面会把活化窗口耗掉（saveLocalOraCopy 同款纪律）。
-  if (!_localFile.handle) return await _saveUntitledLocalDoc();
-  const home = _localFile;   // 收窄：下面这段是「已有家」路径，handle 非 null
   try {
     // 陈旧对表（FS Access 无 etag，mtime 是零成本的 freshness 检查）：文件在我们打开后被外部改过 → 问。
-    const mt = await handleMtime(home.handle!);
-    if (mt != null && mt !== home.lastModified) {
-      const ok = await openConfirmSheet(t("lf.staleTitle"), t("lf.staleMsg", { name: home.fileName }));
+    const mt = await handleMtime(_localFile.handle);
+    if (mt != null && mt !== _localFile.lastModified) {
+      const ok = await openConfirmSheet(t("lf.staleTitle"), t("lf.staleMsg", { name: _localFile.fileName }));
       if (!ok) { setStatus(t("ss.saveCancelled")); return false; }
     }
     const { bytes } = await _encodeCurrentOraWithPeek();
-    await writeHandleBlob(home.handle!, bytes);
-    home.lastModified = (await handleMtime(home.handle!)) ?? Date.now();
-    home.dirty = false;
+    await writeHandleBlob(_localFile.handle, bytes);
+    _localFile.lastModified = (await handleMtime(_localFile.handle)) ?? Date.now();
+    _localFile.dirty = false;
     updateSaveStatus();
-    setStatus(t("lf.saved", { name: home.fileName }));
+    setStatus(t("lf.saved", { name: _localFile.fileName }));
     return true;
   } catch (e) {
     reportError(new Error("[local-file] save failed: " + String(e)), "warning");
-    setStatus(t("lf.saveFailed", { error: errMsg(e) }), true);
-    return false;
-  }
-}
-
-/** 未命名本地文档的「保存」= 选位置（桌面）或下载一份（Safari）。
- *  桌面（FS Access）：picker → 写 → **认领句柄**，此后 Ctrl+S 就是原地写回同一个文件。
- *  Safari/Firefox（无 showSaveFilePicker）：只能下载，**拿不到句柄** → 文档保持未命名，
- *    下次保存还是下载一份新的。这不是缺陷，正是 Blockbench 网页版的语义
- *    （「Web users cannot overwrite existing files directly. Each save creates a new download.」）。 */
-async function _saveUntitledLocalDoc(): Promise<boolean> {
-  const doc = _localFile;
-  if (!doc) return false;
-  const base = stripSessionExt(doc.fileName.replace(/\.ora$/i, "")) || t("nd.untitled");
-  if (supportsSaveFilePicker()) {
-    let h: LocalFileHandle | null = null;
-    try { h = await pickSaveOraFile(`${base}.ora`); }
-    catch (e) { reportError(new Error("[local-file] save picker failed: " + String(e)), "warning"); setStatus(t("lf.saveFailed", { error: errMsg(e) }), true); return false; }
-    if (!h) { setStatus(t("ss.saveCancelled")); return false; }   // 用户取消 OS 保存框（不是错误）
-    try {
-      const { bytes } = await _encodeCurrentOraWithPeek();
-      await writeHandleBlob(h, bytes);
-      // 认领：从此这个 doc 有家了（后续 Ctrl+S 走上面的原地写回 + mtime 陈旧对表）。
-      _localFile = { handle: h, fileName: h.name, lastModified: (await handleMtime(h)) ?? Date.now(), dirty: false };
-      updateSaveStatus();
-      setStatus(t("lf.saved", { name: h.name }));
-      return true;
-    } catch (e) {
-      reportError(new Error("[local-file] first save failed: " + String(e)), "warning");
-      setStatus(t("lf.saveFailed", { error: errMsg(e) }), true);
-      return false;
-    }
-  }
-  try {
-    const { bytes } = await _encodeCurrentOraWithPeek();
-    triggerDownload(bytes, `${base}.ora`);
-    doc.dirty = false;                 // 字节已交到用户手上（下载目录/文件 App）
-    updateSaveStatus();
-    setStatus(t("lf.downloadedNoHandle", { name: `${base}.ora` }), true);
-    return true;
-  } catch (e) {
-    reportError(new Error("[local-file] download fallback failed: " + String(e)), "warning");
     setStatus(t("lf.saveFailed", { error: errMsg(e) }), true);
     return false;
   }
@@ -518,16 +452,7 @@ async function saveNow(opts: { implicit?: boolean; commitPending?: boolean } = {
                              // desk 不进 need：内容脏时顺手被 _buildOraMeta 捞走，不自己驱动落盘（v409）
     setStatus(t("ss.saved", { name: _activeSessionName ?? "" }));
     checkQuotaAndWarn();
-  } catch (e) {
-    // ⚠ 保存失败 = **数据安全事件**，必须留得住（2026-08-21 存储驱逐调查 §B.5）。旧版两处都太轻：
-    //   ① setStatus 漏传 persist → 提示 **1.8 秒后自己变回「就绪」**，用户很可能压根没看见画没存上；
-    //   ② reportError 用 "log" 级 → 只进 console，不弹 banner。
-    //   （同文件 checkQuotaAndWarn / pushItem 都是显式传 true 的——这里是漏传，不是设计决定。）
-    //   现在：dev 诊断留英文原始错误（保住 stack）+ 用户可见 banner 走 i18n + 状态行钉住不自动消失。
-    reportError(new Error("[session] save failed: " + String(e)), "log");            // dev 诊断：英文 + 原始错误
-    reportError(new Error(t("ss.saveFailed", { error: errMsg(e) })), "error");       // 用户可见：banner（i18n）
-    setStatus(t("ss.saveFailed", { error: errMsg(e) }), true);                       // 状态行：钉住
-  }
+  } catch (e) { reportError(new Error("[session] save failed: " + String(e)), "log"); setStatus(t("ss.saveFailed", { error: errMsg(e) })); }
   finally { updateSaveStatus(); }
 }
 
@@ -705,21 +630,11 @@ async function newDoc({ name, w, h, layer0Name, layer0Pixels }: { name: string; 
     resetEditorState();
     applyEditorStateToUI();   // desk：新建 → 面板回默认（关）
     timelapseAdopt({});       // 新文档 = 健康空录制态（默认关；可在这张画上开录）
-    if (!isCloudEnabled()) {
-      // ★ Blockbench 模式（user 2026-08-21 拍板：「禁用云的时候应该所有用户路线都走 blockbench 模式」）。
-      //   作品字节**一个都不进库**：不 es.adopted（es 永不绑身份 ⇒ autosave/退出推送全体天然 no-op）、
-      //   不 saveNow（不写 store 的 files 分区）、不 _captureCheckpoint（那是 app 库里的一份完整 .ora 副本，
-      //   同样是「把作品存进浏览器」）。doc 的家 = 用户磁盘上的文件，保存时才认领。
-      //   这条分支也是「云关时图库被封死、作品却还在往库里写 ⇒ 用户看不见管不了删不掉」那个洞的堵法。
-      beginUntitledLocalDoc(name);
-      setStatus(t("lf.fileFirstNew"), true);
-    } else {
-      es.adopted(toFull(name), { create: true });   // 新建画布/import：es 记为当前 + 脏；首存 mode:"new"（撞名不静默覆盖）。边界转全名。
-      _esRebound();
-      updateSaveStatus();
-      await saveNow();   // 落盘（tryPush:false；撞名 → saveNow try/catch surface）
-      void _captureCheckpoint(name, "new-doc");   // 空白态封一份 → revert = 回到刚新建的样子
-    }
+    es.adopted(toFull(name), { create: true });   // 新建画布/import：es 记为当前 + 脏；首存 mode:"new"（撞名不静默覆盖）。边界转全名。
+    _esRebound();
+    updateSaveStatus();
+    await saveNow();   // 落盘（tryPush:false；撞名 → saveNow try/catch surface）
+    void _captureCheckpoint(name, "new-doc");   // 空白态封一份 → revert = 回到刚新建的样子
     setGalleryOpen(false);
     return true;
   });
@@ -795,13 +710,6 @@ async function unloadItem(item: GalleryItem) {
   await withBusy(t("ss.unloadingBusy", { name: item.name }), async () => {
     try {
       await _file(item.name).offload();
-      // ★ 清掉这幅画的 revert 快照（user 2026-08-21 拍板）。快照是 app 库里的**一份完整 .ora**，
-      //   而「卸载本地副本」正是用户为了腾空间按的按钮 —— 不清它，卸载只生效一半，
-      //   页脚数字却降了（那是谎报）。语义也对：revert = 回到「本次打开时」，卸载 = 离开了这幅画，
-      //   旧快照本就无效；将来重新打开会在 gallery-open 时重新封存一份。
-      //   放 offload **之后**：offload 可能抛 OffloadIllegalError（dirty/离线/云端没了），
-      //   那种情况下本地副本还在、画还开着，快照必须留着。
-      await _dropCheckpoint(item.name);
       setStatus(t("ss.unloaded", { name: item.name }));
       gallery.refresh();
     } catch (err) { setStatus(t("ss.unloadFailed", { error: errMsg(err) })); }
@@ -896,9 +804,6 @@ export const session = {
   // 无地本地文件模式（spec §7）：只读快照给 UI（save-status 徽章/守卫文案）。
   get localFile() { return _localFile ? { name: _localFile.fileName, dirty: _localFile.dirty } : null; },
   openLocalFile, leaveLocalFile,
-  /** 云关冷启动的空白画布进入 Blockbench 态（boot.ts 的 openBlankCanvas 调）。
-   *  不这么做的话那张画布**没有任何脏轨** —— 用户画完直接关 tab，既不警告也没得救。 */
-  beginFileFirstDoc: beginUntitledLocalDoc,
   // app 驱动内容变化（revert 回滚；blender 冗余双标无害）→ 标脏。参考图已迁 wp:sidecarchange（S5）。
   // 无地走本地轨；残影墙期间（_esMuted）es 绝不标脏（防跨写，见无地节注释）。
   markEdited() { if (_localFile) { _markLocalDirty(); return; } if (es && !_esMuted) es.markDirty(); },

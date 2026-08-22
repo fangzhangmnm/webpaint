@@ -517,10 +517,6 @@ function makeGallery(host: GalleryHost) {
             const r = await _store.file(sessionFileName(item.name), { isZip: true, mode: "existing" }).tryMove(sessionFileName(newName));   // 边界转全名
             if (!r.ok) { host.status(t("gal.st.nameTakenTarget", { loc: whereLabel(r.where), base }), true); return; }
             if (item.name === host.activeName()) session.setName(newName);
-            // checkpoint 的 key 含文件夹路径（sessionBareName 保留 `/` 分段）→ 移动 = 换 key，
-            //   旧 key 那份**完整 .ora 快照**就成了永远没人读的孤儿。按 rename 的既有惯例丢弃
-            //   （session-state 的改名路径同样是 drop 不是搬——身份变了，「上次打开态」不再成立）。
-            void session.dropCheckpoint(item.name);
             host.status(t("gal.st.moved", { target: target || t("gal.root") }));
           } catch (e: unknown) { host.status(t("gal.st.moveFail", { e: String((e as { message?: unknown })?.message || e) }), true); }
         });

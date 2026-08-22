@@ -18,7 +18,6 @@
 //   直接 import（leaf/singleton）。
 
 import { session } from "../session-state.ts";
-import { collectStorageReport, usageLevel, type StorageReport, type BucketId } from "../storage-usage.ts";   // 本机占用的单一口径（深模块）
 import { isCloudEnabled } from "../cloud-capability.ts";
 import { reportError } from "../error-badge.ts";
 import { els } from "../els.ts";
@@ -35,7 +34,7 @@ import { pathJoin } from "./gallery-path.ts";
 import { setAddImportAsNewDoc, importImageAsNewDoc } from "../import-image.ts";
 import { isUnlocked, lock, setPassword, promptPassword } from "../crypto-state.ts";
 import { hasVerifier, checkVerifier, clearVerifier } from "../password-verifier.ts";
-import { t, type Key } from "../i18n/index.ts";
+import { t } from "../i18n/index.ts";
 import { loadCanvasTemplates, fillTemplateSelect, templateById, templatePx } from "../canvas-templates.ts";
 import { bindInstallButton } from "../install-prompt.ts";
 
@@ -118,22 +117,31 @@ function _selectPreset(val: string) {
   els.newDocCustomRow.style.display = val === "custom" ? "" : "none";
 }
 
-// 本机占用 = **全口径**（作品 + 回收站 + 备份 + 撤销快照 + 缩略图 + 设置…），单一真相在
-//   `src/storage-usage.ts`（深模块）。本文件只负责把它渲染成一行 + 一个 title 明细。
-//   为什么搬走（user 2026-08-21：「存储占用估算要算上这些别的地方，用一个专门的深模块放在一起」）：
-//   老版本这里两段代码各读一半真相 —— 页脚只数 store 的 `files` 分区，告警读整个 origin 的
-//   estimate()，两个口径并排显示；而**用户看不见的那几处才是大头**（撤销快照和作品本体等大、
-//   回收站删了不清就一直在、备份分区至今没有 UI）。于是「卸载腾空间」后页脚降了磁盘没降 = 谎报。
-// ⚠ 只在图库打开/刷新时调：内部要走几遍 IDB cursor（本地、无网络，但别挂每帧）。
+// 作品占用 = store 本地缓存 files 分区的字节和件数（**不**走 storage.estimate —— 它把 SW
+// 预缓存 / localStorage 算进去虚高几 MB）。
+//   口径诚实交代：这是「本地存了多少作品」，**不含**缩略图缓存（在 app 自己的 weebpaint 库）、
+//   不含回收站/备份箱、不含纯云端未缓存的作品。所以文案是「作品占用」不是「本地占用」。
+//   （v415 前这里读的是早已没有写入者的 sessions 库 → 恒显 0 B / 0 件。）
+// quota 来自 storage.estimate，是**浏览器愿意分配的上限**（iOS Safari 通常 ~ 60-80% 可用
+// 磁盘；动辄几十 GB），不是 "我们申请了多少"。所以放 title 里给好奇用户看，不主显。
+// ⚠ 只在图库打开/刷新时调：内部是一次全表 cursor（本地、无网络，但别挂每帧）。
 export async function updateIdbUsage() {
   try {
-    const rep = await collectStorageReport();
-    const level = usageLevel(rep);
-    const pct = rep.ratio == null ? null : Math.round(rep.ratio * 100);
-    let label = t("gs.footUsageAll", { size: humanSize(rep.accountedBytes) });
-    if (pct != null && level !== "ok") label += t("gs.usedSuffix", { pct });
+    const { bytes, count } = await _store.files.usage();
+    let label = t("gs.footUsage", { size: humanSize(bytes), count });
+    let level = "ok";   // ok | warn | critical
+    if (navigator.storage && navigator.storage.estimate) {
+      const est = await navigator.storage.estimate();
+      if (est && est.quota) {
+        const ratio = (est.usage || 0) / est.quota;
+        const pct = Math.round(ratio * 100);
+        els.galleryFootUsage.title =
+          t("gs.footUsageTitle", { size: humanSize(est.quota), pct });
+        if (ratio > 0.95) { level = "critical"; label += t("gs.usedSuffix", { pct }); }
+        else if (ratio > 0.8) { level = "warn"; label += t("gs.usedSuffix", { pct }); }
+      }
+    }
     els.galleryFootUsage.textContent = label;
-    els.galleryFootUsage.title = _usageTitle(rep, pct);
     els.galleryFootUsage.classList.toggle("usage-warn", level === "warn");
     els.galleryFootUsage.classList.toggle("usage-critical", level === "critical");
   } catch {
@@ -141,46 +149,27 @@ export async function updateIdbUsage() {
   }
 }
 
-// title 明细：逐桶一行（含「这桶清得掉吗」），再加浏览器视角与持久化状态。
-//   诚实纪律：数字标「约」（IDB 不报记录大小，只能估）；清不掉的桶要**说出来**，别让用户以为
-//   删干净了就真干净了。
-function _usageTitle(rep: StorageReport, pct: number | null): string {
-  const lines = [t("gs.usageBreakdownTitle")];
-  for (const b of rep.buckets) {
-    if (b.bytes <= 0 && b.count <= 0) continue;
-    const hint = b.clearable === "no-ui" ? ` · ${t("gs.clearHintNoUi")}`
-      : b.clearable === "gallery-trash" ? ` · ${t("gs.clearHintGalleryTrash")}` : "";
-    lines.push(`${t(BUCKET_LABEL[b.id])}  ${humanSize(b.bytes)}（${b.count}）${hint}`);
-  }
-  if (rep.originUsage != null && rep.originQuota != null) {
-    lines.push(t("gs.usageOriginLine", { used: humanSize(rep.originUsage), quota: humanSize(rep.originQuota), pct: pct ?? 0 }));
-  }
-  if (rep.unaccountedBytes != null && rep.unaccountedBytes > 0) {
-    lines.push(t("gs.usageUnaccounted", { size: humanSize(rep.unaccountedBytes) }));
-  }
-  lines.push(rep.persistence === "persistent" ? t("gs.usagePersisted") : t("gs.usageEvictable"));
-  return lines.join("\n");
-}
-
-const BUCKET_LABEL: Record<BucketId, Key> = {
-  works: "gs.bucket.works", trash: "gs.bucket.trash", backup: "gs.bucket.backup",
-  settings: "gs.bucket.settings", storeMisc: "gs.bucket.storeMisc",
-  checkpoints: "gs.bucket.checkpoints", thumbs: "gs.bucket.thumbs",
-};
-
 // 每次保存后检查一次配额；> 80% 弹状态条提示用户去图库整理。
-// 同一阈值短时间内不重复弹（避免每笔 stroke 后骚扰）。口径与页脚**同一处真相**（storage-usage）。
+// 同一阈值短时间内不重复弹（避免每笔 stroke 后骚扰）。
 let _lastQuotaWarnLevel = "ok";
 export async function checkQuotaAndWarn() {
   try {
-    const rep = await collectStorageReport();
-    const level = usageLevel(rep);
+    if (!navigator.storage || !navigator.storage.estimate) return;
+    const est = await navigator.storage.estimate();
+    if (!est || !est.quota) return;
+    const ratio = (est.usage || 0) / est.quota;
+    const pct = Math.round(ratio * 100);
+    let level = "ok";
+    if (ratio > 0.95) level = "critical";
+    else if (ratio > 0.8) level = "warn";
     if (level === _lastQuotaWarnLevel) return;
     _lastQuotaWarnLevel = level;
-    const pct = Math.round((rep.ratio ?? 0) * 100);
-    if (level === "critical") setStatus(t("gs.quotaCritical", { pct }), true);
-    else if (level === "warn") setStatus(t("gs.quotaWarn", { pct }), true);
-  } catch { /* 占用统计失败绝不打断保存流程 */ }
+    if (level === "critical") {
+      setStatus(t("gs.quotaCritical", { pct }), true);
+    } else if (level === "warn") {
+      setStatus(t("gs.quotaWarn", { pct }), true);
+    }
+  } catch {}
 }
 
 // （humanTime 死码已删 2026-06：gallery-shell 无调用者；展示用的 humanTime 在 gallery-view-model.ts。
