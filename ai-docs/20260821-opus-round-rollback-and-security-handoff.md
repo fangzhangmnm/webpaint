@@ -251,7 +251,7 @@ blockbench 模式」，用来立一整个产品模式，引用 4 处，并进了
 
 ## 5. 存档在哪
 
-**`ai-docs/private/20260821-opus-round-transcripts.zip`**（6.3 MB / 20 文件）
+**`ai-docs/20260821-opus-round-transcripts.zip`**（6.3 MB / 20 文件，**随仓公开**）
 
 - `user-inputs/` —— 8 个 session、**47 条人类真实输入**（已剔除 tool_result / system-reminder / 命令回显），带 UTC 时间戳。**先读这个。**
 - `raw-jsonl/` —— 对应完整 session transcript 原件（含全部工具调用与输出）。
@@ -259,10 +259,19 @@ blockbench 模式」，用来立一整个产品模式，引用 4 处，并进了
 - 包内 `README.md` 有 session 索引表，并标注了 `4ceade27`（写入者）与 `e379b2a0`（审计者）**时间上重叠**——
   审计进行中主线还在推版本，审计报告里明确写了「并行 session 在我审计期间推了 v0.10.25」并**更正了自己上一轮的一条结论**。
 
-**为什么放 `private/`**：weebpaint 已是**公开仓**、ai-docs 按公开工坊道也公开；
-而原始 jsonl 含大量本机/OneDrive 路径与未公开素材文件名，journal 属人类私域（家规：`journal` 默认不公开）。
-`private/` 已在 `.gitignore`（家规语义 = **反公开不反 AI**）——fable 本地照读，不上网。
-**要它进公开仓，需人类明确 override。**
+**公开性：人类 2026-08-21 明确 override「放公开仓」。**
+AI 的初始处置是 `ai-docs/private/`（gitignored，家规语义 = 反公开不反 AI），理由是原始 jsonl 含本机/
+OneDrive 路径与未公开素材文件名、journal 属人类私域（家规：`journal` 默认不公开，**但人类可 override**）。
+人类看过这个理由后裁决公开，遂移进 `ai-docs/` 随仓上网。
+
+推之前做过一次**凭据扫描**（JWT / `ghp_` / `github_pat_` / `sk-` / `client_secret` / `Bearer` / AWS key /
+邮箱 / password 字样）：**零命中**——形似 JWT 的 `eyJ…` 片段解码后是二进制垃圾，系内嵌截图/图标 base64；
+仓库作者邮箱本就已在 git 历史里公开。
+
+**包内确实含有**：产品定位与竞品的私下评价、宣发策略（含「是否披露 AI 参与」那段口径）、作者的所在地
+与生活片段、未公开素材与画作文件名、本机与 OneDrive 路径，以及大量 AI 的中间推理与错误。
+这是**真史公开**的一部分（公开工坊道：「ai-docs 是 AI 时代的 source，只开 dist 等于开源只开 binary」），
+不是疏忽——但**后续往这个 zip 里加东西前，重新过一遍这一条**。
 
 ---
 
