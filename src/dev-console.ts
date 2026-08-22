@@ -3,6 +3,7 @@
 //   非业务逻辑，所有依赖直接 import（无 ctx），由 app 启动时调一次 initDevConsole()。
 import { fetchOraThumbnail } from "./gallery/cloud-thumbs.ts";
 import { store } from "./app-store.ts";
+import { collectStorageReport } from "./storage-usage.ts";
 import { registerFilter, listFilters } from "./filters.ts";
 import { registerExporter, listExporters } from "./exporters.ts";
 import {
@@ -74,6 +75,9 @@ export function initDevConsole() {
 
   // 回收站/备份箱管理（控制台调；backup 无 gallery UI——面板是以后的事，先控制台能清）。
   //   scope: "local" | "cloud" | "both"（默认 both）。listTrash/listBackup 返两端聚合的元数据（无 blob）。
+  // 本机占用全口径（作品/回收站/备份/撤销快照/缩略图/设置 + origin 估算 + 持久化状态）。
+  //   真机排查「到底谁占的地方」用这条；口径与图库页脚**同一个深模块**，不会两个数打架。
+  WP.storageReport = () => collectStorageReport();
   WP.listTrash = () => store.files.listTrash();
   WP.listBackup = () => store.files.listBackup();
   WP.emptyTrash = (scope: "local" | "cloud" | "both" = "both") => store.files.emptyTrash({ scope });

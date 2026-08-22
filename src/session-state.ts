@@ -795,6 +795,13 @@ async function unloadItem(item: GalleryItem) {
   await withBusy(t("ss.unloadingBusy", { name: item.name }), async () => {
     try {
       await _file(item.name).offload();
+      // ★ 清掉这幅画的 revert 快照（user 2026-08-21 拍板）。快照是 app 库里的**一份完整 .ora**，
+      //   而「卸载本地副本」正是用户为了腾空间按的按钮 —— 不清它，卸载只生效一半，
+      //   页脚数字却降了（那是谎报）。语义也对：revert = 回到「本次打开时」，卸载 = 离开了这幅画，
+      //   旧快照本就无效；将来重新打开会在 gallery-open 时重新封存一份。
+      //   放 offload **之后**：offload 可能抛 OffloadIllegalError（dirty/离线/云端没了），
+      //   那种情况下本地副本还在、画还开着，快照必须留着。
+      await _dropCheckpoint(item.name);
       setStatus(t("ss.unloaded", { name: item.name }));
       gallery.refresh();
     } catch (err) { setStatus(t("ss.unloadFailed", { error: errMsg(err) })); }

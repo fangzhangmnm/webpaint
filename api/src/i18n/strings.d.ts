@@ -4249,10 +4249,10 @@ export declare const S: {
         readonly tok: "mi weka e {name} tan ilo ni…";
     };
     readonly "ss.unloaded": {
-        readonly zh: "已卸载本地：{name}（修改在本地回收站，云端保留）";
-        readonly en: "Unloaded local: {name} (changes are in the local trash; the cloud is kept)";
-        readonly ja: "ローカルをアンロードしました：{name}（変更はローカルのゴミ箱にあり、クラウドは保持されます）";
-        readonly tok: "weka tan ilo ni li pini: {name}. ante li lon poki jaki pi ilo ni. poki sewi li awen jo.";
+        readonly zh: "已卸载本地副本：{name} · 云端保留；下次打开需要联网";
+        readonly en: "Local copy unloaded: {name} · kept in the cloud; you will need to be online to open it again";
+        readonly ja: "ローカルコピーを解放しました：{name} · クラウドには残っています。次に開くにはオンラインである必要があります";
+        readonly tok: "lipu lon ilo ni li weka. ({name}) ona li awen lon poki sewi. o lon linja la sina ken open e ona.";
     };
     readonly "ss.unloadFailed": {
         readonly zh: "卸载失败：{error}";
@@ -5069,6 +5069,96 @@ export declare const S: {
         readonly en: "Square 2048²";
         readonly ja: "正方 2048²";
         readonly tok: "leko 2048²";
+    };
+    readonly "gs.footUsageAll": {
+        readonly zh: "本机占用：约 {size}";
+        readonly en: "On this device: ~{size}";
+        readonly ja: "この端末の使用量：約 {size}";
+        readonly tok: "ilo ni li jo e {size} (poka)";
+    };
+    readonly "gs.usageBreakdownTitle": {
+        readonly zh: "本机占用明细（估算）";
+        readonly en: "What is stored on this device (estimated)";
+        readonly ja: "この端末に保存されている内容（推定）";
+        readonly tok: "ijo lon ilo ni (nanpa poka)";
+    };
+    readonly "gs.bucket.works": {
+        readonly zh: "作品";
+        readonly en: "Artwork";
+        readonly ja: "作品";
+        readonly tok: "sitelen";
+    };
+    readonly "gs.bucket.trash": {
+        readonly zh: "回收站";
+        readonly en: "Trash";
+        readonly ja: "ゴミ箱";
+        readonly tok: "poki weka";
+    };
+    readonly "gs.bucket.backup": {
+        readonly zh: "备份";
+        readonly en: "Backups";
+        readonly ja: "バックアップ";
+        readonly tok: "poki awen";
+    };
+    readonly "gs.bucket.settings": {
+        readonly zh: "设置与笔架";
+        readonly en: "Settings and brushes";
+        readonly ja: "設定とブラシ";
+        readonly tok: "nasin en ilo sitelen";
+    };
+    readonly "gs.bucket.storeMisc": {
+        readonly zh: "同步缓存";
+        readonly en: "Sync cache";
+        readonly ja: "同期キャッシュ";
+        readonly tok: "poki pi tenpo lili";
+    };
+    readonly "gs.bucket.checkpoints": {
+        readonly zh: "撤销快照";
+        readonly en: "Revert snapshots";
+        readonly ja: "取り消し用スナップショット";
+        readonly tok: "sitelen pi tenpo open";
+    };
+    readonly "gs.bucket.thumbs": {
+        readonly zh: "缩略图";
+        readonly en: "Thumbnails";
+        readonly ja: "サムネイル";
+        readonly tok: "sitelen lili";
+    };
+    readonly "gs.clearHintGalleryTrash": {
+        readonly zh: "图库回收站可清空";
+        readonly en: "can be emptied from the gallery trash";
+        readonly ja: "ギャラリーのゴミ箱から空にできます";
+        readonly tok: "sina ken weka e ona lon poki weka";
+    };
+    readonly "gs.clearHintNoUi": {
+        readonly zh: "⚠ 暂无清理入口";
+        readonly en: "⚠ no way to clear this yet";
+        readonly ja: "⚠ まだ削除する手段がありません";
+        readonly tok: "⚠ sina ken ala weka e ona";
+    };
+    readonly "gs.usageOriginLine": {
+        readonly zh: "浏览器统计：{used} / 上限约 {quota}（{pct}%）";
+        readonly en: "Browser reports: {used} / ~{quota} cap ({pct}%)";
+        readonly ja: "ブラウザの集計：{used} / 上限約 {quota}（{pct}%）";
+        readonly tok: "ilo lukin li toki e ni: {used} / {quota} ({pct}%)";
+    };
+    readonly "gs.usageUnaccounted": {
+        readonly zh: "未计入：约 {size}（离线缓存等）";
+        readonly en: "Not itemised: ~{size} (offline cache and similar)";
+        readonly ja: "内訳外：約 {size}（オフラインキャッシュなど）";
+        readonly tok: "mi sona ala e ni: {size} (poki pi lon ala linja)";
+    };
+    readonly "gs.usageEvictable": {
+        readonly zh: "⚠ 本地存储可能被浏览器清除 —— 重要作品请「存为本地 .ora」";
+        readonly en: "⚠ The browser may clear this storage — keep anything important as a local .ora file";
+        readonly ja: "⚠ このストレージはブラウザに消される可能性があります — 大切な作品は「ローカル .ora として保存」してください";
+        readonly tok: "⚠ ilo lukin li ken weka e ijo ni. o awen e sitelen suli kepeken lipu .ora.";
+    };
+    readonly "gs.usagePersisted": {
+        readonly zh: "本地存储已获持久化（浏览器不会主动清除）";
+        readonly en: "Storage is persistent (the browser will not clear it on its own)";
+        readonly ja: "ストレージは永続化されています（ブラウザが自動的に消すことはありません）";
+        readonly tok: "ijo ni li awen. ilo lukin li weka ala e ona.";
     };
     readonly "gs.footUsage": {
         readonly zh: "作品占用：{size}（{count} 件）";
